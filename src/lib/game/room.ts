@@ -314,6 +314,17 @@ export class Room {
   }
 
   /** Хозяин приватной комнаты выгоняет игрока. */
+  /**
+   * Ответ ведущего до вскрышки — только для серверного кода.
+   *
+   * В `view()` и в снимок для клиента он не попадает намеренно: на этом
+   * держится вся игра. Нужен ботам, которые в комнате с живыми людьми ставят
+   * вокруг настоящего ответа, а не наугад.
+   */
+  peekHostAnswer(): Bet | null {
+    return this.hostAnswer;
+  }
+
   kick(requesterId: string, targetId: string, now: number): ActionResult {
     if (this.ownerId === null || requesterId !== this.ownerId) {
       return {

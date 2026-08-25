@@ -103,7 +103,11 @@ export function GameRoom({
           </section>
 
           <aside className="flex flex-col gap-4">
-            <RoomPanel state={state} />
+            <RoomPanel
+              state={state}
+              onInviteBots={(count) => void room.inviteBots(count)}
+              onDismissBots={() => void room.dismissBots()}
+            />
             <PlayerList
               state={state}
               onKick={(playerId) => void room.kick(playerId)}

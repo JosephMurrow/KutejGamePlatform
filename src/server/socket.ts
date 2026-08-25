@@ -16,7 +16,7 @@ import {
   type RoomStatePayload,
 } from "../shared/protocol";
 import { authenticateSocket, type SocketUser } from "./auth";
-import { BotDirector } from "./bots/director";
+import { BOT_LIMIT, BOT_PARTY_SIZE, BotDirector } from "./bots/director";
 import { RateLimiter } from "./rate-limit";
 import {
   GLOBAL_SETUP,
@@ -49,8 +49,11 @@ export function createSocketServer(httpServer: HttpServer): SocketServer {
     destroyUpgrade: false,
   });
 
+  // Рассылка менеджера ссылается на директора, который создаётся ниже: к
+  // моменту первого вызова он уже есть. Без этого снимок, разосланный по ходу
+  // игры, уходил бы без числа ботов, и панель хозяина врала бы.
   const manager = new RoomManager((managed) => {
-    void broadcastState(io, managed);
+    void broadcastState(io, managed, director);
   });
 
   const director = new BotDirector(manager, {
@@ -162,7 +165,7 @@ async function onConnection(
   socket.emit(SERVER_EVENT.chatHistory, managed.chat);
   socket.emit(
     SERVER_EVENT.state,
-    buildState(managed, user.id, roomCode, director.hasParty(roomKey)),
+    buildState(managed, user.id, roomCode, director.count(roomKey)),
   );
   void broadcastState(io, managed, director);
 
@@ -264,19 +267,42 @@ async function onConnection(
       if (managed.room.view().ownerId !== user.id) {
         return { accepted: false, reason: "Звать ботов может только хозяин" };
       }
-      if (managed.connections.size > 1) {
-        return { accepted: false, reason: "В комнате уже есть живые игроки" };
-      }
-      if (director.hasParty(roomKey)) {
-        return { accepted: false, reason: "Боты уже здесь" };
+
+      // Вид компании решает не число людей за столом, а то, как её позвали.
+      // Кнопка «Forever alone» шлёт запрос без числа — такие боты уходят сами,
+      // когда появляется живой человек. Добор из панели шлёт число: этих
+      // хозяин позвал осознанно, и уводить их за него не нужно.
+      const asked = readNumber(args[0]);
+      const kind = asked === null ? "alone" : "invited";
+      const count = asked ?? BOT_PARTY_SIZE;
+
+      if (director.count(roomKey) >= BOT_LIMIT) {
+        return { accepted: false, reason: "Больше ботов не поместится" };
       }
 
-      const added = await director.fill(roomKey);
+      const added = await director.fill(roomKey, count, kind);
       if (added === 0) {
         return { accepted: false, reason: "Не удалось позвать ботов" };
       }
 
       void broadcastState(io, managed, director);
+      return { accepted: true };
+    });
+  });
+
+  socket.on(CLIENT_EVENT.dismissBots, (...args: unknown[]) => {
+    respond(args, () => {
+      if (managed.room.view().ownerId !== user.id) {
+        return { accepted: false, reason: "Выгонять может только хозяин" };
+      }
+      if (!director.hasParty(roomKey)) {
+        return { accepted: false, reason: "Ботов и так нет" };
+      }
+
+      // Прощаются как обычно: молча исчезнувшая компания выглядит сбоем.
+      director.farewell(roomKey);
+      void broadcastState(io, managed, director);
+
       return { accepted: true };
     });
   });
@@ -292,7 +318,7 @@ export function buildState(
   managed: ManagedRoom,
   viewerId: string,
   roomCode: string | null = null,
-  botsPresent = false,
+  botCount = 0,
 ): RoomStatePayload {
   const view = managed.room.view();
   // В фазе READY вопрос знает только ведущий.
@@ -350,7 +376,10 @@ export function buildState(
       managed.setup.isPrivate &&
       view.ownerId === viewerId &&
       managed.connections.size === 1 &&
-      !botsPresent,
+      botCount === 0,
+    canManageBots: managed.setup.isPrivate && view.ownerId === viewerId,
+    botCount,
+    botLimit: BOT_LIMIT,
     youId: viewerId,
   };
 }
@@ -377,10 +406,10 @@ async function disconnectPlayer(
 async function broadcastState(
   io: IOServer,
   managed: ManagedRoom,
-  director?: BotDirector,
+  director: BotDirector,
 ) {
   const sockets = await io.in(managed.key).fetchSockets();
-  const botsPresent = director?.hasParty(managed.key) ?? false;
+  const botCount = director.count(managed.key);
 
   for (const socket of sockets) {
     const user = socket.data.user as SocketUser | undefined;
@@ -389,7 +418,7 @@ async function broadcastState(
     const code = socket.data.roomCode as string | null | undefined;
     socket.emit(
       SERVER_EVENT.state,
-      buildState(managed, user.id, code ?? null, botsPresent),
+      buildState(managed, user.id, code ?? null, botCount),
     );
   }
 }
@@ -454,6 +483,19 @@ function readBet(payload: unknown): unknown {
     return (payload as { bet: unknown }).bet;
   }
   return payload;
+}
+
+/**
+ * Сколько ботов просят позвать. `null` — число не прислали вовсе; это отличает
+ * кнопку «Forever alone» от добора из панели, а не только меняет количество.
+ */
+function readNumber(payload: unknown): number | null {
+  if (typeof payload !== "object" || payload === null) return null;
+
+  const value = (payload as { count?: unknown }).count;
+  const count = Math.trunc(Number(value));
+
+  return Number.isFinite(count) && count > 0 ? count : null;
 }
 
 /** Достать строковое поле из полезной нагрузки события. */

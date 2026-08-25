@@ -29,8 +29,40 @@ import {
  * в комнату заходит живой человек, боты прощаются и уходят.
  */
 
-/** Сколько ботов приходит по кнопке. */
+/** Сколько ботов приходит по кнопке «Forever alone». */
 export const BOT_PARTY_SIZE = 10;
+
+/** Больше этого числа ботов в комнате не бывает. */
+export const BOT_LIMIT = 10;
+
+/**
+ * Разброс ставки бота вокруг настоящего ответа: до двадцати крат в обе
+ * стороны. Подобран прогоном по коду подсчёта — при трёх кратах бот попадает
+ * в зачёт в двух случаях из трёх и просто отбирает игру у людей.
+ */
+export const BOT_SPREAD = 20;
+
+/**
+ * Вероятность точного попадания. Три процента на бота — это уже около
+ * четверти за раунд, когда ботов десять.
+ */
+export const BOT_EXACT_CHANCE = 0.03;
+
+/**
+ * Откуда взялась компания.
+ *
+ * `alone` — «Forever alone»: боты пришли в пустую комнату, ставят наугад и
+ * уходят сами, как только появляется живой человек.
+ *
+ * `invited` — хозяин позвал их к живым игрокам: они знают ответ ведущего,
+ * ставят вокруг него и остаются, пока их не выгонят.
+ */
+export type PartyKind = "alone" | "invited";
+
+interface Party {
+  seats: Seat[];
+  kind: PartyKind;
+}
 
 const TICK_MS = 1000;
 
@@ -64,7 +96,7 @@ export interface BotDeps {
 }
 
 export class BotDirector {
-  private readonly parties = new Map<string, Seat[]>();
+  private readonly parties = new Map<string, Party>();
   /** Когда в комнате последний раз говорил бот. */
   private readonly lastChatAt = new Map<string, number>();
   /** Вопрос последней вскрышки, которую уже отпраздновали. */
@@ -90,7 +122,7 @@ export class BotDirector {
    * успевают всегда, а издевательство над своим выглядело бы странно.
    */
   private react(roomKey: string, events: GameEvent[]): void {
-    const seats = this.parties.get(roomKey);
+    const seats = this.parties.get(roomKey)?.seats;
     if (!seats || seats.length === 0) return;
 
     for (const event of events) {
@@ -124,20 +156,44 @@ export class BotDirector {
   }
 
   hasParty(roomKey: string): boolean {
-    return (this.parties.get(roomKey)?.length ?? 0) > 0;
+    return this.count(roomKey) > 0;
   }
 
-  /** Посадить в комнату компанию ботов. */
-  async fill(roomKey: string): Promise<number> {
-    const managed = this.manager.get(roomKey);
-    if (!managed || this.hasParty(roomKey)) return 0;
+  /** Сколько ботов сейчас в комнате. */
+  count(roomKey: string): number {
+    return this.parties.get(roomKey)?.seats.length ?? 0;
+  }
 
-    const profiles = pickMany(BOT_ROSTER, BOT_PARTY_SIZE);
+  /**
+   * Посадить ботов в комнату. Если компания уже сидит, новые добираются к ней;
+   * вид компании при этом не меняется — он задан первым приглашением.
+   */
+  async fill(
+    roomKey: string,
+    count: number,
+    kind: PartyKind = "alone",
+  ): Promise<number> {
+    const managed = this.manager.get(roomKey);
+    if (!managed) return 0;
+
+    const party = this.parties.get(roomKey);
+    const seated = party?.seats ?? [];
+    const room = Math.max(0, BOT_LIMIT - seated.length);
+    const wanted = Math.min(Math.max(0, Math.trunc(count)), room);
+    if (wanted === 0) return 0;
+
+    // Уже занятые ники не предлагаем: два «ЯДЕРНЫЙ_ХОМЯК_СЕВА» за столом —
+    // это не шутка, а путаница.
+    const taken = new Set(seated.map((seat) => seat.nickname));
+    const profiles = pickMany(
+      BOT_ROSTER.filter((entry) => !taken.has(entry.nickname)),
+      wanted,
+    );
     const now = Date.now();
     const seats: Seat[] = [];
 
     for (const [index, profile] of profiles.entries()) {
-      const avatarId = robotAvatarId(index);
+      const avatarId = robotAvatarId(seated.length + index);
       const user = await prisma.user.upsert({
         where: { login: botLogin(profile.nickname) },
         create: {
@@ -163,7 +219,10 @@ export class BotDirector {
       });
     }
 
-    this.parties.set(roomKey, seats);
+    this.parties.set(roomKey, {
+      seats: [...seated, ...seats],
+      kind: party?.kind ?? kind,
+    });
 
     for (const seat of seats) {
       managed.profiles.set(seat.userId, {
@@ -177,9 +236,9 @@ export class BotDirector {
     return seats.length;
   }
 
-  /** Боты прощаются и выходят: в комнату пришёл живой игрок. */
+  /** Боты прощаются и выходят: из комнаты их убрали или пришёл живой игрок. */
   farewell(roomKey: string): void {
-    const seats = this.parties.get(roomKey);
+    const seats = this.parties.get(roomKey)?.seats;
     const managed = this.manager.get(roomKey);
     if (!seats || !managed) return;
 
@@ -220,31 +279,32 @@ export class BotDirector {
   private tick(): void {
     const now = Date.now();
 
-    for (const [roomKey, seats] of [...this.parties]) {
+    for (const [roomKey, party] of [...this.parties]) {
       const managed = this.manager.get(roomKey);
       if (!managed) {
         this.dismiss(roomKey);
         continue;
       }
 
-      // Живой человек в комнате не один — ботам пора прощаться.
-      if (managed.connections.size > 1) {
+      // Сами уходят только те, кто пришёл в пустую комнату: позванных хозяином
+      // выгоняет он же, и появление второго живого их не касается.
+      if (party.kind === "alone" && managed.connections.size > 1) {
         this.farewell(roomKey);
         continue;
       }
 
-      this.play(managed, seats, now);
-      this.celebrate(managed, seats, now);
-      this.chatter(managed, seats, now);
+      this.play(managed, party, now);
+      this.celebrate(managed, party.seats, now);
+      this.chatter(managed, party.seats, now);
     }
   }
 
   /** Игровые ходы: прочитать вопрос, назвать сумму, поставить. */
-  private play(managed: ManagedRoom, seats: Seat[], now: number): void {
+  private play(managed: ManagedRoom, party: Party, now: number): void {
     const view = managed.room.view();
     const phaseTag = `${view.phase}:${view.questionId ?? ""}`;
 
-    for (const seat of seats) {
+    for (const seat of party.seats) {
       if (seat.actedIn === phaseTag) continue;
 
       const isHost = view.hostId === seat.userId;
@@ -270,7 +330,15 @@ export class BotDirector {
           room.submitHostAnswer(seat.userId, bet, at),
         );
       } else {
-        const bet = randomBet();
+        // Позванные к живым игрокам знают ответ ведущего и ставят вокруг него;
+        // пришедшие в пустую комнату по-прежнему гадают.
+        // Позванные к живым игрокам знают ответ ведущего и ставят вокруг
+        // него; пришедшие в пустую комнату по-прежнему гадают.
+        const bet =
+          party.kind === "invited"
+            ? informedBet(managed.room.peekHostAnswer())
+            : randomBet();
+
         managed.runner.run((room, at) => room.placeBet(seat.userId, bet, at));
       }
     }
@@ -366,6 +434,36 @@ function plan(phase: string, isHost: boolean, hasBet: boolean): Plan | null {
     return { action: "bet", delay: BET_DELAY };
   }
   return null;
+}
+
+/**
+ * Ставка бота, который знает ответ ведущего.
+ *
+ * Он не повторяет ответ, а промахивается вокруг него — иначе игра теряет
+ * смысл. Изредка попадает точно; на крайних ответах «Бесплатно» и «Ни за какие
+ * деньги» угадать «около» нельзя, поэтому те же проценты решают, назовёт он
+ * этот вариант или промахнётся числом.
+ */
+export function informedBet(hostAnswer: Bet | null): Bet {
+  // Ответа ещё нет — значит и знать нечего, ставим как раньше.
+  if (hostAnswer === null) return randomBet();
+
+  const exact = Math.random() < BOT_EXACT_CHANCE;
+  if (exact) return hostAnswer;
+
+  // Крайний ответ: мимо — это любое число, оно точно не совпадёт.
+  if (hostAnswer === NEVER || hostAnswer === 0) return randomMiss();
+
+  const span = Math.log10(BOT_SPREAD);
+  const shift = (Math.random() * 2 - 1) * span;
+
+  return Math.max(1, Math.round(hostAnswer * Math.pow(10, shift)));
+}
+
+/** Обычная сумма без крайних вариантов: нужна, чтобы промахнуться наверняка. */
+function randomMiss(): number {
+  const exponent = 2 + Math.random() * 5;
+  return Math.round(Math.pow(10, exponent));
 }
 
 /**

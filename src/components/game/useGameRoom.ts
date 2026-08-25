@@ -33,7 +33,8 @@ export interface GameRoomHandle {
   /** Хозяин начинает новую партию после финального экрана. */
   restart: () => Promise<void>;
   /** «Forever alone»: позвать в комнату ботов. */
-  inviteBots: () => Promise<void>;
+  inviteBots: (count?: number) => Promise<void>;
+  dismissBots: () => Promise<void>;
 }
 
 /**
@@ -151,8 +152,18 @@ export function useGameRoom(roomCode?: string): GameRoomHandle {
     await act(CLIENT_EVENT.restart);
   }, [act]);
 
-  const inviteBots = useCallback(async () => {
-    await act(CLIENT_EVENT.fillBots);
+  const inviteBots = useCallback(
+    async (count?: number) => {
+      await act(
+        CLIENT_EVENT.fillBots,
+        count === undefined ? undefined : { count },
+      );
+    },
+    [act],
+  );
+
+  const dismissBots = useCallback(async () => {
+    await act(CLIENT_EVENT.dismissBots);
   }, [act]);
 
   return {
@@ -169,5 +180,6 @@ export function useGameRoom(roomCode?: string): GameRoomHandle {
     kick,
     restart,
     inviteBots,
+    dismissBots,
   };
 }

@@ -373,3 +373,33 @@ describe("Room: таймеры", () => {
     assert.equal(room.view().phase, "waiting");
   });
 });
+
+describe("Ответ ведущего наружу не уходит", () => {
+  it("в снимке комнаты его нет до самой вскрышки", () => {
+    const { room } = startedRoom();
+    room.confirmRead("аня", 0);
+    room.submitHostAnswer("аня", 123_456, 0);
+
+    const снимок = JSON.stringify(room.view());
+
+    assert.equal(
+      снимок.includes("123456"),
+      false,
+      "сумма ведущего просочилась в состояние",
+    );
+    assert.equal(room.view().reveal, null);
+  });
+
+  it("серверный доступ её при этом отдаёт — на этом стоят боты", () => {
+    const { room } = startedRoom();
+    room.confirmRead("аня", 0);
+    room.submitHostAnswer("аня", 123_456, 0);
+
+    assert.equal(room.peekHostAnswer(), 123_456);
+  });
+
+  it("до ответа ведущего отдавать нечего", () => {
+    const { room } = startedRoom();
+    assert.equal(room.peekHostAnswer(), null);
+  });
+});
