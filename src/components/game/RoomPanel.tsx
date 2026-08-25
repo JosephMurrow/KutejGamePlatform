@@ -1,28 +1,21 @@
 "use client";
 
 import { useState } from "react";
+import { InviteModal } from "@/components/rooms/InviteModal";
 import type { RoomStatePayload } from "@/shared/protocol";
 
 /** Приглашение и правила партии — видно всем, кто в приватной комнате. */
 export function RoomPanel({ state }: { state: RoomStatePayload }) {
-  const [copied, setCopied] = useState(false);
+  const [inviteOpen, setInviteOpen] = useState(false);
 
   if (!state.roomCode) return null;
 
+  // Адрес берём из строки браузера: снаружи и изнутри сети он разный, и
+  // правильный тот, по которому человек сюда пришёл.
   const link =
     typeof window === "undefined"
       ? ""
       : `${window.location.origin}/r/${state.roomCode}`;
-
-  async function copy() {
-    try {
-      await navigator.clipboard.writeText(link);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    } catch {
-      setCopied(false);
-    }
-  }
 
   return (
     <div className="rounded-2xl border border-line bg-paper p-4">
@@ -35,13 +28,20 @@ export function RoomPanel({ state }: { state: RoomStatePayload }) {
 
       <button
         type="button"
-        onClick={() => void copy()}
+        onClick={() => setInviteOpen(true)}
         className="w-full rounded-lg border border-line bg-blush px-3 py-2 text-sm transition hover:border-crimson hover:text-crimson"
       >
-        {copied ? "Ссылка скопирована" : "Скопировать приглашение"}
+        Пригласить друга
       </button>
 
       <p className="mt-3 text-xs text-muted">{rules(state)}</p>
+
+      <InviteModal
+        open={inviteOpen}
+        onClose={() => setInviteOpen(false)}
+        link={link}
+        hint="Наведи камеру телефона — и попадёшь прямо в эту комнату."
+      />
     </div>
   );
 }
