@@ -1,19 +1,13 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { Avatar } from "@/components/Avatar";
 import { BRAND, Brand } from "@/components/Brand";
 import { UserMenu } from "@/components/UserMenu";
 import { getCurrentUser } from "@/lib/auth/session";
 import { loadChampions } from "@/lib/champions";
-import { crownFor, type Titles } from "@/lib/game/crowns";
-import { Crown } from "@/components/game/Crown";
-import {
-  loadLeaderboard,
-  TOP_SIZE,
-  type LeaderboardPeriod,
-  type LeaderboardRow,
-} from "@/lib/leaderboard";
+import { LeaderboardTable } from "@/components/leaderboard/LeaderboardTable";
+import type { Titles } from "@/lib/game/crowns";
+import { loadLeaderboard, type LeaderboardPeriod } from "@/lib/leaderboard";
 
 export const metadata: Metadata = {
   title: `Рейтинг — ${BRAND}`,
@@ -68,89 +62,8 @@ export default async function LeaderboardPage({
         </Tab>
       </div>
 
-      {board.rows.length === 0 ? (
-        <p className="rounded-2xl border border-line bg-paper p-8 text-center text-sm text-muted">
-          {period === "week"
-            ? "На этой неделе ещё никто не сыграл. Будь первым."
-            : "Рейтинг пока пуст. Сыграй раунд — и займёшь первое место."}
-        </p>
-      ) : (
-        <div className="overflow-hidden rounded-2xl border border-line bg-paper">
-          <div className="flex items-center gap-2 border-b border-line px-3 py-2 text-xs text-muted sm:gap-3 sm:px-4">
-            <span className="w-6 shrink-0">#</span>
-            <span className="min-w-0 flex-1">Игрок</span>
-            <span className="w-12 shrink-0 text-right">Очки</span>
-            <span className="w-14 shrink-0 text-right">Раунды</span>
-          </div>
-
-          <ul>
-            {board.rows.map((row) => (
-              <Row
-                key={row.userId}
-                row={row}
-                you={row.userId === user.id}
-                titles={titles}
-              />
-            ))}
-          </ul>
-
-          {board.you && (
-            <div className="border-t-2 border-dashed border-line">
-              <Row row={board.you} you titles={titles} />
-            </div>
-          )}
-        </div>
-      )}
-
-      {board.total > TOP_SIZE && (
-        <p className="mt-3 text-center text-xs text-muted">
-          Показаны первые {TOP_SIZE} из {board.total}
-        </p>
-      )}
+      <LeaderboardTable board={board} viewerId={user.id} titles={titles} />
     </main>
-  );
-}
-
-function Row({
-  row,
-  you,
-  titles,
-}: {
-  row: LeaderboardRow;
-  you: boolean;
-  titles: Titles;
-}) {
-  const crown = crownFor(row.userId, titles);
-
-  return (
-    <li
-      className={`flex items-center gap-2 border-b border-line px-3 py-2.5 last:border-b-0 sm:gap-3 sm:px-4 ${
-        you ? "bg-tint" : ""
-      }`}
-    >
-      <span
-        className={`tabular w-6 shrink-0 text-sm ${
-          row.rank <= 3 ? "font-bold text-gold" : "text-muted"
-        }`}
-      >
-        {row.rank}
-      </span>
-
-      <Avatar id={row.avatarId} size={32} className="shrink-0" />
-
-      <span className="min-w-0 flex-1 truncate text-sm font-medium">
-        {crown && <Crown kind={crown} className="mr-1" />}
-        {row.nickname}
-        {you && <span className="ml-1 text-xs text-muted">· ты</span>}
-      </span>
-
-      <span className="tabular w-12 shrink-0 text-right text-sm font-semibold text-crimson">
-        {row.points}
-      </span>
-      <span className="tabular w-14 shrink-0 text-right text-sm text-muted">
-        {row.roundsPlayed}
-      </span>
-    </li>
   );
 }
 

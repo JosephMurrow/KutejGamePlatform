@@ -12,6 +12,9 @@ const LINKS = [
   { href: "/profile", label: "Профиль" },
 ] as const;
 
+/** Пункт, который в комнате открывает окно вместо перехода. */
+const OVERLAY_HREF = "/leaderboard";
+
 /**
  * Кнопка с меню вместо россыпи ссылок в шапке: переходы между комнатами,
  * рейтинг, профиль и выход в одном месте.
@@ -19,9 +22,15 @@ const LINKS = [
 export function UserMenu({
   nickname,
   avatarId,
+  onLeaderboard,
 }: {
   nickname: string;
   avatarId: number;
+  /**
+   * Показать рейтинг, не уходя со страницы. Передаётся из комнаты: переход по
+   * ссылке рвёт сокет, и человек теряет место за столом.
+   */
+  onLeaderboard?: () => void;
 }) {
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement | null>(null);
@@ -82,17 +91,32 @@ export function UserMenu({
           role="menu"
           className="absolute right-0 z-50 mt-2 w-56 overflow-hidden rounded-xl border border-line bg-paper py-1 shadow-lg"
         >
-          {LINKS.map((link) => (
-            <Link
-              key={link.href}
-              href={link.href}
-              role="menuitem"
-              onClick={() => setOpen(false)}
-              className="block px-4 py-2.5 text-sm transition hover:bg-tint hover:text-crimson"
-            >
-              {link.label}
-            </Link>
-          ))}
+          {LINKS.map((link) =>
+            link.href === OVERLAY_HREF && onLeaderboard ? (
+              <button
+                key={link.href}
+                type="button"
+                role="menuitem"
+                onClick={() => {
+                  setOpen(false);
+                  onLeaderboard();
+                }}
+                className="block w-full px-4 py-2.5 text-left text-sm transition hover:bg-tint hover:text-crimson"
+              >
+                {link.label}
+              </button>
+            ) : (
+              <Link
+                key={link.href}
+                href={link.href}
+                role="menuitem"
+                onClick={() => setOpen(false)}
+                className="block px-4 py-2.5 text-sm transition hover:bg-tint hover:text-crimson"
+              >
+                {link.label}
+              </Link>
+            ),
+          )}
 
           <form action={logoutAction} className="border-t border-line">
             <button

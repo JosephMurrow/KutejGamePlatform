@@ -1,7 +1,9 @@
 "use client";
 
 import Link from "next/link";
+import { useState } from "react";
 import { Brand } from "@/components/Brand";
+import { LeaderboardModal } from "@/components/leaderboard/LeaderboardModal";
 import { UserMenu } from "@/components/UserMenu";
 import type { Bet } from "@/lib/game/bet";
 import { titlesOf } from "@/lib/game/crowns";
@@ -28,6 +30,7 @@ export function GameRoom({
 }) {
   const room = useGameRoom(roomCode);
   const state = room.state;
+  const [ratingOpen, setRatingOpen] = useState(false);
 
   return (
     <div className="mx-auto flex w-full max-w-5xl flex-1 flex-col gap-4 px-4 py-5">
@@ -36,8 +39,17 @@ export function GameRoom({
           <Brand className="text-xl" />
         </Link>
 
-        <UserMenu nickname={nickname} avatarId={avatarId} />
+        <UserMenu
+          nickname={nickname}
+          avatarId={avatarId}
+          onLeaderboard={() => setRatingOpen(true)}
+        />
       </header>
+
+      <LeaderboardModal
+        open={ratingOpen}
+        onClose={() => setRatingOpen(false)}
+      />
 
       {room.kicked ? (
         <div className="flex flex-1 flex-col items-center justify-center gap-4 text-center">

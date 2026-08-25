@@ -1,5 +1,18 @@
+import {
+  TOP_SIZE,
+  type Leaderboard,
+  type LeaderboardPeriod,
+  type LeaderboardRow,
+} from "@/shared/leaderboard";
 import { GLOBAL_ROOM } from "@/shared/protocol";
 import { prisma } from "./prisma";
+
+export {
+  TOP_SIZE,
+  type Leaderboard,
+  type LeaderboardPeriod,
+  type LeaderboardRow,
+};
 
 /**
  * Рейтинг общей комнаты (см. docs/SPEC.md §8). Очки приватных комнат сюда не
@@ -17,30 +30,6 @@ import { prisma } from "./prisma";
 
 /** Только живые игроки: боты в зачёт не идут. */
 const HUMAN = { isBot: false } as const;
-
-export type LeaderboardPeriod = "all" | "week";
-
-export const TOP_SIZE = 100;
-
-export interface LeaderboardRow {
-  rank: number;
-  userId: string;
-  nickname: string;
-  avatarId: number;
-  points: number;
-  roundsPlayed: number;
-}
-
-export interface Leaderboard {
-  period: LeaderboardPeriod;
-  rows: LeaderboardRow[];
-  /** Строка игрока, если он не попал в топ. */
-  you: LeaderboardRow | null;
-  /** Сколько всего игроков в зачёте. */
-  total: number;
-  /** Начало недели, для подписи. */
-  since: Date | null;
-}
 
 export async function loadLeaderboard(
   period: LeaderboardPeriod,
