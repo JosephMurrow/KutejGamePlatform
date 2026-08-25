@@ -29,6 +29,12 @@ services:
       PORT: 3000
       DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}?schema=public
       SESSION_SECRET: ${SESSION_SECRET}
+      APP_URL: ${APP_URL}
+      MAIL_HOST: ${MAIL_HOST}
+      MAIL_PORT: ${MAIL_PORT}
+      MAIL_USER: ${MAIL_USER}
+      MAIL_PASSWORD: ${MAIL_PASSWORD}
+      MAIL_FROM: ${MAIL_FROM}
     # Наружу приложение не публикуем — только на петлю самого LXC, чтобы можно
     # было проверить его руками в обход прокси.
     ports:

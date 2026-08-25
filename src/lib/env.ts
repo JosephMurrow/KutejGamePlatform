@@ -22,6 +22,22 @@ const envSchema = z.object({
   SESSION_SECRET: z
     .string()
     .min(32, "SESSION_SECRET должен быть не короче 32 символов"),
+
+  /**
+   * Внешний адрес игры. Нужен письмам: ссылку в письме собрать из запроса
+   * нельзя — письмо уходит из фоновой задачи, где никакого запроса нет.
+   */
+  APP_URL: z.string().url().default("http://localhost:3000"),
+
+  /**
+   * Почтовый релей. Пустой хост означает «отправка не настроена»: письма
+   * тогда не уходят, а всё, что от них зависит, честно об этом сообщает.
+   */
+  MAIL_HOST: z.string().default(""),
+  MAIL_PORT: z.coerce.number().int().positive().default(587),
+  MAIL_USER: z.string().default(""),
+  MAIL_PASSWORD: z.string().default(""),
+  MAIL_FROM: z.string().default("Платитутка <no-reply@localhost>"),
 });
 
 type Env = z.infer<typeof envSchema>;

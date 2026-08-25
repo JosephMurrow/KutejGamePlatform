@@ -17,5 +17,15 @@ services:
       timeout: 5s
       retries: 10
 
+  # Песочница для писем: наружу ничего не уходит, всё видно в браузере
+  # на http://localhost:8025. Без неё отлаживать почту нечем.
+  mail:
+    image: axllent/mailpit:latest
+    container_name: pricetitute-mail
+    restart: unless-stopped
+    ports:
+      - "1025:1025" # SMTP для приложения
+      - "8025:8025" # веб-интерфейс
+
 volumes:
   pricetitute-db-data:
