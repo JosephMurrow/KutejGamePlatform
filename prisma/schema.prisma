@@ -156,6 +156,8 @@ model PrivateRoom {
 
   /// Длительность фазы ставок, мс.
   bettingMs    Int          @default(300000)
+  /// Сколько показывать вскрышку, мс.
+  revealMs     Int          @default(30000)
   includeAdult Boolean      @default(true)
   mode         QuestionMode @default(NORMAL)
   endMode      RoomEndMode  @default(ENDLESS)

@@ -9,6 +9,7 @@ import {
   type QuestionModeDb,
 } from "../questions/modes";
 import { dropQuestionQueue } from "../questions/store";
+import { parseRevealMs } from "@/shared/room-settings";
 
 /**
  * Приватные комнаты: создание, разбор ссылки-приглашения и уборка опустевших
@@ -28,6 +29,8 @@ export const MAX_END_VALUE = 99;
 
 export interface PrivateRoomSettings {
   bettingMs: number;
+  /** Сколько показывать вскрышку. */
+  revealMs: number;
   includeAdult: boolean;
   /** Каким набором паков играет комната. */
   mode: QuestionMode;
@@ -67,6 +70,7 @@ export async function createPrivateRoom(
           code,
           hostId,
           bettingMs: settings.bettingMs,
+          revealMs: settings.revealMs,
           includeAdult: settings.includeAdult,
           mode: dbValue(settings.mode),
           endMode: MODE_TO_DB[settings.endMode],
@@ -137,6 +141,7 @@ export function generateCode(): string {
 /** Настройки из формы: всё за пределами разумного отбрасывается. */
 export function normalizeSettings(input: {
   bettingMs?: unknown;
+  revealMs?: unknown;
   includeAdult?: unknown;
   mode?: unknown;
   endMode?: unknown;
@@ -161,6 +166,7 @@ export function normalizeSettings(input: {
 
   return {
     bettingMs,
+    revealMs: parseRevealMs(input.revealMs),
     includeAdult: input.includeAdult !== false,
     mode: parseMode(input.mode),
     endMode,
@@ -177,6 +183,7 @@ function toInfo(room: {
   code: string;
   hostId: string;
   bettingMs: number;
+  revealMs: number;
   includeAdult: boolean;
   mode: QuestionModeDb;
   endMode: keyof typeof MODE_FROM_DB;
@@ -187,6 +194,7 @@ function toInfo(room: {
     code: room.code,
     hostId: room.hostId,
     bettingMs: room.bettingMs,
+    revealMs: room.revealMs,
     includeAdult: room.includeAdult,
     mode: parseMode(room.mode),
     endMode: MODE_FROM_DB[room.endMode],

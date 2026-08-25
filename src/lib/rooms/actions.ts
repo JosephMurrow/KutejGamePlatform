@@ -16,6 +16,7 @@ export async function createRoomAction(
 
   const settings = normalizeSettings({
     bettingMs: formData.get("bettingMs"),
+    revealMs: formData.get("revealMs"),
     includeAdult: formData.get("includeAdult") === "on",
     mode: formData.get("mode"),
     endMode: formData.get("endMode"),

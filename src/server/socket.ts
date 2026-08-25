@@ -124,7 +124,7 @@ async function resolveRoom(
     setup: {
       pool: { includeAdult: room.includeAdult, mode: room.mode },
       rules: {
-        timings: { bettingMs: room.bettingMs },
+        timings: { bettingMs: room.bettingMs, revealMs: room.revealMs },
         endMode: room.endMode,
         endValue: room.endValue,
         ownerId: room.hostId,
