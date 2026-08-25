@@ -25,11 +25,21 @@ export function RegisterForm({ next }: { next?: string }) {
       />
 
       <Field
+        label="Почта"
+        name="email"
+        type="email"
+        autoComplete="email"
+        defaultValue={state.values?.email}
+        hint="Нужна, чтобы восстановить забытый пароль. Входить всё равно по логину."
+        error={state.fieldErrors?.email}
+      />
+
+      <Field
         label="Пароль"
         name="password"
         type="password"
         autoComplete="new-password"
-        hint="Минимум 8 символов. Восстановления пароля нет — запиши его."
+        hint="Минимум 8 символов."
         error={state.fieldErrors?.password}
       />
 

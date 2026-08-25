@@ -32,6 +32,10 @@ export interface CurrentUser {
   login: string;
   nickname: string;
   avatarId: number;
+  /** Почта. Может не быть: аккаунты старше писем живут без неё. */
+  email: string | null;
+  /** Момент подтверждения адреса; без него восстановление не работает. */
+  emailConfirmedAt: Date | null;
 }
 
 /**
@@ -44,7 +48,14 @@ export async function getCurrentUser(): Promise<CurrentUser | null> {
 
   const user = await prisma.user.findUnique({
     where: { id: userId },
-    select: { id: true, login: true, nickname: true, avatarId: true },
+    select: {
+      id: true,
+      login: true,
+      nickname: true,
+      avatarId: true,
+      email: true,
+      emailConfirmedAt: true,
+    },
   });
 
   return user;

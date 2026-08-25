@@ -172,8 +172,45 @@ model PrivateRoom {
   @@map("private_rooms")
 }
 
-/// Игрок. Регистрация — только логин и пароль, email не собираем,
-/// восстановления пароля нет (см. docs/SPEC.md §2).
+/// Зачем выдана одноразовая ссылка.
+enum LinkPurpose {
+  /// Подтверждение адреса почты.
+  EMAIL_CONFIRM
+  /// Сброс забытого пароля.
+  PASSWORD_RESET
+}
+
+/// Одноразовая ссылка из письма.
+///
+/// Хранится хеш, а не сама ссылка: утёкшая таблица не должна давать доступ к
+/// аккаунтам. Протухшие подметает уборщик комнат.
+model OneTimeLink {
+  id String @id @default(cuid())
+
+  /// SHA-256 от ссылки. По нему и ищем.
+  tokenHash String      @unique
+  purpose   LinkPurpose
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  /// Адрес, на который ушло письмо. Подтверждаем именно его: человек мог
+  /// успеть поменять почту в профиле, пока письмо шло.
+  email String
+
+  expiresAt DateTime
+  /// Когда ссылкой воспользовались. Второй раз не сработает.
+  usedAt    DateTime?
+
+  createdAt DateTime @default(now())
+
+  @@index([userId, purpose])
+  @@index([expiresAt])
+  @@map("one_time_links")
+}
+
+/// Игрок. Регистрация — логин, пароль и почта,
+/// восстановление пароля идёт по письму (см. docs/SPEC.md §2).
 model User {
   id           String @id @default(cuid())
   /// Хранится в нижнем регистре: логин уникален без учёта регистра.
@@ -188,12 +225,20 @@ model User {
   /// Момент подтверждения возраста 18+ при регистрации.
   adultConfirmedAt DateTime?
 
+  /// Почта. Пустая допускается: аккаунты, заведённые до появления писем,
+  /// живут как жили, а адрес предлагается прикрепить в профиле.
+  email            String?   @unique
+  /// Момент подтверждения адреса. Сброс пароля работает только с
+  /// подтверждённого: иначе опечатка при регистрации отдаёт аккаунт чужому.
+  emailConfirmedAt DateTime?
+
   /// Бот из режима «Forever alone»: войти под ним нельзя.
   isBot Boolean @default(false)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  links        OneTimeLink[]
   hostedRounds Round[]       @relation("HostedRounds")
   hostedRooms  PrivateRoom[] @relation("HostedRooms")
   bets         RoundBet[]

@@ -24,11 +24,27 @@ const nicknameSchema = z
   .min(NICKNAME_MIN_LENGTH, `Ник не короче ${NICKNAME_MIN_LENGTH} символов`)
   .max(NICKNAME_MAX_LENGTH, `Ник не длиннее ${NICKNAME_MAX_LENGTH} символов`);
 
+/** Адрес хранится в нижнем регистре: почта регистронезависима на практике. */
+const emailSchema = z
+  .string()
+  .trim()
+  .toLowerCase()
+  .min(1, "Введи адрес почты")
+  .max(254, "Слишком длинный адрес")
+  .email("Это не похоже на адрес почты");
+
 export const registerSchema = z.object({
   login: loginSchema,
   password: passwordSchema,
   nickname: nicknameSchema,
+  email: emailSchema,
 });
+
+/** Прикрепление почты в профиле и запрос на восстановление. */
+export const emailOnlySchema = z.object({ email: emailSchema });
+
+/** Новый пароль по ссылке из письма. */
+export const newPasswordSchema = z.object({ password: passwordSchema });
 
 export const loginFormSchema = z.object({
   login: loginSchema,

@@ -3,6 +3,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { Avatar } from "@/components/Avatar";
 import { BRAND, Brand } from "@/components/Brand";
+import { EmailForm } from "@/components/profile/EmailForm";
 import { ProfileForm } from "@/components/profile/ProfileForm";
 import { UserMenu } from "@/components/UserMenu";
 import { getCurrentUser } from "@/lib/auth/session";
@@ -38,6 +39,14 @@ export default async function ProfilePage() {
       <div className="rounded-2xl border border-line bg-paper p-6">
         <h1 className="mb-5 text-lg font-semibold">Профиль</h1>
         <ProfileForm nickname={user.nickname} avatarId={user.avatarId} />
+      </div>
+
+      <div className="mt-6 rounded-2xl border border-line bg-paper p-6">
+        <h2 className="mb-5 text-lg font-semibold">Почта</h2>
+        <EmailForm
+          email={user.email}
+          confirmed={user.emailConfirmedAt !== null}
+        />
       </div>
     </main>
   );
