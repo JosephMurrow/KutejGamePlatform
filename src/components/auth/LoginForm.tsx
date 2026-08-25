@@ -31,6 +31,15 @@ export function LoginForm({ next }: { next?: string }) {
         error={state.fieldErrors?.password}
       />
 
+      <p className="-mt-2 text-right text-xs">
+        <Link
+          href="/forgot"
+          className="text-muted hover:text-crimson hover:underline"
+        >
+          Забыл пароль?
+        </Link>
+      </p>
+
       <SubmitButton>Войти</SubmitButton>
 
       <p className="text-center text-sm text-muted">

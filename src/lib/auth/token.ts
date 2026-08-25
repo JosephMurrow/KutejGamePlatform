@@ -30,18 +30,56 @@ export async function signSessionToken(
     .sign(secretKey());
 }
 
-/** Возвращает id игрока или null, если токен протух, подделан или мусорный. */
-export async function readSessionToken(
+export interface SessionClaims {
+  userId: string;
+  /** Когда токен выдан. Нужен, чтобы отличить сессию до смены пароля от новой. */
+  issuedAt: Date;
+}
+
+/**
+ * Разобрать токен. `null` — протух, подделан или мусорный.
+ *
+ * Проверка здесь чисто криптографическая, без похода в базу: этим же кодом
+ * пользуется быстрая развилка в proxy.ts. Отзыв сессий проверяется отдельно,
+ * там, где база и так под рукой.
+ */
+export async function readSessionClaims(
   token: string | undefined,
-): Promise<string | null> {
+): Promise<SessionClaims | null> {
   if (!token) return null;
 
   try {
     const { payload } = await jwtVerify(token, secretKey(), {
       algorithms: [ALGORITHM],
     });
-    return typeof payload.sub === "string" ? payload.sub : null;
+
+    if (typeof payload.sub !== "string") return null;
+
+    return {
+      userId: payload.sub,
+      issuedAt: new Date((payload.iat ?? 0) * 1000),
+    };
   } catch {
     return null;
   }
+}
+
+/** Только идентификатор: для мест, где отзыв не проверяется. */
+export async function readSessionToken(
+  token: string | undefined,
+): Promise<string | null> {
+  return (await readSessionClaims(token))?.userId ?? null;
+}
+
+/**
+ * Действует ли сессия с учётом отзыва. Сравнение по секундам: в токене время
+ * выпуска хранится с точностью до секунды, и без округления сессия, выданная
+ * в ту же секунду, что и смена пароля, отвалилась бы сразу.
+ */
+export function sessionAlive(issuedAt: Date, validFrom: Date | null): boolean {
+  if (validFrom === null) return true;
+  return (
+    Math.floor(issuedAt.getTime() / 1000) >=
+    Math.floor(validFrom.getTime() / 1000)
+  );
 }

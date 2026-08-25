@@ -5,15 +5,17 @@ import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { prisma } from "../prisma";
 import { AVATAR_COUNT, randomAvatarId } from "../avatars";
-import { confirmLetter, welcomeLetter } from "../mail/letters";
+import { RateLimiter } from "../../server/rate-limit";
+import { confirmLetter, resetLetter, welcomeLetter } from "../mail/letters";
 import { sendLetter } from "../mail/send";
 import type { FormState } from "./form-state";
-import { issueLink } from "./links";
+import { claimLink, issueLink } from "./links";
 import { endSession, getSessionUserId, startSession } from "./session";
 import {
   emailOnlySchema,
   fieldErrorsFrom,
   loginFormSchema,
+  newPasswordSchema,
   normalizeLogin,
   profileSchema,
   registerSchema,
@@ -282,4 +284,111 @@ export async function attachEmailAction(
           "Адрес сохранён, но письмо отправить не удалось — отправка почты " +
           "сейчас не настроена. Попробуй позже.",
       };
+}
+
+/**
+ * Ограничение на запросы восстановления: по одному ключу не чаще трёх раз за
+ * четверть часа. Ключ — то, что ввели, поэтому перебор чужих логинов упирается
+ * в него так же, как и попытки завалить один ящик письмами.
+ */
+const resetLimiter = new RateLimiter(3, 15 * 60 * 1000);
+
+/**
+ * Запрос на восстановление пароля по логину или адресу почты.
+ *
+ * Ответ одинаковый всегда — и на существующий аккаунт, и на выдуманный.
+ * Иначе форма превращается в удобный перебиратель чужих логинов.
+ */
+export async function requestResetAction(
+  _prev: FormState,
+  formData: FormData,
+): Promise<FormState> {
+  const raw = String(formData.get("identity") ?? "").trim();
+  const values = { identity: raw };
+
+  if (raw === "") {
+    return { values, fieldErrors: { identity: "Введи логин или адрес почты" } };
+  }
+
+  const done: FormState = {
+    values,
+    ok:
+      "Если такой аккаунт есть и его адрес подтверждён, письмо уже в пути. " +
+      "Проверь почту, в том числе папку со спамом.",
+  };
+
+  if (!resetLimiter.allow(raw.toLowerCase())) return done;
+
+  const user = await prisma.user.findFirst({
+    where: {
+      isBot: false,
+      emailConfirmedAt: { not: null },
+      OR: [{ login: normalizeLogin(raw) }, { email: raw.toLowerCase() }],
+    },
+    select: { id: true, login: true, email: true },
+  });
+
+  // Аккаунта нет, почты нет или она не подтверждена — молчим и отвечаем
+  // ровно то же самое.
+  if (!user?.email) return done;
+
+  try {
+    const token = await issueLink(user.id, user.email, "PASSWORD_RESET");
+    await sendLetter(user.email, resetLetter(user.login, token));
+  } catch (error) {
+    console.error("Письмо для восстановления не ушло:", error);
+  }
+
+  return done;
+}
+
+/**
+ * Новый пароль по ссылке из письма.
+ *
+ * После смены все прежние сессии этого аккаунта перестают работать: если
+ * аккаунт увели, у настоящего владельца должен остаться способ выставить чужого.
+ */
+export async function resetPasswordAction(
+  _prev: FormState,
+  formData: FormData,
+): Promise<FormState> {
+  const token = String(formData.get("token") ?? "");
+  const parsed = newPasswordSchema.safeParse({
+    password: String(formData.get("password") ?? ""),
+  });
+
+  if (!parsed.success) {
+    return { fieldErrors: fieldErrorsFrom(parsed.error) };
+  }
+
+  const claimed = await claimLink(token, "PASSWORD_RESET");
+  if (!claimed) {
+    return {
+      error:
+        "Ссылка не сработала: она живёт час и срабатывает один раз. " +
+        "Запроси восстановление заново.",
+    };
+  }
+
+  const now = new Date();
+
+  await prisma.$transaction([
+    prisma.user.update({
+      where: { id: claimed.userId },
+      data: {
+        passwordHash: await hash(parsed.data.password),
+        // Всё, что выдано раньше этого момента, больше не действует.
+        sessionsValidFrom: now,
+      },
+    }),
+    // Остальные живые ссылки этого аккаунта тоже гасим: пароль уже сменили.
+    prisma.oneTimeLink.updateMany({
+      where: { userId: claimed.userId, usedAt: null },
+      data: { usedAt: now },
+    }),
+  ]);
+
+  // Новая сессия выдаётся после сдвига отметки, поэтому переживёт его.
+  await startSession(claimed.userId);
+  redirect("/play");
 }

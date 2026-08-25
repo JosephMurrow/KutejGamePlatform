@@ -1,5 +1,9 @@
 import type { IncomingHttpHeaders } from "node:http";
-import { readSessionToken, SESSION_COOKIE } from "../lib/auth/token";
+import {
+  readSessionClaims,
+  sessionAlive,
+  SESSION_COOKIE,
+} from "../lib/auth/token";
 import { prisma } from "../lib/prisma";
 
 export interface SocketUser {
@@ -32,11 +36,23 @@ export async function authenticateSocket(
   headers: IncomingHttpHeaders,
 ): Promise<SocketUser | null> {
   const token = readCookie(headers.cookie, SESSION_COOKIE);
-  const userId = await readSessionToken(token ?? undefined);
-  if (!userId) return null;
+  const claims = await readSessionClaims(token ?? undefined);
+  if (!claims) return null;
 
-  return prisma.user.findUnique({
-    where: { id: userId },
-    select: { id: true, nickname: true, avatarId: true },
+  const user = await prisma.user.findUnique({
+    where: { id: claims.userId },
+    select: {
+      id: true,
+      nickname: true,
+      avatarId: true,
+      sessionsValidFrom: true,
+    },
   });
+
+  if (!user) return null;
+
+  // Сессия, выданная до смены пароля, за стол не пускает.
+  if (!sessionAlive(claims.issuedAt, user.sessionsValidFrom)) return null;
+
+  return { id: user.id, nickname: user.nickname, avatarId: user.avatarId };
 }
