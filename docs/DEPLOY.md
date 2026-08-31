@@ -26,7 +26,38 @@ Railway, Render, Fly, обычный VPS. **Vercel не подойдёт** — �
 cp .env.prod.example .env   # и заполнить пароли, секрет и токен
 docker compose -f docker-compose.prod.yml up -d --build
 docker compose -f docker-compose.prod.yml exec app npx prisma migrate deploy
+docker compose -f docker-compose.prod.yml exec app npm run db:rename-questions
 docker compose -f docker-compose.prod.yml exec app npx prisma db seed
+```
+
+**Порядок важен, и вот почему.** Текст вопроса уникален и служит ключом при
+заливке. Если вопросы переписывали, сначала надо обновить уже сохранённые
+строки (`db:rename-questions`), и только потом запускать сид. Наоборот — сид
+не узнает переписанные вопросы, добавит их как новые, и пул удвоится.
+
+Скрипт безопасно запускать всегда: когда переименовывать нечего, он ничего не
+делает.
+
+**После сида обязательно сверить количество.** Это ловит ошибку сразу, а не
+через неделю:
+
+```bash
+docker compose -f docker-compose.prod.yml exec -T postgres \
+  psql -U platitutka -d platitutka -c "select count(*) from questions;"
+```
+
+Число должно совпадать с размером пула из `prisma/seed/questions`. Если оно
+вдвое больше — сид отработал раньше переименования; чинится удалением строк,
+на которые не ссылается ни один раунд, и последующим переименованием
+оригиналов.
+
+**После правки вопросов в базе перезапустите приложение.** Очереди вопросов
+живут в памяти процесса и держат идентификаторы; после удаления строк они
+могут указывать в пустоту, и комната зависнет на «вопрос видит только
+ведущий».
+
+```bash
+docker compose -f docker-compose.prod.yml restart app
 ```
 
 Миграции идут **отдельной командой после запуска**, а не на старте процесса:
