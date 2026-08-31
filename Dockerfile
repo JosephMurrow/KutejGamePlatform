@@ -25,6 +25,10 @@ COPY --from=build /app/.next ./.next
 COPY --from=build /app/public ./public
 COPY --from=build /app/src ./src
 COPY --from=build /app/prisma ./prisma
+# Разовые скрипты обслуживания базы запускаются в этом же контейнере, значит
+# должны в него попасть. Без этого db:rename-questions падает на боевом с
+# «Cannot find module», а следом сид заливает пул повторно.
+COPY --from=build /app/scripts ./scripts
 COPY --from=build /app/server.ts ./server.ts
 COPY --from=build /app/next.config.ts ./next.config.ts
 COPY --from=build /app/tsconfig.json ./tsconfig.json

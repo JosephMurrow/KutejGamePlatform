@@ -4,7 +4,12 @@ node_modules
 .idea
 .claude
 docs
-scripts
+
+# Скрипты обслуживания базы нужны в образе: они запускаются в том же
+# контейнере (db:rename-questions и подобные). Смоук-тесты — не нужны.
+scripts/smoke-*.ts
+scripts/bot-player.ts
+
 .env
 .env.*
 !.env.example
