@@ -12,6 +12,17 @@ import { z } from "zod";
  * себя на пустом DATABASE_URL, хотя базу при сборке никто не трогает. Сервер
  * же читает окружение сразу на старте, так что падать не вовремя он не начнёт.
  */
+/**
+ * Пустая строка — это «не задано», а не значение.
+ *
+ * docker compose подставляет пустую строку вместо переменной, которой нет в
+ * .env. Без этой обёртки такая переменная роняет проверку вместо того, чтобы
+ * откатиться к значению по умолчанию, — и приложение не поднимается вовсе.
+ */
+function optional<T extends z.ZodTypeAny>(schema: T) {
+  return z.preprocess((value) => (value === "" ? undefined : value), schema);
+}
+
 const envSchema = z.object({
   NODE_ENV: z
     .enum(["development", "production", "test"])
@@ -27,17 +38,19 @@ const envSchema = z.object({
    * Внешний адрес игры. Нужен письмам: ссылку в письме собрать из запроса
    * нельзя — письмо уходит из фоновой задачи, где никакого запроса нет.
    */
-  APP_URL: z.string().url().default("http://localhost:3000"),
+  APP_URL: optional(z.string().url().default("http://localhost:3000")),
 
   /**
    * Почтовый релей. Пустой хост означает «отправка не настроена»: письма
    * тогда не уходят, а всё, что от них зависит, честно об этом сообщает.
    */
   MAIL_HOST: z.string().default(""),
-  MAIL_PORT: z.coerce.number().int().positive().default(587),
+  MAIL_PORT: optional(z.coerce.number().int().positive().default(587)),
   MAIL_USER: z.string().default(""),
   MAIL_PASSWORD: z.string().default(""),
-  MAIL_FROM: z.string().default("Платитутка <no-reply@localhost>"),
+  MAIL_FROM: optional(
+    z.string().min(1).default("Платитутка <no-reply@localhost>"),
+  ),
 });
 
 type Env = z.infer<typeof envSchema>;
