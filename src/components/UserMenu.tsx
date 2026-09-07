@@ -8,6 +8,7 @@ import { logoutAction } from "@/lib/auth/actions";
 const LINKS = [
   { href: "/play", label: "В общую комнату" },
   { href: "/rooms/new", label: "Своя комната" },
+  { href: "/join", label: "Зайти по коду" },
   { href: "/leaderboard", label: "Рейтинг" },
   { href: "/profile", label: "Профиль" },
 ] as const;
@@ -22,10 +23,17 @@ const OVERLAY_HREF = "/leaderboard";
 export function UserMenu({
   nickname,
   avatarId,
+  isGuest = false,
   onLeaderboard,
 }: {
   nickname: string;
   avatarId: number;
+  /**
+   * Гость стримерской комнаты. Ему доступна только она: ни общего зала, ни
+   * своей комнаты, ни рейтинга, ни профиля — и предлагать их в меню значит
+   * обещать несуществующее.
+   */
+  isGuest?: boolean;
   /**
    * Показать рейтинг, не уходя со страницы. Передаётся из комнаты: переход по
    * ссылке рвёт сокет, и человек теряет место за столом.
@@ -91,7 +99,7 @@ export function UserMenu({
           role="menu"
           className="absolute right-0 z-50 mt-2 w-56 overflow-hidden rounded-xl border border-line bg-paper py-1 shadow-lg"
         >
-          {LINKS.map((link) =>
+          {(isGuest ? [] : LINKS).map((link) =>
             link.href === OVERLAY_HREF && onLeaderboard ? (
               <button
                 key={link.href}
@@ -116,6 +124,12 @@ export function UserMenu({
                 {link.label}
               </Link>
             ),
+          )}
+
+          {isGuest && (
+            <p className="px-4 py-2.5 text-xs text-muted">
+              Гость: только эта комната. Очки остаются здесь.
+            </p>
           )}
 
           <form action={logoutAction} className="border-t border-line">

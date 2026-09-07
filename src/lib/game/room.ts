@@ -1,3 +1,4 @@
+import type { HostRotation } from "@/shared/room-settings";
 import type { Bet } from "./bet";
 import { resolveRound, type PlayerBet, type RoundOutcome } from "./scoring";
 
@@ -28,6 +29,8 @@ export interface RoomOptions {
   endValue?: number | null;
   /** Хозяин приватной комнаты: только он выгоняет игроков и начинает заново. */
   ownerId?: string | null;
+  /** Кто ведёт раунды: по кругу или всегда хозяин. */
+  hostRotation?: HostRotation;
 }
 
 export interface RoomTimings {
@@ -163,6 +166,7 @@ export class Room {
   private readonly endMode: EndMode;
   private readonly endValue: number | null;
   private readonly ownerId: string | null;
+  private readonly hostRotation: HostRotation;
 
   constructor(
     readonly key: string,
@@ -173,6 +177,7 @@ export class Room {
     this.endMode = options.endMode ?? "endless";
     this.endValue = options.endValue ?? null;
     this.ownerId = options.ownerId ?? null;
+    this.hostRotation = options.hostRotation ?? "circle";
   }
 
   // — Действия игроков ————————————————————————————————————————
@@ -340,6 +345,28 @@ export class Room {
     return this.leave(targetId, now);
   }
 
+  /**
+   * Хозяин закрывает ставки досрочно.
+   *
+   * Правило «фаза закрывается, когда поставили все» на толпе не срабатывает
+   * никогда: всегда найдётся кто-то, кто зашёл и молчит. Темп партии тогда
+   * держать нечем, кроме таймера, — поэтому его отдаём ведущему.
+   */
+  closeBetting(requesterId: string, now: number): ActionResult {
+    if (this.ownerId === null || requesterId !== this.ownerId) {
+      return {
+        accepted: false,
+        reason: "Вскрывать может только хозяин комнаты",
+        events: [],
+      };
+    }
+    if (this.phase !== "betting") {
+      return { accepted: false, reason: "Ставки сейчас не идут", events: [] };
+    }
+
+    return { accepted: true, events: this.resolve(now) };
+  }
+
   /** Хозяин начинает новую партию после финального экрана. */
   restart(requesterId: string, now: number): ActionResult {
     if (this.ownerId === null || requesterId !== this.ownerId) {
@@ -415,8 +442,12 @@ export class Room {
     }
 
     const index = this.cursor % this.order.length;
-    const host = this.order[index];
-    if (host === undefined) return this.pause("not_enough_players");
+    const next = this.order[index];
+    if (next === undefined) return this.pause("not_enough_players");
+
+    // В комнате с одним ведущим круг всё равно крутится: если хозяин выйдет,
+    // партия продолжится по очереди, а не встанет намертво.
+    const host = this.permanentHost() ?? next;
 
     const questionId = this.questions.next();
     if (questionId === null) return this.pause("no_questions");
@@ -432,6 +463,17 @@ export class Room {
     this.deadline = now + this.timings.readyMs;
 
     return [{ type: "round_started", hostId: host, questionId }];
+  }
+
+  /**
+   * Хозяин, который ведёт всегда. `null` — водим по кругу: либо так настроена
+   * комната, либо хозяина за столом сейчас нет.
+   */
+  private permanentHost(): string | null {
+    if (this.hostRotation !== "owner") return null;
+    if (this.ownerId === null) return null;
+
+    return this.order.includes(this.ownerId) ? this.ownerId : null;
   }
 
   private abortRound(reason: AbortReason, now: number): GameEvent[] {

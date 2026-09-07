@@ -5,15 +5,34 @@ import { io, type Socket } from "socket.io-client";
 import type { Bet } from "@/lib/game/bet";
 import {
   CLIENT_EVENT,
+  KEY_QUERY,
   ROOM_QUERY,
+  SCREEN_VIEW,
   SERVER_EVENT,
   SOCKET_PATH,
+  VIEW_QUERY,
   type Ack,
   type ChatMessagePayload,
   type RoomStatePayload,
 } from "@/shared/protocol";
 
 const ERROR_LIFETIME_MS = 4000;
+
+/** Параметры подключения: код комнаты и, для экрана, его сорт с пропуском. */
+function connectionQuery(
+  roomCode?: string,
+  screenKey?: string,
+): Record<string, string> | undefined {
+  if (!roomCode) return undefined;
+
+  const query: Record<string, string> = { [ROOM_QUERY]: roomCode };
+  if (screenKey !== undefined) {
+    query[VIEW_QUERY] = SCREEN_VIEW;
+    query[KEY_QUERY] = screenKey;
+  }
+
+  return query;
+}
 
 export interface GameRoomHandle {
   state: RoomStatePayload | null;
@@ -32,6 +51,12 @@ export interface GameRoomHandle {
   kick: (playerId: string) => Promise<void>;
   /** Хозяин начинает новую партию после финального экрана. */
   restart: () => Promise<void>;
+  /** Хозяин закрывает ставки досрочно. */
+  closeBetting: () => Promise<void>;
+  /** Хозяин закрывает или открывает набор в комнату. */
+  setLocked: (locked: boolean) => Promise<void>;
+  /** Хозяин переименовывает гостя. */
+  renamePlayer: (playerId: string, nickname: string) => Promise<boolean>;
   /** «Forever alone»: позвать в комнату ботов. */
   inviteBots: (count?: number) => Promise<void>;
   dismissBots: () => Promise<void>;
@@ -40,8 +65,16 @@ export interface GameRoomHandle {
 /**
  * Подключение к игровой комнате. Сервер шлёт полный снимок состояния, поэтому
  * хук ничего не досчитывает — только хранит последний снимок и поправку часов.
+ *
+ * С `screenKey` тот же хук подключается видом «экран»: за стол не садится,
+ * секретов не получает и действий не шлёт. Ключ передаётся строкой, а не
+ * объектом, нарочно — объект менял бы личность на каждом рендере и пересоздавал
+ * бы сокет.
  */
-export function useGameRoom(roomCode?: string): GameRoomHandle {
+export function useGameRoom(
+  roomCode?: string,
+  screenKey?: string,
+): GameRoomHandle {
   const [state, setState] = useState<RoomStatePayload | null>(null);
   const [chat, setChat] = useState<ChatMessagePayload[]>([]);
   const [connected, setConnected] = useState(false);
@@ -53,7 +86,7 @@ export function useGameRoom(roomCode?: string): GameRoomHandle {
   useEffect(() => {
     const socket = io({
       path: SOCKET_PATH,
-      query: roomCode ? { [ROOM_QUERY]: roomCode } : undefined,
+      query: connectionQuery(roomCode, screenKey),
     });
     socketRef.current = socket;
 
@@ -87,7 +120,7 @@ export function useGameRoom(roomCode?: string): GameRoomHandle {
       socket.close();
       socketRef.current = null;
     };
-  }, [roomCode]);
+  }, [roomCode, screenKey]);
 
   // Ошибка действия — это подсказка на секунду, а не состояние экрана.
   useEffect(() => {
@@ -152,6 +185,23 @@ export function useGameRoom(roomCode?: string): GameRoomHandle {
     await act(CLIENT_EVENT.restart);
   }, [act]);
 
+  const closeBetting = useCallback(async () => {
+    await act(CLIENT_EVENT.closeBetting);
+  }, [act]);
+
+  const setLocked = useCallback(
+    async (locked: boolean) => {
+      await act(CLIENT_EVENT.lock, { locked });
+    },
+    [act],
+  );
+
+  const renamePlayer = useCallback(
+    (playerId: string, nickname: string) =>
+      act(CLIENT_EVENT.rename, { playerId, nickname }),
+    [act],
+  );
+
   const inviteBots = useCallback(
     async (count?: number) => {
       await act(
@@ -179,6 +229,9 @@ export function useGameRoom(roomCode?: string): GameRoomHandle {
     sendChat,
     kick,
     restart,
+    closeBetting,
+    setLocked,
+    renamePlayer,
     inviteBots,
     dismissBots,
   };

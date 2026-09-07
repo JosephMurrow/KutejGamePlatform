@@ -3,14 +3,21 @@ import type { Server as HttpServer } from "node:http";
 import { Server as IOServer, type Socket } from "socket.io";
 import { champions, refreshChampions } from "../lib/champions";
 import { parseBet } from "../lib/game/bet";
-import { findPrivateRoom } from "../lib/rooms/private";
+import { renameGuest } from "../lib/auth/guest";
+import { findPrivateRoom, setRoomLocked } from "../lib/rooms/private";
+import { checkNickname } from "../shared/guest";
+import { questionCard } from "../lib/questions/store";
+import { hasScreen } from "../shared/room-settings";
 import {
   CHAT_MAX_LENGTH,
   CLIENT_EVENT,
   GLOBAL_ROOM,
+  KEY_QUERY,
   ROOM_QUERY,
+  SCREEN_VIEW,
   SERVER_EVENT,
   SOCKET_PATH,
+  VIEW_QUERY,
   type Ack,
   type ChatMessagePayload,
   type RoomStatePayload,
@@ -18,6 +25,7 @@ import {
 import { authenticateSocket, type SocketUser } from "./auth";
 import { BOT_LIMIT, BOT_PARTY_SIZE, BotDirector } from "./bots/director";
 import { RateLimiter } from "./rate-limit";
+import { TwitchBridge } from "./twitch/bridge";
 import {
   GLOBAL_SETUP,
   pushChat,
@@ -29,6 +37,16 @@ import {
 
 export { SOCKET_PATH };
 
+/**
+ * Сколько игроков влезает в снимок. Пока за столом не больше — шлём всех и
+ * ничего не меняется; дальше состав режется, потому что рассылка иначе растёт
+ * квадратом от числа людей (см. docs/BACKLOG.md N4).
+ */
+const PLAYERS_IN_SNAPSHOT = 12;
+
+/** Сколько строк ставок влезает во вскрышку. */
+const BETS_IN_REVEAL = 10;
+
 /** Действия игрока: защита от заклинившей кнопки и от скрипта-спамера. */
 const actionLimiter = new RateLimiter(20, 5_000);
 const chatLimiter = new RateLimiter(5, 10_000);
@@ -37,6 +55,34 @@ export interface SocketServer {
   io: IOServer;
   /** Остановить таймеры комнат и ботов при выключении сервера. */
   shutdown: () => void;
+}
+
+/**
+ * Чьими глазами собирается снимок комнаты.
+ *
+ * Раньше хватало идентификатора игрока, но экран — это вторая вкладка того же
+ * человека, и по идентификатору она получила бы вопрос ведущего в фазе READY.
+ * Поэтому решает сорт подключения, а не только чей он.
+ */
+export type Viewer = { kind: "player"; id: string } | { kind: "screen" };
+
+/**
+ * Комната только для игроков. Чат уходит сюда, а не всем подряд: экран его не
+ * показывает (см. docs/BACKLOG.md O4), и незачем ему туда и попадать.
+ */
+function playersRoom(key: string): string {
+  return `${key}:players`;
+}
+
+/** Значение параметра подключения. */
+function readQuery(socket: Socket, name: string): string {
+  const raw = socket.handshake.query[name];
+  return typeof raw === "string" ? raw.trim() : "";
+}
+
+/** Просится ли подключение экраном. */
+function wantsScreen(socket: Socket): boolean {
+  return readQuery(socket, VIEW_QUERY) === SCREEN_VIEW;
 }
 
 export function createSocketServer(httpServer: HttpServer): SocketServer {
@@ -53,7 +99,7 @@ export function createSocketServer(httpServer: HttpServer): SocketServer {
   // моменту первого вызова он уже есть. Без этого снимок, разосланный по ходу
   // игры, уходил бы без числа ботов, и панель хозяина врала бы.
   const manager = new RoomManager((managed) => {
-    void broadcastState(io, managed, director);
+    void broadcastState(io, managed, director, twitch);
   });
 
   const director = new BotDirector(manager, {
@@ -62,10 +108,19 @@ export function createSocketServer(httpServer: HttpServer): SocketServer {
       if (!managed) return;
 
       pushChat(managed, message);
-      io.to(roomKey).emit(SERVER_EVENT.chatMessage, message);
+      io.to(playersRoom(roomKey)).emit(SERVER_EVENT.chatMessage, message);
     },
   });
   director.start();
+
+  // Мост в чат Твича. Ставка `!10000` доезжает до стола так же, как нажатие
+  // кнопки: чтение чата анонимно и от стримера ничего не требует.
+  const twitch = new TwitchBridge(manager, (roomKey) => {
+    const managed = manager.get(roomKey);
+    if (managed) void broadcastState(io, managed, director, twitch);
+  });
+
+  manager.onClose = (roomKey) => twitch.detach(roomKey);
 
   // Греем кеш чемпионов заранее: иначе первый вошедший увидит комнату без
   // корон и дождётся их только со следующей рассылкой.
@@ -74,12 +129,21 @@ export function createSocketServer(httpServer: HttpServer): SocketServer {
   io.use((socket, next) => {
     void authenticateSocket(socket.handshake.headers)
       .then((user) => {
-        if (!user) {
-          next(new Error("Нужно войти в аккаунт"));
+        if (user) {
+          socket.data.user = user;
+          next();
           return;
         }
-        socket.data.user = user;
-        next();
+
+        // Экран пускаем и без сессии: у источника OBS её взять неоткуда.
+        // Пропуск у него другой — ключ комнаты, и проверяется он в
+        // onConnection, где уже известно, к какой комнате идёт подключение.
+        if (wantsScreen(socket)) {
+          next();
+          return;
+        }
+
+        next(new Error("Нужно войти в аккаунт"));
       })
       .catch((error: unknown) => {
         console.error("[socket] аутентификация упала:", error);
@@ -88,7 +152,7 @@ export function createSocketServer(httpServer: HttpServer): SocketServer {
   });
 
   io.on("connection", (socket) => {
-    void onConnection(io, manager, director, socket);
+    void onConnection(io, manager, director, twitch, socket);
   });
 
   const stopCleanup = startRoomCleanup(manager);
@@ -97,6 +161,7 @@ export function createSocketServer(httpServer: HttpServer): SocketServer {
     io,
     shutdown: () => {
       stopCleanup();
+      twitch.stop();
       director.stop();
       manager.closeAll();
       io.close();
@@ -108,14 +173,24 @@ export function createSocketServer(httpServer: HttpServer): SocketServer {
  * Куда сажать игрока: без кода — общая комната, с кодом — приватная.
  * Правила партии берутся из базы, а не из того, что прислал клиент.
  */
-async function resolveRoom(
-  socket: Socket,
-): Promise<{ key: string; code: string | null; setup: RoomSetup } | null> {
-  const raw = socket.handshake.query[ROOM_QUERY];
-  const code = typeof raw === "string" ? raw.trim() : "";
+interface RoomTarget {
+  key: string;
+  code: string | null;
+  setup: RoomSetup;
+  /** Пропуск для вида «экран»; у общего зала экрана нет вовсе. */
+  screenKey: string | null;
+}
+
+async function resolveRoom(socket: Socket): Promise<RoomTarget | null> {
+  const code = readQuery(socket, ROOM_QUERY);
 
   if (code === "") {
-    return { key: GLOBAL_ROOM, code: null, setup: GLOBAL_SETUP };
+    return {
+      key: GLOBAL_ROOM,
+      code: null,
+      setup: GLOBAL_SETUP,
+      screenKey: null,
+    };
   }
 
   const room = await findPrivateRoom(code);
@@ -124,6 +199,7 @@ async function resolveRoom(
   return {
     key: room.id,
     code: room.code,
+    screenKey: hasScreen(room.kind) ? room.screenKey : null,
     setup: {
       pool: { includeAdult: room.includeAdult, mode: room.mode },
       rules: {
@@ -131,24 +207,81 @@ async function resolveRoom(
         endMode: room.endMode,
         endValue: room.endValue,
         ownerId: room.hostId,
+        hostRotation: room.hostRotation,
       },
       isPrivate: true,
+      kind: room.kind,
+      title: room.title,
+      locked: room.locked,
+      maxPlayers: room.maxPlayers,
+      twitchChannel: room.twitchChannel,
     },
   };
+}
+
+/**
+ * Подключение экраном: смотрит партию, но за столом его нет и секретов ему не
+ * присылают. Пропуск — ключ комнаты; хозяину со своей сессией ключ не нужен.
+ */
+async function onScreen(
+  io: IOServer,
+  manager: RoomManager,
+  director: BotDirector,
+  twitch: TwitchBridge,
+  socket: Socket,
+  target: RoomTarget,
+): Promise<void> {
+  const user = socket.data.user as SocketUser | undefined;
+
+  if (target.screenKey === null) {
+    socket.emit(SERVER_EVENT.kicked, { reason: "У этой комнаты нет экрана" });
+    socket.disconnect(true);
+    return;
+  }
+
+  const owner = user !== undefined && target.setup.rules.ownerId === user.id;
+  if (!owner && readQuery(socket, KEY_QUERY) !== target.screenKey) {
+    socket.emit(SERVER_EVENT.kicked, { reason: "Экран этой комнаты закрыт" });
+    socket.disconnect(true);
+    return;
+  }
+
+  const viewer: Viewer = { kind: "screen" };
+  const managed = await manager.watch(socket.id, target.key, target.setup);
+
+  // Ждём, пока комната дожуёт свои побочные эффекты. Вход может запустить
+  // раунд, а текст вопроса подгружается уже после события — без этой паузы
+  // первый снимок ушёл бы с пустым вопросом и его пришлось бы чинить
+  // следующей рассылкой.
+  await managed.tail;
+
+  await socket.join(target.key);
+  socket.data.viewer = viewer;
+  socket.data.roomCode = target.code;
+
+  socket.emit(
+    SERVER_EVENT.state,
+    buildState(
+      managed,
+      viewer,
+      target.code,
+      director.count(target.key),
+      twitch,
+    ),
+  );
+
+  socket.on("disconnect", () => {
+    manager.unwatch(socket.id, target.key);
+  });
 }
 
 async function onConnection(
   io: IOServer,
   manager: RoomManager,
   director: BotDirector,
+  twitch: TwitchBridge,
   socket: Socket,
 ): Promise<void> {
-  const user = socket.data.user as SocketUser | undefined;
-  if (!user) {
-    socket.disconnect(true);
-    return;
-  }
-
   const target = await resolveRoom(socket);
   if (!target) {
     socket.emit(SERVER_EVENT.kicked, { reason: "Комната не найдена" });
@@ -156,18 +289,60 @@ async function onConnection(
     return;
   }
 
+  if (wantsScreen(socket)) {
+    await onScreen(io, manager, director, twitch, socket, target);
+    return;
+  }
+
+  const user = socket.data.user as SocketUser | undefined;
+  if (!user) {
+    socket.disconnect(true);
+    return;
+  }
+
   const roomKey = target.key;
   const roomCode = target.code;
-  const managed = await manager.join(user, roomKey, target.setup);
-  await socket.join(roomKey);
 
+  // Гость заведён ради одной комнаты. Сессия у него настоящая, поэтому дверь
+  // приходится закрывать здесь, а не на подписи токена.
+  if (user.guestRoomId !== null && user.guestRoomId !== roomKey) {
+    socket.emit(SERVER_EVENT.kicked, {
+      reason: "Гость играет только в своей комнате",
+    });
+    socket.disconnect(true);
+    return;
+  }
+
+  // Замок и лимит проверяются до того, как человек сядет за стол: выгонять
+  // уже севшего было бы и грубее, и сложнее.
+  const refusal = await manager.admits(user, roomKey, target.setup);
+  if (refusal !== null) {
+    socket.emit(SERVER_EVENT.kicked, { reason: refusal });
+    socket.disconnect(true);
+    return;
+  }
+
+  const viewer: Viewer = { kind: "player", id: user.id };
+  const managed = await manager.join(user, roomKey, target.setup);
+  await managed.tail;
+
+  // Канал слушаем, пока комната жива. Повторный вызов с тем же каналом ничего
+  // не делает — а комнату поднимают на каждом входе.
+  if (target.setup.twitchChannel) {
+    twitch.attach(roomKey, target.setup.twitchChannel);
+  }
+
+  await socket.join(roomKey);
+  await socket.join(playersRoom(roomKey));
+
+  socket.data.viewer = viewer;
   socket.data.roomCode = roomCode;
   socket.emit(SERVER_EVENT.chatHistory, managed.chat);
   socket.emit(
     SERVER_EVENT.state,
-    buildState(managed, user.id, roomCode, director.count(roomKey)),
+    buildState(managed, viewer, roomCode, director.count(roomKey), twitch),
   );
-  void broadcastState(io, managed, director);
+  void broadcastState(io, managed, director, twitch);
 
   socket.on(CLIENT_EVENT.read, (...args: unknown[]) => {
     respond(args, () => {
@@ -225,7 +400,7 @@ async function onConnection(
       };
 
       pushChat(managed, message);
-      io.to(roomKey).emit(SERVER_EVENT.chatMessage, message);
+      io.to(playersRoom(roomKey)).emit(SERVER_EVENT.chatMessage, message);
 
       return { accepted: true };
     });
@@ -247,6 +422,61 @@ async function onConnection(
       }
 
       return result;
+    });
+  });
+
+  socket.on(CLIENT_EVENT.closeBetting, (...args: unknown[]) => {
+    respond(args, () =>
+      managed.runner.run((room, now) => room.closeBetting(user.id, now)),
+    );
+  });
+
+  socket.on(CLIENT_EVENT.lock, (...args: unknown[]) => {
+    void respondAsync(args, async (payload) => {
+      if (managed.room.view().ownerId !== user.id) {
+        return { accepted: false, reason: "Набор закрывает только хозяин" };
+      }
+
+      const locked = readBoolean(payload, "locked");
+      managed.locked = locked;
+
+      // Замок переживает перезапуск: комната остаётся закрытой, а не
+      // распахивается сама, пока хозяин смотрит в другую сторону.
+      if (target.setup.isPrivate) await setRoomLocked(roomKey, locked);
+
+      void broadcastState(io, managed, director, twitch);
+      return { accepted: true };
+    });
+  });
+
+  socket.on(CLIENT_EVENT.rename, (...args: unknown[]) => {
+    void respondAsync(args, async (payload) => {
+      if (managed.room.view().ownerId !== user.id) {
+        return {
+          accepted: false,
+          reason: "Переименовывать может только хозяин",
+        };
+      }
+
+      const targetId = readString(payload, "playerId");
+      const nickname = readString(payload, "nickname")?.trim() ?? "";
+      if (!targetId)
+        return { accepted: false, reason: "Кого переименовывать?" };
+
+      const profile = managed.profiles.get(targetId);
+      // Только гостей: чужой аккаунт хозяину комнаты не принадлежит.
+      if (!profile || profile.guestRoomId !== roomKey) {
+        return { accepted: false, reason: "Так можно только с гостями" };
+      }
+
+      const problem = checkNickname(nickname);
+      if (problem) return { accepted: false, reason: problem };
+
+      await renameGuest(targetId, nickname);
+      managed.profiles.set(targetId, { ...profile, nickname });
+
+      void broadcastState(io, managed, director, twitch);
+      return { accepted: true };
     });
   });
 
@@ -285,7 +515,7 @@ async function onConnection(
         return { accepted: false, reason: "Не удалось позвать ботов" };
       }
 
-      void broadcastState(io, managed, director);
+      void broadcastState(io, managed, director, twitch);
       return { accepted: true };
     });
   });
@@ -301,7 +531,7 @@ async function onConnection(
 
       // Прощаются как обычно: молча исчезнувшая компания выглядит сбоем.
       director.farewell(roomKey);
-      void broadcastState(io, managed, director);
+      void broadcastState(io, managed, director, twitch);
 
       return { accepted: true };
     });
@@ -309,21 +539,34 @@ async function onConnection(
 
   socket.on("disconnect", () => {
     manager.leave(user, roomKey);
-    void broadcastState(io, managed, director);
+    void broadcastState(io, managed, director, twitch);
   });
 }
 
-/** Состояние комнаты глазами конкретного игрока. */
+/** Состояние комнаты глазами конкретного подключения. */
 export function buildState(
   managed: ManagedRoom,
-  viewerId: string,
+  viewer: Viewer,
   roomCode: string | null = null,
   botCount = 0,
+  twitch?: TwitchBridge,
 ): RoomStatePayload {
   const view = managed.room.view();
-  // В фазе READY вопрос знает только ведущий.
-  const questionVisible = view.questionVisibleToAll || view.hostId === viewerId;
+  const isScreen = viewer.kind === "screen";
+  const viewerId = isScreen ? "" : viewer.id;
+
+  // В фазе READY вопрос знает только ведущий — и только на своём экране.
+  // Экран не знает его никогда: он для того и заведён.
+  const questionVisible =
+    view.questionVisibleToAll || (!isScreen && view.hostId === viewerId);
   const winners = new Set(view.reveal?.winners ?? []);
+
+  // Вопрос берётся по идентификатору из самого снимка, а не из отложенной
+  // загрузки: движок меняет фазу мгновенно, а текст подгружается следующим
+  // шагом, и рассылка, попавшая в это окно, уходила бы с пустым вопросом.
+  const card =
+    questionCard(view.questionId) ??
+    (managed.question?.id === view.questionId ? managed.question : null);
 
   // Чемпионы берутся из кеша, а обновление уходит в фон: держать рассылку
   // состояния ради похода в базу нельзя.
@@ -337,9 +580,9 @@ export function buildState(
     phaseDurationMs: view.phaseDurationMs,
     serverTime: Date.now(),
     hostId: view.hostId,
-    question: questionVisible ? (managed.question?.text ?? null) : null,
-    questionAdult: questionVisible && (managed.question?.adult ?? false),
-    players: view.players.map((player) => {
+    question: questionVisible ? (card?.text ?? null) : null,
+    questionAdult: questionVisible && (card?.adult ?? false),
+    players: trimPlayers(view.players, viewerId, view.hostId).map((player) => {
       const profile = managed.profiles.get(player.id);
       return {
         id: player.id,
@@ -349,12 +592,14 @@ export function buildState(
         roundsPlayed: player.roundsPlayed,
         hasBet: player.hasBet,
         isHost: player.isHost,
+        isGuest: profile?.guestRoomId != null,
       };
     }),
     reveal: view.reveal
       ? {
           hostAnswer: view.reveal.hostAnswer,
-          bets: view.reveal.bets.map((bet) => ({
+          betCount: view.reveal.bets.length,
+          bets: trimBets(view.reveal, viewerId).map((bet) => ({
             playerId: bet.playerId,
             bet: bet.bet,
             distance: view.reveal?.distances[bet.playerId] ?? null,
@@ -371,17 +616,77 @@ export function buildState(
     allTimeChampionId: champs.allTime,
     weekChampionId: champs.week,
     roomCode,
+    roomKind: managed.setup.kind,
+    roomTitle: managed.setup.title,
+    isScreen,
+    locked: managed.locked,
+    maxPlayers: managed.maxPlayers,
+    twitchChannel: managed.setup.twitchChannel,
+    twitchConnected: twitch?.connected(managed.key) ?? false,
     // Кнопка «Forever alone» — только хозяину пустой приватной комнаты.
     canInviteBots:
+      !isScreen &&
       managed.setup.isPrivate &&
       view.ownerId === viewerId &&
       managed.connections.size === 1 &&
       botCount === 0,
-    canManageBots: managed.setup.isPrivate && view.ownerId === viewerId,
+    canManageBots:
+      !isScreen && managed.setup.isPrivate && view.ownerId === viewerId,
     botCount,
     botLimit: BOT_LIMIT,
+    playerCount: view.players.length,
     youId: viewerId,
   };
+}
+
+/**
+ * Кого положить в снимок. Ведущий и сам зритель — всегда: без них экран врёт
+ * про то, чей ход и поставил ли ты. Остальные места достаются верхушке
+ * таблицы, а порядок сохраняется прежний — по кругу ходов.
+ */
+function trimPlayers<T extends { id: string; score: number }>(
+  players: readonly T[],
+  viewerId: string,
+  hostId: string | null,
+): readonly T[] {
+  if (players.length <= PLAYERS_IN_SNAPSHOT) return players;
+
+  const keep = new Set<string>();
+  if (hostId !== null) keep.add(hostId);
+  if (viewerId !== "") keep.add(viewerId);
+
+  for (const player of [...players].sort((a, b) => b.score - a.score)) {
+    if (keep.size >= PLAYERS_IN_SNAPSHOT) break;
+    keep.add(player.id);
+  }
+
+  return players.filter((player) => keep.has(player.id));
+}
+
+/**
+ * Какие ставки показать на вскрышке: ближайшие к ответу и своя. Промахнувшихся
+ * в сто раз не читают, а на большой комнате их сотни.
+ */
+function trimBets<T extends { playerId: string }>(
+  reveal: { bets: readonly T[]; distances: Record<string, number | null> },
+  viewerId: string,
+): readonly T[] {
+  if (reveal.bets.length <= BETS_IN_REVEAL) return reveal.bets;
+
+  const closest = [...reveal.bets].sort((a, b) => {
+    const left = reveal.distances[a.playerId];
+    const right = reveal.distances[b.playerId];
+    if (left === null || left === undefined) return 1;
+    if (right === null || right === undefined) return -1;
+    return left - right;
+  });
+
+  const keep = new Set(
+    closest.slice(0, BETS_IN_REVEAL).map((bet) => bet.playerId),
+  );
+  if (viewerId !== "") keep.add(viewerId);
+
+  return reveal.bets.filter((bet) => keep.has(bet.playerId));
 }
 
 /** Разорвать все соединения игрока с комнатой, объяснив причину. */
@@ -407,18 +712,19 @@ async function broadcastState(
   io: IOServer,
   managed: ManagedRoom,
   director: BotDirector,
+  twitch?: TwitchBridge,
 ) {
   const sockets = await io.in(managed.key).fetchSockets();
   const botCount = director.count(managed.key);
 
   for (const socket of sockets) {
-    const user = socket.data.user as SocketUser | undefined;
-    if (!user) continue;
+    const viewer = socket.data.viewer as Viewer | undefined;
+    if (!viewer) continue;
 
     const code = socket.data.roomCode as string | null | undefined;
     socket.emit(
       SERVER_EVENT.state,
-      buildState(managed, user.id, code ?? null, botCount),
+      buildState(managed, viewer, code ?? null, botCount, twitch),
     );
   }
 }
@@ -496,6 +802,12 @@ function readNumber(payload: unknown): number | null {
   const count = Math.trunc(Number(value));
 
   return Number.isFinite(count) && count > 0 ? count : null;
+}
+
+/** Достать логическое поле из полезной нагрузки события. */
+function readBoolean(payload: unknown, field: string): boolean {
+  if (typeof payload !== "object" || payload === null) return false;
+  return (payload as Record<string, unknown>)[field] === true;
 }
 
 /** Достать строковое поле из полезной нагрузки события. */

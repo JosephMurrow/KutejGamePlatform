@@ -227,6 +227,7 @@ export class BotDirector {
     for (const seat of seats) {
       managed.profiles.set(seat.userId, {
         id: seat.userId,
+        guestRoomId: null,
         nickname: seat.nickname,
         avatarId: seat.avatarId,
       });

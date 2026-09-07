@@ -10,6 +10,11 @@ export interface SocketUser {
   id: string;
   nickname: string;
   avatarId: number;
+  /**
+   * Комната гостя. У полноценного игрока — null: он ходит куда хочет, гость же
+   * заведён ради одной комнаты и в другие не попадает даже с валидной сессией.
+   */
+  guestRoomId: string | null;
 }
 
 /** Разбор заголовка Cookie без внешних зависимостей. */
@@ -46,6 +51,7 @@ export async function authenticateSocket(
       nickname: true,
       avatarId: true,
       sessionsValidFrom: true,
+      guestRoomId: true,
     },
   });
 
@@ -54,5 +60,10 @@ export async function authenticateSocket(
   // Сессия, выданная до смены пароля, за стол не пускает.
   if (!sessionAlive(claims.issuedAt, user.sessionsValidFrom)) return null;
 
-  return { id: user.id, nickname: user.nickname, avatarId: user.avatarId };
+  return {
+    id: user.id,
+    nickname: user.nickname,
+    avatarId: user.avatarId,
+    guestRoomId: user.guestRoomId,
+  };
 }

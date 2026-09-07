@@ -1,5 +1,6 @@
 import type { Bet } from "@/lib/game/bet";
 import type { EndMode, PauseReason, Phase } from "@/lib/game/room";
+import type { RoomKind } from "./room-settings";
 
 /**
  * Контракт сокетов: типы делят клиент и сервер, поэтому здесь не должно быть
@@ -29,6 +30,12 @@ export const CLIENT_EVENT = {
   kick: "room:kick",
   /** Хозяин начинает новую партию после финального экрана. */
   restart: "room:restart",
+  /** Хозяин закрывает ставки досрочно и открывает вскрышку. */
+  closeBetting: "round:close",
+  /** Хозяин закрывает или открывает набор в комнату. */
+  lock: "room:lock",
+  /** Хозяин переименовывает гостя, не выгоняя его из партии. */
+  rename: "room:rename",
   /** «Forever alone»: набить комнату ботами. */
   fillBots: "room:bots",
   dismissBots: "room:bots:out",
@@ -36,6 +43,19 @@ export const CLIENT_EVENT = {
 
 /** Имя параметра подключения с кодом приватной комнаты. */
 export const ROOM_QUERY = "room";
+
+/**
+ * Сорт подключения. Обычное — игрок за столом; `screen` — вид «экран»: он
+ * подписан на комнату, но не садится в круг ходов и не знает ни одного секрета.
+ */
+export const VIEW_QUERY = "view";
+export const SCREEN_VIEW = "screen";
+
+/**
+ * Ключ вида «экран». Браузерный источник OBS ходит со своей пустой банкой кук,
+ * сессии у него нет — пропуском служит ключ комнаты в адресе.
+ */
+export const KEY_QUERY = "key";
 
 export interface PlayerPayload {
   id: string;
@@ -46,6 +66,8 @@ export interface PlayerPayload {
   /** Поставил ли в текущем раунде. Сама ставка до вскрышки не приходит. */
   hasBet: boolean;
   isHost: boolean;
+  /** Гость: хозяин может его переименовать, не выкидывая из партии. */
+  isGuest: boolean;
 }
 
 export interface RevealBetPayload {
@@ -58,7 +80,14 @@ export interface RevealBetPayload {
 
 export interface RevealPayload {
   hostAnswer: Bet;
+  /**
+   * Ставки. На большой комнате это не все ставки, а ближайшие к ответу плюс
+   * твоя собственная: двести строк подряд никто не читает, а рассылать их
+   * каждому — квадрат от числа игроков.
+   */
   bets: RevealBetPayload[];
+  /** Сколько ставок было на самом деле. */
+  betCount: number;
 }
 
 export interface RoomStatePayload {
@@ -80,7 +109,13 @@ export interface RoomStatePayload {
    */
   question: string | null;
   questionAdult: boolean;
+  /**
+   * Состав. На большой комнате — верхушка таблицы, ты сам и ведущий, а не все
+   * подряд: полный список никто не читает, а весит он на каждой рассылке.
+   */
   players: PlayerPayload[];
+  /** Сколько игроков за столом на самом деле. */
+  playerCount: number;
   /** Заполнено только в фазе вскрышки. */
   reveal: RevealPayload | null;
   /** Почему комната стоит: только в фазе ожидания. */
@@ -101,6 +136,23 @@ export interface RoomStatePayload {
   weekChampionId: string | null;
   /** Код приватной комнаты для ссылки-приглашения; в общей — null. */
   roomCode: string | null;
+  /** Какого рода комната. У общего зала экрана нет, поэтому там `private`. */
+  roomKind: RoomKind;
+  /** Название комнаты: рисуется на экране. У общей и у обычной своей — null. */
+  roomTitle: string | null;
+  /**
+   * Смотрит ли это подключение экраном. У экрана нет места за столом, `youId`
+   * пустой, а вопрос приходит только после открытия всем.
+   */
+  isScreen: boolean;
+  /** Закрыт ли набор в комнату. */
+  locked: boolean;
+  /** Потолок числа игроков; null — без ограничения. */
+  maxPlayers: number | null;
+  /** Канал Твича, чей чат слушает комната; null — не слушает. */
+  twitchChannel: string | null;
+  /** Есть ли связь с чатом Твича прямо сейчас. */
+  twitchConnected: boolean;
   /**
    * Можно ли позвать компанию по кнопке «Forever alone»: только хозяину пустой
    * приватной комнаты. Как только заходит живой игрок, кнопка пропадает.

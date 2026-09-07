@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Brand } from "@/components/Brand";
 import { LeaderboardModal } from "@/components/leaderboard/LeaderboardModal";
 import { UserMenu } from "@/components/UserMenu";
@@ -22,15 +22,40 @@ export function GameRoom({
   nickname,
   avatarId,
   roomCode,
+  screenKey,
+  isGuest = false,
 }: {
   nickname: string;
   avatarId: number;
   /** Код приватной комнаты; без него садимся в общую. */
   roomCode?: string;
+  /** Ключ вида «экран». Страница отдаёт его только хозяину комнаты. */
+  screenKey?: string;
+  /** Гость стримерской комнаты: рейтинг и переходы ему закрыты. */
+  isGuest?: boolean;
 }) {
   const room = useGameRoom(roomCode);
   const state = room.state;
   const [ratingOpen, setRatingOpen] = useState(false);
+  const actionRef = useRef<HTMLDivElement | null>(null);
+
+  const phase = state?.phase ?? null;
+  const actionable = needsInput(state);
+
+  // Началась фаза, где надо что-то ввести, — подтягиваем экран к полю. Только
+  // если его не видно: насильную прокрутку из чата в 1.01 уже убирали (B3), и
+  // повторять ту же ошибку в соседнем месте незачем.
+  useEffect(() => {
+    if (!actionable) return;
+
+    const node = actionRef.current;
+    if (!node) return;
+
+    const box = node.getBoundingClientRect();
+    if (box.top >= 0 && box.bottom <= window.innerHeight) return;
+
+    node.scrollIntoView({ behavior: "smooth", block: "center" });
+  }, [phase, actionable]);
 
   return (
     <div className="mx-auto flex w-full max-w-5xl flex-1 flex-col gap-4 px-4 py-5">
@@ -42,7 +67,8 @@ export function GameRoom({
         <UserMenu
           nickname={nickname}
           avatarId={avatarId}
-          onLeaderboard={() => setRatingOpen(true)}
+          isGuest={isGuest}
+          onLeaderboard={isGuest ? undefined : () => setRatingOpen(true)}
         />
       </header>
 
@@ -54,20 +80,24 @@ export function GameRoom({
       {room.kicked ? (
         <div className="flex flex-1 flex-col items-center justify-center gap-4 text-center">
           <p className="text-lg font-semibold">{room.kicked}</p>
-          <div className="flex flex-col gap-2 sm:flex-row">
-            <Link
-              href="/play"
-              className="rounded-lg bg-crimson px-5 py-2.5 text-sm font-semibold text-paper transition hover:bg-deep"
-            >
-              В общую комнату
-            </Link>
-            <Link
-              href="/rooms/new"
-              className="rounded-lg border border-line bg-paper px-5 py-2.5 text-sm font-semibold transition hover:border-crimson hover:text-crimson"
-            >
-              Создать свою
-            </Link>
-          </div>
+
+          {/* Гостю идти некуда: ни общего зала, ни своей комнаты у него нет. */}
+          {!isGuest && (
+            <div className="flex flex-col gap-2 sm:flex-row">
+              <Link
+                href="/play"
+                className="rounded-lg bg-crimson px-5 py-2.5 text-sm font-semibold text-paper transition hover:bg-deep"
+              >
+                В общую комнату
+              </Link>
+              <Link
+                href="/rooms/new"
+                className="rounded-lg border border-line bg-paper px-5 py-2.5 text-sm font-semibold transition hover:border-crimson hover:text-crimson"
+              >
+                Создать свою
+              </Link>
+            </div>
+          )}
         </div>
       ) : null}
 
@@ -89,28 +119,42 @@ export function GameRoom({
         </p>
       ) : (
         <div className="grid items-start gap-4 lg:grid-cols-[1fr_300px]">
-          <section className="flex flex-col gap-4">
+          {/*
+            `min-w-0` обязателен обеим колонкам: у элемента сетки минимальная
+            ширина по умолчанию равна ширине его содержимого, и любая длинная
+            строка внутри (ник, ссылка, сумма) распирает колонку шире экрана.
+            Без этого `truncate` внутри не срабатывает вовсе — ужиматься некуда.
+          */}
+          <section className="flex min-w-0 flex-col gap-4">
             <PhaseCard state={state} clockOffset={room.clockOffset} />
             <QuestionCard state={state} />
-            <ActionArea
-              state={state}
-              onRead={room.confirmRead}
-              onAnswer={room.submitAnswer}
-              onBet={room.placeBet}
-              onRestart={() => void room.restart()}
-              onInviteBots={() => void room.inviteBots()}
-            />
+            <div ref={actionRef}>
+              <ActionArea
+                state={state}
+                onRead={room.confirmRead}
+                onAnswer={room.submitAnswer}
+                onBet={room.placeBet}
+                onRestart={() => void room.restart()}
+                onCloseBetting={() => void room.closeBetting()}
+                onInviteBots={() => void room.inviteBots()}
+              />
+            </div>
           </section>
 
-          <aside className="flex flex-col gap-4">
+          <aside className="flex min-w-0 flex-col gap-4">
             <RoomPanel
               state={state}
+              screenKey={screenKey}
               onInviteBots={(count) => void room.inviteBots(count)}
               onDismissBots={() => void room.dismissBots()}
+              onLock={(locked) => void room.setLocked(locked)}
             />
             <PlayerList
               state={state}
               onKick={(playerId) => void room.kick(playerId)}
+              onRename={(playerId, nickname) =>
+                void room.renamePlayer(playerId, nickname)
+              }
             />
             <Chat
               messages={room.chat}
@@ -137,10 +181,18 @@ function PhaseCard({
 
   return (
     <div className="flex flex-col gap-3 rounded-2xl border border-line bg-paper p-4">
+      {/*
+        Ник ведущего ужимается, а не распирает строку. С `shrink-0` длинный ник
+        вроде «~*~ТУМАННЫЙ_ГЛЕБ~*~» растягивал карточку шире экрана, а вместе с
+        ней и всю колонку: на телефоне страница начинала ездить вбок, и правые
+        края кнопок ставки оказывались за краем экрана.
+      */}
       <div className="flex items-baseline justify-between gap-3">
-        <h1 className="text-lg font-semibold">{title(state, isHost)}</h1>
+        <h1 className="shrink-0 text-lg font-semibold">
+          {title(state, isHost)}
+        </h1>
         {host && !isHost && (
-          <span className="shrink-0 text-xs text-muted">
+          <span className="min-w-0 truncate text-xs text-muted">
             ведёт {host.nickname}
           </span>
         )}
@@ -189,6 +241,7 @@ function ActionArea({
   onAnswer,
   onBet,
   onRestart,
+  onCloseBetting,
   onInviteBots,
 }: {
   state: RoomStatePayload;
@@ -196,6 +249,7 @@ function ActionArea({
   onAnswer: (bet: Bet) => Promise<void>;
   onBet: (bet: Bet) => Promise<void>;
   onRestart: () => void;
+  onCloseBetting: () => void;
   onInviteBots: () => void;
 }) {
   const isHost = state.hostId === state.youId;
@@ -207,7 +261,7 @@ function ActionArea({
       // делать, вместо безнадёжного «ждём второго игрока».
       const aloneInGlobal =
         state.roomCode === null &&
-        state.players.length === 1 &&
+        state.playerCount === 1 &&
         state.pauseReason !== "no_questions";
 
       if (aloneInGlobal) return <LonelyNotice />;
@@ -269,14 +323,12 @@ function ActionArea({
         </div>
       );
 
-    case "betting":
-      if (isHost) {
-        return <Notice>Игроки делают ставки. Ты уже всё сказал.</Notice>;
-      }
-      if (you?.hasBet) {
-        return <Notice>Ставка принята. Ждём остальных.</Notice>;
-      }
-      return (
+    case "betting": {
+      const own = isHost ? (
+        <Notice>Игроки делают ставки. Ты уже всё сказал.</Notice>
+      ) : you?.hasBet ? (
+        <Notice>Ставка принята. Ждём остальных.</Notice>
+      ) : (
         <div className="flex flex-col gap-3 rounded-2xl border border-line bg-paper p-5">
           <p className="text-sm text-muted">
             За сколько на это согласился бы ведущий? Ставка одна, переиграть
@@ -286,11 +338,57 @@ function ActionArea({
         </div>
       );
 
+      // Хозяину — досрочное вскрытие. Правило «закрываем, когда поставили все»
+      // на толпе не срабатывает никогда: кто-нибудь зашёл и молчит, и партию
+      // держит один таймер.
+      if (state.ownerId !== state.youId) return own;
+
+      const waiting = state.players.filter(
+        (player) => player.id !== state.hostId && !player.hasBet,
+      ).length;
+
+      return (
+        <div className="flex flex-col gap-3">
+          {own}
+          <button
+            type="button"
+            onClick={onCloseBetting}
+            className="rounded-xl border border-line bg-paper px-4 py-3 text-sm font-semibold transition hover:border-crimson hover:text-crimson"
+          >
+            {waiting === 0
+              ? "Вскрываем"
+              : `Вскрываем, не дожидаясь остальных (${waiting})`}
+          </button>
+        </div>
+      );
+    }
+
     case "reveal":
       return <Reveal state={state} />;
 
     case "finished":
       return <Finished state={state} onRestart={onRestart} />;
+  }
+}
+
+/**
+ * Есть ли прямо сейчас что вводить. Подсказка «ведущий вписывает сумму» вводом
+ * не считается — подтягивать к ней экран было бы навязчиво.
+ */
+function needsInput(state: RoomStatePayload | null): boolean {
+  if (state === null) return false;
+
+  const isHost = state.hostId === state.youId;
+  const you = state.players.find((player) => player.id === state.youId);
+
+  switch (state.phase) {
+    case "ready":
+    case "host_answer":
+      return isHost;
+    case "betting":
+      return !isHost && !(you?.hasBet ?? false);
+    default:
+      return false;
   }
 }
 

@@ -1,4 +1,5 @@
-import { randomInt } from "node:crypto";
+import { randomBytes, randomInt } from "node:crypto";
+import { normalizeChannel } from "@/server/twitch/chat";
 import type { EndMode } from "../game/room";
 import { dropScores } from "../game/store";
 import { prisma } from "../prisma";
@@ -9,7 +10,22 @@ import {
   type QuestionModeDb,
 } from "../questions/modes";
 import { dropQuestionQueue } from "../questions/store";
-import { parseRevealMs } from "@/shared/room-settings";
+import {
+  defaultRotation,
+  kindDbValue,
+  normalizeTitle,
+  parseKind,
+  parseRevealMs,
+  MAX_PLAYERS_LIMIT,
+  MIN_PLAYERS_LIMIT,
+  parseRotation,
+  ROOM_CODE_LENGTH,
+  rotationDbValue,
+  type HostRotation,
+  type HostRotationDb,
+  type RoomKind,
+  type RoomKindDb,
+} from "@/shared/room-settings";
 
 /**
  * Приватные комнаты: создание, разбор ссылки-приглашения и уборка опустевших
@@ -18,7 +34,6 @@ import { parseRevealMs } from "@/shared/room-settings";
 
 /** Без нуля, единицы и похожих букв: код диктуют голосом. */
 const ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
-const CODE_LENGTH = 6;
 
 /** Через сколько после ухода последнего игрока комната удаляется. */
 export const EMPTY_LIFETIME_MS = 30 * 60 * 1000;
@@ -36,12 +51,26 @@ export interface PrivateRoomSettings {
   mode: QuestionMode;
   endMode: EndMode;
   endValue: number | null;
+  /** Какого рода комната: своя, стримерская или домашняя. */
+  kind: RoomKind;
+  /** Название комнаты: рисуется на экране. У обычной приватной его нет. */
+  title: string | null;
+  /** Кто ведёт раунды. */
+  hostRotation: HostRotation;
+  /** Набор закрыт: новых за стол не пускают. */
+  locked: boolean;
+  /** Больше этого числа за стол не сажаем. null — без ограничения. */
+  maxPlayers: number | null;
+  /** Канал Твича, чей чат слушает комната. */
+  twitchChannel: string | null;
 }
 
 export interface PrivateRoomInfo extends PrivateRoomSettings {
   id: string;
   code: string;
   hostId: string;
+  /** Ключ вида «экран»: по нему туда пускают без сессии. */
+  screenKey: string;
 }
 
 const MODE_TO_DB = {
@@ -69,6 +98,12 @@ export async function createPrivateRoom(
         data: {
           code,
           hostId,
+          kind: kindDbValue(settings.kind),
+          title: settings.title,
+          hostRotation: rotationDbValue(settings.hostRotation),
+          maxPlayers: settings.maxPlayers,
+          twitchChannel: settings.twitchChannel,
+          screenKey: generateScreenKey(),
           bettingMs: settings.bettingMs,
           revealMs: settings.revealMs,
           includeAdult: settings.includeAdult,
@@ -132,10 +167,18 @@ export async function staleRoomIds(now: Date): Promise<string[]> {
 
 export function generateCode(): string {
   let code = "";
-  for (let i = 0; i < CODE_LENGTH; i++) {
+  for (let i = 0; i < ROOM_CODE_LENGTH; i++) {
     code += ALPHABET[randomInt(ALPHABET.length)];
   }
   return code;
+}
+
+/**
+ * Ключ вида «экран». Диктовать его не надо — он живёт в адресе, который
+ * копируют, — поэтому берём просто случайные байты, а не короткий алфавит.
+ */
+export function generateScreenKey(): string {
+  return randomBytes(16).toString("hex");
 }
 
 /** Настройки из формы: всё за пределами разумного отбрасывается. */
@@ -146,6 +189,11 @@ export function normalizeSettings(input: {
   mode?: unknown;
   endMode?: unknown;
   endValue?: unknown;
+  kind?: unknown;
+  title?: unknown;
+  hostRotation?: unknown;
+  maxPlayers?: unknown;
+  twitchChannel?: unknown;
 }): PrivateRoomSettings {
   const bettingMs = clamp(
     Number(input.bettingMs) || 300_000,
@@ -164,6 +212,8 @@ export function normalizeSettings(input: {
       ? null
       : clamp(Math.trunc(rawValue), 1, MAX_END_VALUE);
 
+  const kind = parseKind(input.kind);
+
   return {
     bettingMs,
     revealMs: parseRevealMs(input.revealMs),
@@ -171,6 +221,22 @@ export function normalizeSettings(input: {
     mode: parseMode(input.mode),
     endMode,
     endValue,
+    kind,
+    // Название есть только у комнат с экраном: у обычной приватной его негде
+    // показать, и хранить его там значило бы обещать несуществующее.
+    title: kind === "private" ? null : normalizeTitle(input.title),
+    hostRotation:
+      input.hostRotation === undefined
+        ? defaultRotation(kind)
+        : parseRotation(input.hostRotation),
+    // Замок при создании всегда открыт: закрывать пустую комнату бессмысленно.
+    locked: false,
+    maxPlayers: parseMaxPlayers(input.maxPlayers),
+    // Канал есть только у стримерской: домашней он ни к чему.
+    twitchChannel:
+      kind === "stream" && typeof input.twitchChannel === "string"
+        ? normalizeChannel(input.twitchChannel)
+        : null,
   };
 }
 
@@ -178,10 +244,36 @@ function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
 }
 
+/** Лимит игроков из формы. Пусто и мусор означают «без ограничения». */
+function parseMaxPlayers(value: unknown): number | null {
+  const limit = Math.trunc(Number(value));
+  if (!Number.isFinite(limit) || limit <= 0) return null;
+
+  return clamp(limit, MIN_PLAYERS_LIMIT, MAX_PLAYERS_LIMIT);
+}
+
+/** Хозяин закрывает или открывает набор. */
+export async function setRoomLocked(
+  roomId: string,
+  locked: boolean,
+): Promise<void> {
+  await prisma.privateRoom.updateMany({
+    where: { id: roomId },
+    data: { locked },
+  });
+}
+
 function toInfo(room: {
   id: string;
   code: string;
   hostId: string;
+  kind: RoomKindDb;
+  title: string | null;
+  screenKey: string;
+  hostRotation: HostRotationDb;
+  locked: boolean;
+  maxPlayers: number | null;
+  twitchChannel: string | null;
   bettingMs: number;
   revealMs: number;
   includeAdult: boolean;
@@ -193,6 +285,13 @@ function toInfo(room: {
     id: room.id,
     code: room.code,
     hostId: room.hostId,
+    kind: parseKind(room.kind),
+    title: room.title,
+    screenKey: room.screenKey,
+    hostRotation: parseRotation(room.hostRotation),
+    locked: room.locked,
+    maxPlayers: room.maxPlayers,
+    twitchChannel: room.twitchChannel,
     bettingMs: room.bettingMs,
     revealMs: room.revealMs,
     includeAdult: room.includeAdult,

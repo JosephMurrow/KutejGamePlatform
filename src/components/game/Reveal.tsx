@@ -38,6 +38,13 @@ export function Reveal({ state }: { state: RoomStatePayload }) {
 
       <Outcome bets={sorted} players={players} />
 
+      {reveal.betCount > sorted.length && (
+        <p className="text-center text-xs text-muted">
+          Показаны {sorted.length} ставок из {reveal.betCount} — ближайшие к
+          ответу и твоя.
+        </p>
+      )}
+
       {sorted.length > 0 && (
         <ul className="flex flex-col gap-2">
           {sorted.map((bet, index) => {

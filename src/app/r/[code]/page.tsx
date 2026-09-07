@@ -2,10 +2,12 @@ import type { Metadata } from "next";
 import { notFound, redirect } from "next/navigation";
 import { BRAND } from "@/components/Brand";
 import { GameRoom } from "@/components/game/GameRoom";
+import { GuestGate } from "@/components/rooms/GuestGate";
 import { HardcoreGate } from "@/components/rooms/HardcoreGate";
 import { getCurrentUser } from "@/lib/auth/session";
 import { isHardcore } from "@/lib/questions/modes";
 import { findPrivateRoom } from "@/lib/rooms/private";
+import { allowsGuests } from "@/shared/room-settings";
 
 export const metadata: Metadata = {
   title: `Своя комната — ${BRAND}`,
@@ -17,15 +19,26 @@ export default async function PrivateRoomPage({
   params: Promise<{ code: string }>;
 }) {
   const { code } = await params;
-  const user = await getCurrentUser();
-
-  // Незалогиненного отправляем на вход и возвращаем сюда же.
-  if (!user) {
-    redirect(`/login?next=${encodeURIComponent(`/r/${code}`)}`);
-  }
 
   const room = await findPrivateRoom(code);
   if (!room) {
+    notFound();
+  }
+
+  const user = await getCurrentUser();
+
+  if (!user) {
+    // В стримерскую пускают гостем: зритель не пойдёт регистрироваться ради
+    // одного раунда. В остальные — только по аккаунту, как и было.
+    if (allowsGuests(room.kind)) {
+      return <GuestGate code={room.code} title={room.title} />;
+    }
+
+    redirect(`/login?next=${encodeURIComponent(`/r/${code}`)}`);
+  }
+
+  // Гость чужой комнаты: своя у него одна, и это не она.
+  if (user.isGuest && user.guestRoomId !== room.id) {
     notFound();
   }
 
@@ -34,6 +47,10 @@ export default async function PrivateRoomPage({
       nickname={user.nickname}
       avatarId={user.avatarId}
       roomCode={room.code}
+      isGuest={user.isGuest}
+      // Ключ экрана — хозяину и только ему: остальным он ни к чему, а лишний
+      // раз раздавать пропуск незачем.
+      screenKey={user.id === room.hostId ? room.screenKey : undefined}
     />
   );
 

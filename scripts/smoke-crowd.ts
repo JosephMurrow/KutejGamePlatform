@@ -91,14 +91,22 @@ async function main() {
   const last = watcher.states.at(-1);
 
   console.log("\nСостав комнаты");
+  // Считаем по playerCount, а не по длине списка: на большой комнате в снимок
+  // едет верхушка таблицы, а не все подряд (см. docs/BACKLOG.md N4).
   check(
     "все игроки за столом",
-    last?.players.length === COUNT,
-    `${last?.players.length} из ${COUNT}`,
+    last?.playerCount === COUNT,
+    `${last?.playerCount} из ${COUNT}`,
   );
   check(
-    "дублей в составе нет",
-    new Set(last?.players.map((player) => player.id)).size === COUNT,
+    "дублей в присланном составе нет",
+    new Set(last?.players.map((player) => player.id)).size ===
+      last?.players.length,
+  );
+  check(
+    "снимок не тащит весь зал",
+    (last?.players.length ?? 0) <= Math.min(COUNT, 13),
+    `в снимке ${last?.players.length} из ${COUNT}`,
   );
   check(
     "рассылка дошла до каждого",
@@ -122,8 +130,8 @@ async function main() {
   const expected = COUNT - leaving.length;
   check(
     "состав уменьшился ровно на ушедших",
-    after?.players.length === expected,
-    `${after?.players.length} из ${expected}`,
+    after?.playerCount === expected,
+    `${after?.playerCount} из ${expected}`,
   );
   check("игра не встала", after?.phase !== "waiting", after?.phase);
 

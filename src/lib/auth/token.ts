@@ -21,8 +21,14 @@ function secretKey(): Uint8Array {
 export async function signSessionToken(
   userId: string,
   maxAgeSeconds: number,
+  /**
+   * Гостевая сессия. Признак живёт в самом токене, потому что `proxy.ts`
+   * намеренно не ходит в базу: без него быстрая развилка не смогла бы отличить
+   * гостя от полноценного игрока, а гостю закрыты и общий зал, и рейтинг.
+   */
+  guest = false,
 ): Promise<string> {
-  return new SignJWT({})
+  return new SignJWT(guest ? { guest: true } : {})
     .setProtectedHeader({ alg: ALGORITHM })
     .setSubject(userId)
     .setIssuedAt()
@@ -34,6 +40,8 @@ export interface SessionClaims {
   userId: string;
   /** Когда токен выдан. Нужен, чтобы отличить сессию до смены пароля от новой. */
   issuedAt: Date;
+  /** Гостевая сессия: одноразовый профиль одной комнаты. */
+  guest: boolean;
 }
 
 /**
@@ -58,6 +66,7 @@ export async function readSessionClaims(
     return {
       userId: payload.sub,
       issuedAt: new Date((payload.iat ?? 0) * 1000),
+      guest: payload.guest === true,
     };
   } catch {
     return null;
@@ -69,6 +78,13 @@ export async function readSessionToken(
   token: string | undefined,
 ): Promise<string | null> {
   return (await readSessionClaims(token))?.userId ?? null;
+}
+
+/** Гостевая ли сессия. Развилка для `proxy.ts`, без похода в базу. */
+export async function readSessionGuest(
+  token: string | undefined,
+): Promise<boolean> {
+  return (await readSessionClaims(token))?.guest ?? false;
 }
 
 /**

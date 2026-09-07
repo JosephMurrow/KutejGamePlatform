@@ -29,7 +29,12 @@ export {
  */
 
 /** Только живые игроки: боты в зачёт не идут. */
-const HUMAN = { isBot: false } as const;
+/**
+ * Кого показываем в общем рейтинге. Гостевые очки живут под ключом своей
+ * комнаты и сюда не дотянулись бы и так, но одна забытая выборка — и
+ * одноразовый ник окажется в общей таблице.
+ */
+const HUMAN = { isBot: false, isGuest: false } as const;
 
 export async function loadLeaderboard(
   period: LeaderboardPeriod,

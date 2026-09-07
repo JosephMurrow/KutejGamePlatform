@@ -24,6 +24,28 @@ export interface QuestionCard {
 }
 
 /**
+ * Тексты вопросов в памяти процесса.
+ *
+ * Снимок комнаты собирается синхронно, а вопрос лежит в базе. Без кеша между
+ * сменой фазы и подгрузкой текста остаётся окно, в котором ведущему уходит
+ * состояние с пустым вопросом — и он видит «вопрос видит только ведущий» на
+ * своём же ходу, пока не придёт следующая рассылка.
+ *
+ * Пул маленький (около тысячи строк по сотне символов) и общий на все комнаты,
+ * поэтому держим его целиком и не мудрим с вытеснением.
+ */
+const cards = new Map<string, QuestionCard>();
+
+/** Вопрос из кеша. Синхронно — за этим кеш и заведён. */
+export function questionCard(id: string | null): QuestionCard | null {
+  return id === null ? null : (cards.get(id) ?? null);
+}
+
+function remember(list: readonly QuestionCard[]): void {
+  for (const card of list) cards.set(card.id, card);
+}
+
+/**
  * Очередь комнаты: поднимаем сохранённый порядок, если он есть и собран с теми
  * же режимом и настройкой 18+. Иначе собираем свежую перемешанную — состав
  * пула изменился, и старый порядок больше ничего не значит.
@@ -40,9 +62,13 @@ export async function loadQuestionQueue(
       // остаться вообще без вопросов.
       ...(adultChoiceApplies(mode) && !includeAdult ? { adult: false } : {}),
     },
-    select: { id: true },
+    select: { id: true, text: true, adult: true },
     orderBy: { createdAt: "asc" },
   });
+
+  // Тексты всё равно приехали — кладём их в кеш, чтобы снимок комнаты потом
+  // собирался без похода в базу.
+  remember(questions);
 
   const ids = questions.map((question) => question.id);
   const saved = await prisma.roomQuestionQueue.findUnique({
@@ -86,8 +112,14 @@ export async function dropQuestionQueue(roomKey: string): Promise<void> {
 export async function getQuestionCard(
   id: string,
 ): Promise<QuestionCard | null> {
-  return prisma.question.findUnique({
+  const cached = questionCard(id);
+  if (cached) return cached;
+
+  const card = await prisma.question.findUnique({
     where: { id },
     select: { id: true, text: true, adult: true },
   });
+
+  if (card) remember([card]);
+  return card;
 }

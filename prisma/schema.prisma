@@ -135,6 +135,26 @@ model RoomQuestionQueue {
   @@map("room_question_queues")
 }
 
+/// Какого рода комната. От этого зависит, есть ли у неё вид «экран», пускают ли
+/// туда гостей и как выглядит приглашение (см. docs/BACKLOG.md Q4).
+enum RoomKind {
+  /// Своя комната по ссылке: как было до 1.04.
+  PRIVATE
+  /// Стримерская: код показывают в эфире, вход гостем, экран уходит в трансляцию.
+  STREAM
+  /// Домашняя: картинка на телевизоре, вход только по аккаунту.
+  HOME
+}
+
+/// Кто ведёт раунды.
+enum HostRotation {
+  /// По кругу в порядке входа, как в общем зале.
+  CIRCLE
+  /// Всегда хозяин комнаты. Круг ходов рассыпается на аудитории: двести
+  /// зрителей по шесть минут дают свой ход раз в двадцать часов.
+  OWNER
+}
+
 /// Чем заканчивается партия в приватной комнате.
 enum RoomEndMode {
   /// Играем, пока хост не остановит.
@@ -154,19 +174,40 @@ model PrivateRoom {
   hostId String
   host   User   @relation("HostedRooms", fields: [hostId], references: [id], onDelete: Cascade)
 
+  /// Какого рода комната.
+  kind      RoomKind @default(PRIVATE)
+  /// Название комнаты: рисуется на экране. У обычной приватной пусто.
+  title     String?
+  /// Ключ вида «экран». Браузерный источник OBS ходит со своей пустой банкой
+  /// кук, нашей сессии у него нет, — поэтому экран открывается по ключу в
+  /// адресе. Утечка ключа не страшна: на экране нет секретов.
+  screenKey String   @unique
+
   /// Длительность фазы ставок, мс.
-  bettingMs    Int          @default(300000)
+  bettingMs     Int          @default(300000)
   /// Сколько показывать вскрышку, мс.
-  revealMs     Int          @default(30000)
-  includeAdult Boolean      @default(true)
-  mode         QuestionMode @default(NORMAL)
-  endMode      RoomEndMode  @default(ENDLESS)
+  revealMs      Int          @default(30000)
+  includeAdult  Boolean      @default(true)
+  mode          QuestionMode @default(NORMAL)
+  /// Кто ведёт раунды.
+  hostRotation  HostRotation @default(CIRCLE)
+  /// Набор закрыт: код висит в эфире, и в какой-то момент новых пускать хватит.
+  locked        Boolean      @default(false)
+  /// Больше этого числа за стол не сажаем. null — без ограничения.
+  maxPlayers    Int?
+  /// Канал Твича, чей чат слушает комната. Чтение анонимно, разрешений не
+  /// требует — достаточно имени (см. docs/BACKLOG.md P1).
+  twitchChannel String?
+  endMode       RoomEndMode  @default(ENDLESS)
   /// Сколько раундов или очков до конца партии.
-  endValue     Int?
+  endValue      Int?
 
   createdAt  DateTime  @default(now())
   /// Когда комната опустела. Через полчаса после этого её удаляют.
   emptySince DateTime?
+
+  /// Гости этой комнаты. Умирают вместе с ней: каскад уносит и их ставки.
+  guests User[] @relation("Guests")
 
   @@index([emptySince])
   @@map("private_rooms")
@@ -239,6 +280,14 @@ model User {
   /// Бот из режима «Forever alone»: войти под ним нельзя.
   isBot Boolean @default(false)
 
+  /// Гость стримерской комнаты: одноразовый профиль без пароля и без почты.
+  /// В общий зал, в рейтинг и в профиль он не ходит, а живёт не дольше своей
+  /// комнаты (см. docs/BACKLOG.md O3).
+  isGuest     Boolean      @default(false)
+  /// Комната, ради которой гость заведён. Больше он никуда не ходит.
+  guestRoomId String?
+  guestRoom   PrivateRoom? @relation("Guests", fields: [guestRoomId], references: [id], onDelete: Cascade)
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -248,5 +297,6 @@ model User {
   bets         RoundBet[]
   scores       Score[]
 
+  @@index([guestRoomId])
   @@map("users")
 }

@@ -20,8 +20,10 @@
     "db:studio": "prisma studio",
     "db:seed": "prisma db seed",
     "postinstall": "prisma generate",
+    "audit:questions": "node --import tsx scripts/audit-questions.ts",
     "db:rename-questions": "node --env-file-if-exists=.env --import tsx scripts/rename-questions.ts",
-    "mail:check": "node --env-file-if-exists=.env --import tsx scripts/mail-check.ts"
+    "mail:check": "node --env-file-if-exists=.env --import tsx scripts/mail-check.ts",
+    "twitch:check": "node --import tsx scripts/twitch-check.ts"
   },
   "dependencies": {
     "@node-rs/argon2": "^2.1.0",

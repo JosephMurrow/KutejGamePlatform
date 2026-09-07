@@ -53,6 +53,13 @@ export default async function Home() {
             </div>
 
             <Link
+              href="/join"
+              className="text-sm text-muted underline-offset-4 transition hover:text-crimson hover:underline"
+            >
+              Зайти по коду
+            </Link>
+
+            <Link
               href="/profile"
               className="flex items-center gap-3 rounded-2xl border border-line bg-paper px-4 py-2.5 transition hover:border-crimson"
             >
@@ -80,6 +87,16 @@ export default async function Home() {
               Войти
             </Link>
           </div>
+        )}
+
+        {/* Код с телевизора или из трансляции: ссылку оттуда не кликнешь. */}
+        {!user && (
+          <Link
+            href="/join"
+            className="text-sm text-muted underline-offset-4 transition hover:text-crimson hover:underline"
+          >
+            Позвали в комнату? Зайти по коду
+          </Link>
         )}
       </section>
 

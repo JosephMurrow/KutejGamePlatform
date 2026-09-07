@@ -11,12 +11,15 @@ export function Countdown({
   durationMs,
   clockOffset,
   urgent = false,
+  big = false,
 }: {
   deadline: number | null;
   durationMs: number | null;
   clockOffset: number;
   /** Подсветить, когда времени в обрез: для коротких фаз ведущего. */
   urgent?: boolean;
+  /** Крупный вариант — для вида «экран»: его читают с дивана, а не с руки. */
+  big?: boolean;
 }) {
   // Хранить оставшееся время в состоянии незачем: тикаем счётчиком, а само
   // значение считается на рендере — так оно не расходится с пропсами.
@@ -37,13 +40,17 @@ export function Countdown({
   const low = urgent || remaining <= 5000;
 
   return (
-    <div className="flex items-center gap-3">
+    <div className={`flex items-center ${big ? "gap-5" : "gap-3"}`}>
       <span
-        className={`tabular text-sm font-semibold ${low ? "text-crimson" : "text-muted"}`}
+        className={`tabular font-semibold ${big ? "text-3xl" : "text-sm"} ${
+          low ? "text-crimson" : "text-muted"
+        }`}
       >
         {format(remaining)}
       </span>
-      <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-tint">
+      <div
+        className={`${big ? "h-3" : "h-1.5"} flex-1 overflow-hidden rounded-full bg-tint`}
+      >
         <div
           className={`h-full rounded-full transition-[width] duration-200 ease-linear ${
             low ? "bg-crimson" : "bg-rose"

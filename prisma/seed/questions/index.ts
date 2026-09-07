@@ -1,6 +1,8 @@
 import { adult01 } from "./adult-01";
 import { black01 } from "./black-01";
+import { black02 } from "./black-02";
 import { crime01 } from "./crime-01";
+import { crime02 } from "./crime-02";
 import { daily01 } from "./daily-01";
 import { daily02 } from "./daily-02";
 import { daily03 } from "./daily-03";
@@ -39,5 +41,7 @@ export const QUESTIONS: QuestionSeed[] = [
   ...batch(drunk01, "DRUNK", true),
   ...batch(sex01, "SEX", true),
   ...batch(crime01, "CRIME", true),
+  ...batch(crime02, "CRIME", true),
   ...batch(black01, "BLACK", true),
+  ...batch(black02, "BLACK", true),
 ];
