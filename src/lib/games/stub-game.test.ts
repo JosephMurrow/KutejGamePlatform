@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { describe, it } from "node:test";
+import { describe, it, type TestContext } from "node:test";
 import { RoomManager, type ManagedRoom, type RoomSetup } from "@/server/rooms";
 import type { SocketUser } from "@/server/auth";
 import type {
@@ -24,13 +24,20 @@ class StubRoom implements GameRoomState {
   private readonly players: string[] = [];
   private readonly clicks = new Map<string, number>();
   /** Своя выдумка: фаза, которой платформа знать не должна. */
-  private phase: "waiting" | "clicking" = "waiting";
+  private phase: "waiting" | "clicking" | "done" = "waiting";
+  /** Своё время: платформа только заводит по нему будильник. */
+  private deadlineAt: number | null = null;
+  /** Сколько раз платформа будила движок. */
+  ticks = 0;
 
   constructor(private readonly context: GameRoomContext) {}
 
   join(playerId: string): void {
     if (!this.players.includes(playerId)) this.players.push(playerId);
-    if (this.players.length >= 2) this.phase = "clicking";
+    if (this.players.length >= 2) {
+      this.phase = "clicking";
+      this.deadlineAt = Date.now() + 5000;
+    }
     this.context.changed();
   }
 
@@ -43,6 +50,18 @@ class StubRoom implements GameRoomState {
 
   seated(): readonly string[] {
     return this.players;
+  }
+
+  deadline(): number | null {
+    return this.deadlineAt;
+  }
+
+  tick(): void {
+    this.ticks += 1;
+    this.phase = "done";
+    this.deadlineAt = null;
+    this.context.emitted([{ type: "stub_finished", clicks: this.clicks.size }]);
+    this.context.changed();
   }
 
   act(event: string, actorId: string): { accepted: boolean; reason?: string } {
@@ -209,6 +228,57 @@ describe("платформа с болванкой вместо игры", () =>
     await managed.game.act("stub:click", "a", null);
 
     assert.ok(sent.length >= before, "рассылка не остановилась");
+  });
+
+  it("заводит будильник по дедлайну движка и будит его", async (t: TestContext) => {
+    t.mock.timers.enable({ apis: ["setTimeout"] });
+    const { manager } = setup();
+
+    await manager.join(player("a", "Аня"), "stub-room", SETUP);
+    const managed = await manager.join(player("b", "Боря"), "stub-room", SETUP);
+    const room = managed.game as StubRoom;
+
+    assert.equal(room.ticks, 0, "будить раньше срока нельзя");
+    assert.notEqual(managed.game.deadline(), null, "движок ждёт побудки");
+
+    t.mock.timers.tick(5000);
+
+    assert.equal(room.ticks, 1, "платформа разбудила движок");
+    assert.equal(managed.game.snapshot({ kind: "screen" }).extra.phase, "done");
+    assert.equal(managed.game.deadline(), null, "часы остановились");
+  });
+
+  it("после закрытия комнаты будильник не срабатывает", async (t: TestContext) => {
+    t.mock.timers.enable({ apis: ["setTimeout"] });
+    const { manager } = setup();
+
+    await manager.join(player("a", "Аня"), "stub-room", SETUP);
+    const managed = await manager.join(player("b", "Боря"), "stub-room", SETUP);
+    const room = managed.game as StubRoom;
+
+    manager.close("stub-room");
+    t.mock.timers.tick(5000 * 3);
+
+    assert.equal(room.ticks, 0, "погашенная комната не просыпается");
+  });
+
+  it("пересказывает события партии подписчикам", async (t: TestContext) => {
+    t.mock.timers.enable({ apis: ["setTimeout"] });
+    const { manager } = setup();
+
+    const heard: { key: string; type: string }[] = [];
+    const off = manager.onEvents((key, events) => {
+      for (const event of events) heard.push({ key, type: event.type });
+    });
+
+    await manager.join(player("a", "Аня"), "stub-room", SETUP);
+    await manager.join(player("b", "Боря"), "stub-room", SETUP);
+    t.mock.timers.tick(5000);
+
+    assert.deepEqual(heard, [{ key: "stub-room", type: "stub_finished" }]);
+
+    // Отписка возвращается вызовом — после неё слушателя больше нет.
+    off();
   });
 
   it("гасит комнату и сообщает об этом игре", async () => {

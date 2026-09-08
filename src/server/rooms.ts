@@ -1,4 +1,5 @@
 import type {
+  GameRoomEvent,
   GameRoomState,
   GameServer,
   RoomProfile,
@@ -104,6 +105,20 @@ export class RoomManager {
   private readonly framed = new Map<string, ReturnType<typeof setTimeout>>();
   /** Когда по комнате рассылали в последний раз. */
   private readonly lastSent = new Map<string, number>();
+  /**
+   * Будильники партий: по одному на комнату. Все таймеры процесса живут здесь,
+   * поэтому и гасятся здесь же — движок только объявляет, когда его будить
+   * (docs/BACKLOG.md A3).
+   */
+  private readonly clocks = new Map<string, ReturnType<typeof setTimeout>>();
+  /**
+   * Кому пересказывать события партий. Список, а не слот: подписчиков может
+   * быть сколько угодно — лог, метрики, всё, что захочет знать о ходе игры,
+   * не заглядывая внутрь правил.
+   */
+  private readonly eventListeners = new Set<
+    (roomKey: string, events: readonly GameRoomEvent[]) => void
+  >();
   /**
    * Кого позвать, когда комнату гасят. Подписан мост в чат Твича: держать
    * подключение к каналу удалённой комнаты незачем.
@@ -246,6 +261,14 @@ export class RoomManager {
     this.leaving.delete(pendingKey);
   }
 
+  /** Подписаться на события партий. Возвращает функцию отписки. */
+  onEvents(
+    listener: (roomKey: string, events: readonly GameRoomEvent[]) => void,
+  ): () => void {
+    this.eventListeners.add(listener);
+    return () => this.eventListeners.delete(listener);
+  }
+
   /** Подписаться на закрытие комнат. Возвращает функцию отписки. */
   onClose(listener: (roomKey: string) => void): () => void {
     this.closeListeners.add(listener);
@@ -267,6 +290,10 @@ export class RoomManager {
         this.leaving.delete(pendingKey);
       }
     }
+
+    const clock = this.clocks.get(key);
+    if (clock) clearTimeout(clock);
+    this.clocks.delete(key);
 
     const framed = this.framed.get(key);
     if (framed) clearTimeout(framed);
@@ -326,16 +353,64 @@ export class RoomManager {
       isPrivate: setup.isPrivate,
       settings: setup.settings,
       connections: () => managed.connections.size,
-      introduce: (profile) => managed.profiles.set(profile.id, profile),
-      forget: (playerId) => managed.profiles.delete(playerId),
+      introduce: (profile) => {
+        managed.profiles.set(profile.id, profile);
+      },
+      forget: (playerId) => {
+        managed.profiles.delete(playerId);
+      },
+      emitted: (events) => {
+        for (const listener of this.eventListeners) {
+          try {
+            listener(key, events);
+          } catch (error) {
+            console.error(`[room ${key}] подписчик событий упал:`, error);
+          }
+        }
+      },
       changed: () => {
-        if (this.rooms.has(key)) this.frame(managed);
+        if (!this.rooms.has(key)) return;
+        // Ход мог сдвинуть дедлайн — переводим будильник, потом рассылаем.
+        this.arm(managed);
+        this.frame(managed);
       },
     });
 
     this.rooms.set(key, managed);
+    this.arm(managed);
 
     return managed;
+  }
+
+  /**
+   * Перевести будильник партии на её следующий дедлайн. Дедлайн абсолютный,
+   * поэтому переводить можно сколько угодно раз — сработает он в своё время.
+   */
+  private arm(managed: ManagedRoom): void {
+    const key = managed.key;
+
+    const existing = this.clocks.get(key);
+    if (existing) clearTimeout(existing);
+    this.clocks.delete(key);
+
+    const deadline = managed.game.deadline();
+    if (deadline === null) return;
+
+    const timer = setTimeout(
+      () => {
+        this.clocks.delete(key);
+        if (!this.rooms.has(key)) return;
+
+        // Движок сам решит, что значит «время вышло», и позовёт changed —
+        // тогда будильник переведётся на следующую фазу.
+        managed.game.tick(Date.now());
+      },
+      Math.max(0, deadline - Date.now()),
+    );
+    // Комната не должна удерживать процесс живым сама по себе.
+    timer.unref?.();
+
+    this.clocks.set(key, timer);
   }
 
   /**

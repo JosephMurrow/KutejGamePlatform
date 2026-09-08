@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { describe, it, type TestContext } from "node:test";
+import { describe, it } from "node:test";
 import {
   DEFAULT_TIMINGS,
   Room,
@@ -22,22 +22,22 @@ class FakeQuestions implements QuestionSource {
   }
 }
 
-/** Управляемые часы: время двигаем руками вместе с таймерами теста. */
-function testClock(t: TestContext) {
-  t.mock.timers.enable({ apis: ["setTimeout"] });
-
+/**
+ * Управляемые часы. Таймеров тут больше нет: будильник по дедлайну заводит
+ * платформа, а движок будят вызовом `tick` — его тест и делает руками.
+ */
+function testClock() {
   let value = 0;
   return {
     now: () => value,
     advance(ms: number) {
       value += ms;
-      t.mock.timers.tick(ms);
     },
   };
 }
 
-function setup(t: TestContext) {
-  const clock = testClock(t);
+function setup() {
+  const clock = testClock();
   const room = new Room("test", new FakeQuestions());
   const views: RoomView[] = [];
 
@@ -51,8 +51,8 @@ function setup(t: TestContext) {
 }
 
 describe("RoomRunner", () => {
-  it("рассылает состояние после принятого действия", (t) => {
-    const { runner, views } = setup(t);
+  it("рассылает состояние после принятого действия", () => {
+    const { runner, views } = setup();
 
     runner.run((room, now) => room.join("аня", now));
     runner.run((room, now) => room.join("боря", now));
@@ -61,8 +61,8 @@ describe("RoomRunner", () => {
     assert.equal(views.at(-1)?.phase, "ready");
   });
 
-  it("молчит, если действие отклонено", (t) => {
-    const { runner, views } = setup(t);
+  it("молчит, если действие отклонено", () => {
+    const { runner, views } = setup();
 
     runner.run((room, now) => room.join("аня", now));
     runner.run((room, now) => room.join("боря", now));
@@ -74,8 +74,8 @@ describe("RoomRunner", () => {
     assert.equal(views.length, before, "отказ не должен обновлять всех");
   });
 
-  it("сам переводит фазу, когда дедлайн вышел", (t) => {
-    const { clock, runner, views } = setup(t);
+  it("переводит фазу, когда его будят", () => {
+    const { clock, runner, views } = setup();
 
     runner.run((room, now) => room.join("аня", now));
     runner.run((room, now) => room.join("боря", now));
@@ -83,14 +83,15 @@ describe("RoomRunner", () => {
 
     // Ведущий молчит все двадцать секунд — раунд должен уйти следующему.
     clock.advance(DEFAULT_TIMINGS.readyMs);
+    runner.tick(clock.now());
 
     const latest = views.at(-1);
     assert.equal(latest?.phase, "ready");
     assert.equal(latest?.hostId, "боря");
   });
 
-  it("докручивает цикл до вскрышки и следующего раунда", (t) => {
-    const { clock, runner, views } = setup(t);
+  it("докручивает цикл до вскрышки и следующего раунда", () => {
+    const { clock, runner, views } = setup();
 
     runner.run((room, now) => room.join("аня", now));
     runner.run((room, now) => room.join("боря", now));
@@ -101,21 +102,26 @@ describe("RoomRunner", () => {
     assert.equal(views.at(-1)?.phase, "reveal");
 
     clock.advance(DEFAULT_TIMINGS.revealMs);
+    runner.tick(clock.now());
 
     assert.equal(views.at(-1)?.phase, "ready");
     assert.equal(views.at(-1)?.hostId, "боря");
   });
 
-  it("после stop таймеры больше не срабатывают", (t) => {
-    const { clock, runner, views } = setup(t);
+  it("после stop не принимает ни ходов, ни побудок", () => {
+    const { clock, runner, views } = setup();
 
     runner.run((room, now) => room.join("аня", now));
     runner.run((room, now) => room.join("боря", now));
     const before = views.length;
 
     runner.stop();
-    clock.advance(DEFAULT_TIMINGS.readyMs * 3);
 
-    assert.equal(views.length, before);
+    const result = runner.run((room, now) => room.confirmRead("аня", now));
+    clock.advance(DEFAULT_TIMINGS.readyMs);
+    runner.tick(clock.now());
+
+    assert.equal(result.accepted, false, "закрытая комната ходов не берёт");
+    assert.equal(views.length, before, "и ничего не рассылает");
   });
 });

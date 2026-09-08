@@ -94,7 +94,6 @@ export class PricetituteRoom implements GameRoomState {
     });
 
     self = new PricetituteRoom(context, settings, bots, room, runner, queue);
-    runner.start();
 
     return self;
   }
@@ -134,6 +133,14 @@ export class PricetituteRoom implements GameRoomState {
 
   seated(): readonly string[] {
     return this.room.view().players.map((player) => player.id);
+  }
+
+  deadline(): number | null {
+    return this.room.view().deadline;
+  }
+
+  tick(now: number): void {
+    this.runner.tick(now);
   }
 
   settled(): Promise<void> {
@@ -353,6 +360,7 @@ export class PricetituteRoom implements GameRoomState {
         );
       })
       .then(() => {
+        this.context.emitted(events);
         this.context.changed();
         this.bots.react(this.context.key, events);
       });
