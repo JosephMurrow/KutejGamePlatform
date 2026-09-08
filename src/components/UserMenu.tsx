@@ -3,8 +3,6 @@
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import { Avatar } from "@/components/Avatar";
-import { Button, ButtonLink } from "@/components/ui/Button";
-import { Modal } from "@/components/ui/Modal";
 import { logoutAction } from "@/lib/auth/actions";
 
 export interface MenuLink {
@@ -23,12 +21,13 @@ const PLATFORM_LINKS: readonly MenuLink[] = [
   { href: "/profile", label: "Профиль" },
 ];
 
-/** Дорога с игры на витрину. Она обязана быть в каждой игре. */
-const SHELF: MenuLink = { href: "/games", label: "Выйти в меню выбора игр" };
-
 /**
  * Кнопка с меню вместо россыпи ссылок в шапке: переходы между комнатами,
- * рейтинг, профиль и выход в одном месте.
+ * рейтинг и профиль в одном месте.
+ *
+ * Выхода на витрину здесь нет. Он переехал в отдельную кнопку в углу страницы
+ * (`components/games/ExitToShelf`): меню видит только залогиненный, а страница
+ * игры открыта и постороннему — дорога назад обязана быть и у него.
  */
 export function UserMenu({
   nickname,
@@ -36,7 +35,6 @@ export function UserMenu({
   isGuest = false,
   links = [],
   onOverlay,
-  confirmExit,
 }: {
   nickname: string;
   avatarId: number;
@@ -50,14 +48,8 @@ export function UserMenu({
   links?: readonly MenuLink[];
   /** Открыть окно вместо перехода — для пунктов с `overlay`. */
   onOverlay?: (href: string) => void;
-  /**
-   * Спросить перед уходом на витрину. Передаёт игра, когда партия идёт: уход
-   * рвёт сокет и высаживает из-за стола.
-   */
-  confirmExit?: string;
 }) {
   const [open, setOpen] = useState(false);
-  const [asking, setAsking] = useState(false);
   const rootRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
@@ -143,36 +135,6 @@ export function UserMenu({
             ),
           )}
 
-          {/*
-            Выход на витрину платформа рисует сама: человек, доигравший
-            партию, не должен искать дорогу в адресной строке. Гостю его не
-            показываем — витрина для него закрыта, а уход из комнаты его
-            попросту стирает.
-          */}
-          {!isGuest &&
-            (confirmExit ? (
-              <button
-                type="button"
-                role="menuitem"
-                onClick={() => {
-                  setOpen(false);
-                  setAsking(true);
-                }}
-                className="block w-full border-t border-line px-4 py-2.5 text-left text-sm transition hover:bg-tint hover:text-accent"
-              >
-                {SHELF.label}
-              </button>
-            ) : (
-              <Link
-                href={SHELF.href}
-                role="menuitem"
-                onClick={() => setOpen(false)}
-                className="block border-t border-line px-4 py-2.5 text-sm transition hover:bg-tint hover:text-accent"
-              >
-                {SHELF.label}
-              </Link>
-            ))}
-
           {isGuest && (
             <p className="px-4 py-2.5 text-xs text-muted">
               Гость: только эта комната. Очки остаются здесь.
@@ -190,24 +152,6 @@ export function UserMenu({
           </form>
         </div>
       )}
-
-      <Modal
-        open={asking}
-        onClose={() => setAsking(false)}
-        title="Выйти в меню игр?"
-      >
-        <p className="text-sm text-muted">{confirmExit}</p>
-        <div className="mt-4 flex gap-2">
-          <ButtonLink href={SHELF.href}>Выйти</ButtonLink>
-          <Button
-            type="button"
-            look="secondary"
-            onClick={() => setAsking(false)}
-          >
-            Остаться
-          </Button>
-        </div>
-      </Modal>
     </div>
   );
 }

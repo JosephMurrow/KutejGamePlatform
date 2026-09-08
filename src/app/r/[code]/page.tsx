@@ -63,6 +63,11 @@ export default async function PrivateRoomPage({
     game
   );
 
-  // Комната красится темой той игры, что в ней записана.
-  return <GameTheme id={room.gameId}>{body}</GameTheme>;
+  // Комната красится темой той игры, что в ней записана. Выход на витрину
+  // гостю не показываем: она для него закрыта, а уход из комнаты его стирает.
+  return (
+    <GameTheme id={room.gameId} exit={!user.isGuest}>
+      {body}
+    </GameTheme>
+  );
 }

@@ -41,8 +41,10 @@ export default async function ScreenPage({
     if (userId !== room.hostId) notFound();
   }
 
+  // Выхода на витрину здесь нет: на экран смотрят, по нему не кликают, а в
+  // кадре трансляции кнопка была бы мусором.
   return (
-    <GameTheme id={room.gameId}>
+    <GameTheme id={room.gameId} exit={false}>
       <ScreenView roomCode={room.code} screenKey={room.screenKey} />
     </GameTheme>
   );

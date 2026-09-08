@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { GameExit } from "./ExitToShelf";
 
 /**
  * Поддерево игры со своей темой.
@@ -9,17 +10,27 @@ import type { ReactNode } from "react";
  *
  * Фон рисует сама обёртка: иначе за короткой страницей игры просвечивал бы
  * фиолетовый фон платформы.
+ *
+ * Отсюда же платформа рисует выход на витрину: он обязан быть на каждой
+ * странице игры, и оставлять это на совесть игры нельзя — забудут (C3).
  */
 export function GameTheme({
   id,
+  exit = true,
   children,
 }: {
   id: string;
+  /**
+   * Показывать выход на витрину. Выключают там, где витрина недостижима или
+   * не нужна: экран для трансляции (по нему никто не кликает, а в кадре
+   * кнопка лишняя) и гость, которому кроме своей комнаты идти некуда.
+   */
+  exit?: boolean;
   children: ReactNode;
 }) {
   return (
     <div data-game={id} className="flex flex-1 flex-col bg-surface text-ink">
-      {children}
+      {exit ? <GameExit>{children}</GameExit> : children}
     </div>
   );
 }

@@ -5,6 +5,7 @@ import { useEffect, useRef, useState } from "react";
 import { GameBrand } from "./Brand";
 import { LeaderboardModal } from "@/games/pricetitute/components/leaderboard/LeaderboardModal";
 import { UserMenu } from "@/components/UserMenu";
+import { useExitWarning } from "@/components/games/ExitToShelf";
 import type { Bet } from "@/games/pricetitute/engine/bet";
 import { crownFor, titlesOf } from "@/games/pricetitute/engine/crowns";
 import { Crown } from "./Crown";
@@ -45,6 +46,15 @@ export function GameRoom({
   const phase = state?.phase ?? null;
   const actionable = needsInput(state);
 
+  // Посреди партии уход рвёт сокет и высаживает из круга ходов. Кнопку выхода
+  // рисует платформа, а про идущую партию знаем только мы — вторую строку
+  // вопроса передаём отсюда (docs/BACKLOG.md C3).
+  useExitWarning(
+    phase && phase !== "waiting" && phase !== "finished"
+      ? "Партия идёт. Если выйдешь, место за столом достанется следующему."
+      : null,
+  );
+
   // Чат платформенный и про короны не знает: значок рядом с ником он получает
   // слотом, а кто его заслужил — дело игры (docs/BACKLOG.md A1).
   const titles = state ? titlesOf(state) : null;
@@ -83,13 +93,6 @@ export function GameRoom({
           isGuest={isGuest}
           links={MENU_LINKS}
           onOverlay={isGuest ? undefined : () => setRatingOpen(true)}
-          // Посреди партии уход рвёт сокет и высаживает из круга ходов —
-          // спрашиваем, а не выкидываем молча (docs/BACKLOG.md C3).
-          confirmExit={
-            phase && phase !== "waiting" && phase !== "finished"
-              ? "Партия идёт. Если выйдешь, место за столом достанется следующему."
-              : undefined
-          }
         />
       </header>
 
