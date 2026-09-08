@@ -1,19 +1,33 @@
 import type { Metadata } from "next";
 import { notFound, redirect } from "next/navigation";
+import { cache } from "react";
 import { PLATFORM } from "@/components/Brand";
-import { GameRoom } from "@/games/pricetitute/components/GameRoom";
 import { GuestGate } from "@/components/rooms/GuestGate";
-import { HardcoreGate } from "@/games/pricetitute/components/HardcoreGate";
-import { getCurrentUser } from "@/lib/auth/session";
 import { GameTheme } from "@/components/games/GameTheme";
-import { loadRoomSettings } from "@/games/pricetitute/rooms/store";
-import { isHardcore } from "@/games/pricetitute/questions/modes";
+import { gameById } from "@/lib/games/registry";
+import { gamePages } from "@/lib/games/pages";
+import { getCurrentUser } from "@/lib/auth/session";
 import { findPrivateRoom } from "@/lib/rooms/private";
 import { allowsGuests } from "@/shared/room-settings";
 
-export const metadata: Metadata = {
-  title: `Своя комната — ${PLATFORM}`,
-};
+/**
+ * Комната нужна дважды за запрос — заголовку вкладки и самой странице. `cache`
+ * склеивает два обращения в базу в одно.
+ */
+const roomByCode = cache(findPrivateRoom);
+
+/** Вкладка подписана игрой, а не платформой: комнаты у игр разные (E1). */
+export async function generateMetadata({
+  params,
+}: {
+  params: Promise<{ code: string }>;
+}): Promise<Metadata> {
+  const { code } = await params;
+  const room = await roomByCode(code);
+  const game = room ? gameById(room.gameId) : null;
+
+  return { title: `Своя комната — ${game?.title ?? PLATFORM}` };
+}
 
 export default async function PrivateRoomPage({
   params,
@@ -22,7 +36,7 @@ export default async function PrivateRoomPage({
 }) {
   const { code } = await params;
 
-  const room = await findPrivateRoom(code);
+  const room = await roomByCode(code);
   if (!room) {
     notFound();
   }
@@ -44,30 +58,18 @@ export default async function PrivateRoomPage({
     notFound();
   }
 
-  const game = (
-    <GameRoom
-      nickname={user.nickname}
-      avatarId={user.avatarId}
-      roomCode={room.code}
-      isGuest={user.isGuest}
-      // Ключ экрана — хозяину и только ему: остальным он ни к чему, а лишний
-      // раз раздавать пропуск незачем.
-      screenKey={user.id === room.hostId ? room.screenKey : undefined}
-    />
-  );
-
-  // В комнату с чернотой человек попадает только через предупреждение.
-  const body = isHardcore((await loadRoomSettings(room.id, room.kind)).mode) ? (
-    <HardcoreGate code={room.code}>{game}</HardcoreGate>
-  ) : (
-    game
-  );
+  // Что рисовать внутри — дело игры, записанной в комнате. Платформа знает
+  // только про порог для гостя и про тему (docs/BACKLOG.md E1).
+  const pages = gamePages(room.gameId);
+  if (!pages) {
+    notFound();
+  }
 
   // Комната красится темой той игры, что в ней записана. Выход на витрину
   // гостю не показываем: она для него закрыта, а уход из комнаты его стирает.
   return (
     <GameTheme id={room.gameId} exit={!user.isGuest}>
-      {body}
+      <pages.Room room={room} user={user} />
     </GameTheme>
   );
 }

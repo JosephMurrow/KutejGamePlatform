@@ -24,10 +24,6 @@ export function robotAvatarSrc(avatarId: number): string {
   return `${DIR}/${String(safe).padStart(2, "0")}.svg`;
 }
 
-export function isRobotAvatar(avatarId: number): boolean {
-  return avatarId >= ROBOT_AVATAR_OFFSET;
-}
-
 /** Аватар робота по порядковому номеру бота. */
 export function robotAvatarId(index: number): number {
   return ROBOT_AVATAR_OFFSET + (index % ROBOT_COUNT);

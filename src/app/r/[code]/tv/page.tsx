@@ -1,15 +1,28 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
+import { cache } from "react";
 import { PLATFORM } from "@/components/Brand";
-import { ScreenView } from "@/games/pricetitute/components/ScreenView";
+import { GameTheme } from "@/components/games/GameTheme";
+import { gameById } from "@/lib/games/registry";
+import { gamePages } from "@/lib/games/pages";
 import { getSessionUserId } from "@/lib/auth/session";
 import { findPrivateRoom } from "@/lib/rooms/private";
 import { hasScreen } from "@/shared/room-settings";
-import { GameTheme } from "@/components/games/GameTheme";
 
-export const metadata: Metadata = {
-  title: `Экран — ${PLATFORM}`,
-};
+const roomByCode = cache(findPrivateRoom);
+
+/** Экран тоже подписан игрой: на телевизоре открыта не «платформа». */
+export async function generateMetadata({
+  params,
+}: {
+  params: Promise<{ code: string }>;
+}): Promise<Metadata> {
+  const { code } = await params;
+  const room = await roomByCode(code);
+  const game = room ? gameById(room.gameId) : null;
+
+  return { title: `Экран — ${game?.title ?? PLATFORM}` };
+}
 
 /**
  * Вид «экран»: то, что уходит на телевизор или в трансляцию.
@@ -31,7 +44,7 @@ export default async function ScreenPage({
   const { code } = await params;
   const { key } = await searchParams;
 
-  const room = await findPrivateRoom(code);
+  const room = await roomByCode(code);
   if (!room || !hasScreen(room.kind)) {
     notFound();
   }
@@ -41,11 +54,16 @@ export default async function ScreenPage({
     if (userId !== room.hostId) notFound();
   }
 
+  const pages = gamePages(room.gameId);
+  if (!pages) {
+    notFound();
+  }
+
   // Выхода на витрину здесь нет: на экран смотрят, по нему не кликают, а в
   // кадре трансляции кнопка была бы мусором.
   return (
     <GameTheme id={room.gameId} exit={false}>
-      <ScreenView roomCode={room.code} screenKey={room.screenKey} />
+      <pages.Screen room={room} />
     </GameTheme>
   );
 }
