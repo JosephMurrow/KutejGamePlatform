@@ -23,6 +23,7 @@ export const PRICETITUTE: GameManifest = {
   adult: true,
   routes: ROUTES,
   Box: PricetituteBox,
+  logo: "/games/pricetitute/logo.png",
   commonRoomKey: GLOBAL_ROOM,
   botAvatars: {
     offset: ROBOT_AVATAR_OFFSET,

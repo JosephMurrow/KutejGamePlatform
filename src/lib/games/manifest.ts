@@ -60,6 +60,12 @@ export interface GameManifest {
    */
   Box: ComponentType<{ className?: string }>;
   /**
+   * Знак игры: путь к картинке в `public`. Им же подписана вкладка — иконку
+   * сегмента Next берёт из `src/app/games/<игра>/icon.png`, и она обязана быть
+   * тем же знаком (docs/BACKLOG.md D7).
+   */
+  logo: string;
+  /**
    * Ключ общего зала. Строки в базе нет — общий зал живёт литералом, и за
    * платитуткой он остаётся прежним, потому что за ним лежат живые раунды
    * и очки (docs/BACKLOG.md A4).
