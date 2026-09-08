@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useCallback, useSyncExternalStore } from "react";
+import { ROUTES } from "../manifest";
 
 /**
  * Предупреждение на входе в комнату с чернотой.
@@ -62,7 +63,7 @@ export function HardcoreGate({
             Я понимаю
           </button>
           <Link
-            href="/play"
+            href={ROUTES.play}
             className="flex-1 rounded-xl border border-line bg-paper px-4 py-3 text-center text-sm font-semibold transition hover:border-crimson hover:text-crimson"
           >
             Я на такое не согласен

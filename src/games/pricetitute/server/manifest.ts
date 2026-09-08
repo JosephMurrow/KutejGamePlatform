@@ -1,7 +1,7 @@
 import type { GameServerManifest } from "@/lib/games/engine";
 import type { PrivateRoomInfo } from "@/lib/rooms/private";
 import { dropScores } from "../engine/store";
-import { GAME_EVENT, GLOBAL_ROOM } from "../protocol";
+import { GAME_ID, GAME_EVENT, GLOBAL_ROOM } from "../protocol";
 import { dropQuestionQueue } from "../questions/store";
 import { createPricetituteServer } from ".";
 import type { PricetituteSettings } from "./room";
@@ -17,7 +17,7 @@ const COMMON_SETTINGS: PricetituteSettings = {
 
 /** Серверная половина договора платитутки с платформой. */
 export const PRICETITUTE_SERVER: GameServerManifest = {
-  id: "pricetitute",
+  id: GAME_ID,
   commonRoomKey: GLOBAL_ROOM,
   commonRoomSettings: COMMON_SETTINGS,
   roomSettings: (room: PrivateRoomInfo): PricetituteSettings => ({

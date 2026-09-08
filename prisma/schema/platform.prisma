@@ -30,6 +30,10 @@ enum RoomKind {
 /// Приватная комната: счёт внутри неё наружу не уходит (см. docs/SPEC.md §3.2).
 model PrivateRoom {
   id   String @id @default(cuid())
+
+  /// Во что тут играют. Умолчание — ради старых строк: до появления платформы
+  /// игра была одна, и все существующие комнаты платитуткины.
+  gameId String @default("pricetitute")
   /// Короткий код из ссылки-приглашения.
   code String @unique
 

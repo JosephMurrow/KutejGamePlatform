@@ -15,6 +15,7 @@ import {
   CHAT_MAX_LENGTH,
   CLIENT_EVENT,
   KEY_QUERY,
+  GAME_QUERY,
   ROOM_QUERY,
   SCREEN_VIEW,
   SERVER_EVENT,
@@ -190,8 +191,13 @@ interface RoomTarget {
  * следующем этапе (docs/BACKLOG.md A4), и тогда развилка станет настоящей.
  */
 async function resolveRoom(socket: Socket): Promise<RoomTarget | null> {
-  const game = defaultGameServer();
   const code = readQuery(socket, ROOM_QUERY);
+
+  // Игру называет клиент, а для приватной комнаты — сама комната. Пустой
+  // параметр означает платитутку: так ходит вкладка, открытая до выкладки.
+  const asked = readQuery(socket, GAME_QUERY);
+  const game = asked === "" ? defaultGameServer() : gameServerById(asked);
+  if (!game) return null;
 
   if (code === "") {
     return {
@@ -217,7 +223,9 @@ async function resolveRoom(socket: Socket): Promise<RoomTarget | null> {
   const room = await findPrivateRoom(code);
   if (!room) return null;
 
-  const owner = gameServerById(game.id);
+  // За столом играют в то, во что завели комнату, а не в то, что попросил
+  // клиент: иначе чужая вкладка меняла бы игру чужой комнате.
+  const owner = gameServerById(room.gameId);
   if (!owner) return null;
 
   return {

@@ -6,6 +6,7 @@ import type { Bet } from "@/games/pricetitute/engine/bet";
 import {
   CLIENT_EVENT,
   KEY_QUERY,
+  GAME_QUERY,
   ROOM_QUERY,
   SCREEN_VIEW,
   SERVER_EVENT,
@@ -15,7 +16,7 @@ import {
   type ChatMessagePayload,
 } from "@/shared/protocol";
 import { type GameStatePayload } from "@/games/pricetitute/protocol";
-import { GAME_EVENT } from "@/games/pricetitute/protocol";
+import { GAME_EVENT, GAME_ID } from "@/games/pricetitute/protocol";
 
 const ERROR_LIFETIME_MS = 4000;
 
@@ -24,9 +25,14 @@ function connectionQuery(
   roomCode?: string,
   screenKey?: string,
 ): Record<string, string> | undefined {
-  if (!roomCode) return undefined;
+  // Общий зал ходит без кода комнаты, но игру называет всё равно: иначе
+  // сервер не знает, чей это зал.
+  if (!roomCode) return { [GAME_QUERY]: GAME_ID };
 
-  const query: Record<string, string> = { [ROOM_QUERY]: roomCode };
+  const query: Record<string, string> = {
+    [ROOM_QUERY]: roomCode,
+    [GAME_QUERY]: GAME_ID,
+  };
   if (screenKey !== undefined) {
     query[VIEW_QUERY] = SCREEN_VIEW;
     query[KEY_QUERY] = screenKey;

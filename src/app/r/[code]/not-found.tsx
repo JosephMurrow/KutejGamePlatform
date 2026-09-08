@@ -16,13 +16,13 @@ export default function RoomNotFound() {
 
       <div className="flex flex-col gap-2 sm:flex-row">
         <Link
-          href="/rooms/new"
+          href="/games/pricetitute/rooms/new"
           className="rounded-lg bg-crimson px-5 py-2.5 text-sm font-semibold text-paper transition hover:bg-deep"
         >
           Создать свою
         </Link>
         <Link
-          href="/play"
+          href="/games/pricetitute/play"
           className="rounded-lg border border-line bg-paper px-5 py-2.5 text-sm font-semibold transition hover:border-crimson hover:text-crimson"
         >
           В общую комнату

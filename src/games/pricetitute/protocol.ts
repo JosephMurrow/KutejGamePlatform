@@ -10,6 +10,9 @@ import type { EndMode, PauseReason, Phase } from "./engine/room";
  * остаётся плоским (docs/BACKLOG.md A3).
  */
 
+/** Код игры: им она зовётся в адресах, в базе и в реестре. */
+export const GAME_ID = "pricetitute";
+
 /** Ключ общего зала. За ним в базе лежат живые раунды и очки — не менять. */
 export const GLOBAL_ROOM = "global";
 

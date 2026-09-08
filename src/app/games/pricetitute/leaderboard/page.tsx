@@ -57,7 +57,7 @@ export default async function LeaderboardPage({
       </p>
 
       <div className="mb-5 flex gap-2">
-        <Tab href="/leaderboard" active={period === "all"}>
+        <Tab href="/games/pricetitute/leaderboard" active={period === "all"}>
           За всё время
         </Tab>
         <Tab href="/leaderboard?period=week" active={period === "week"}>

@@ -13,7 +13,7 @@ export const metadata: Metadata = {
 export default async function NewRoomPage() {
   const user = await getCurrentUser();
   if (!user) {
-    redirect("/login?next=/rooms/new");
+    redirect("/login?next=/games/pricetitute/rooms/new");
   }
 
   return (

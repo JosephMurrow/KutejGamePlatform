@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useState } from "react";
 import { InviteModal } from "@/components/rooms/InviteModal";
+import { ROUTES } from "../manifest";
 
 /**
  * Общая комната, а в ней никого. Показываем, что делать дальше: позвать людей
@@ -36,7 +37,7 @@ export function LonelyNotice() {
         </button>
 
         <Link
-          href="/rooms/new"
+          href={ROUTES.newRoom}
           className="flex-1 rounded-xl border border-line bg-paper px-4 py-2.5 text-sm font-semibold transition hover:border-crimson hover:text-crimson"
         >
           Своя комната с ботами

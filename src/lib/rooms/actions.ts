@@ -17,7 +17,7 @@ export async function createRoomAction(
 ): Promise<FormState> {
   const userId = await getSessionUserId();
   if (!userId) {
-    redirect("/login?next=/rooms/new");
+    redirect("/login?next=/games/pricetitute/rooms/new");
   }
 
   const settings = normalizeSettings({

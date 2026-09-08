@@ -390,5 +390,7 @@ export async function resetPasswordAction(
 
   // Новая сессия выдаётся после сдвига отметки, поэтому переживёт его.
   await startSession(claimed.userId);
-  redirect("/play");
+  // На главную, а не в игровой зал: платформенный экшен не знает, во что
+  // человек играет (docs/BACKLOG.md A6).
+  redirect("/");
 }

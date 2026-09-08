@@ -68,6 +68,8 @@ export interface PrivateRoomInfo extends PrivateRoomSettings {
   id: string;
   code: string;
   hostId: string;
+  /** Во что тут играют. */
+  gameId: string;
   /** Ключ вида «экран»: по нему туда пускают без сессии. */
   screenKey: string;
 }
@@ -87,6 +89,7 @@ const MODE_FROM_DB = {
 export async function createPrivateRoom(
   hostId: string,
   settings: PrivateRoomSettings,
+  gameId: string = defaultGameServer().id,
 ): Promise<PrivateRoomInfo> {
   // Код короткий, поэтому столкновения возможны — пробуем несколько раз.
   for (let attempt = 0; attempt < 5; attempt++) {
@@ -97,6 +100,7 @@ export async function createPrivateRoom(
         data: {
           code,
           hostId,
+          gameId,
           kind: kindDbValue(settings.kind),
           title: settings.title,
           hostRotation: rotationDbValue(settings.hostRotation),
@@ -263,6 +267,7 @@ export async function setRoomLocked(
 }
 
 function toInfo(room: {
+  gameId: string;
   id: string;
   code: string;
   hostId: string;
@@ -284,6 +289,7 @@ function toInfo(room: {
     id: room.id,
     code: room.code,
     hostId: room.hostId,
+    gameId: room.gameId,
     kind: parseKind(room.kind),
     title: room.title,
     screenKey: room.screenKey,

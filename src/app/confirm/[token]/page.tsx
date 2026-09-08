@@ -46,7 +46,7 @@ export default async function ConfirmPage({
 
       <div className="flex flex-col gap-2 sm:flex-row">
         <Link
-          href="/play"
+          href="/games/pricetitute/play"
           className="rounded-lg bg-crimson px-5 py-2.5 text-sm font-semibold text-paper transition hover:bg-deep"
         >
           В общую комнату

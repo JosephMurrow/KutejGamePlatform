@@ -1,14 +1,22 @@
 import type { GameManifest } from "@/lib/games/manifest";
 import { ROBOT_AVATAR_OFFSET, ROBOT_COUNT } from "./bots/avatars";
 import { BotAvatar } from "./components/BotAvatar";
-import { GLOBAL_ROOM } from "./protocol";
+import { GAME_ID, GLOBAL_ROOM } from "./protocol";
+
+/** Адреса страниц игры. Отсюда их берут и витрина, и сама игра. */
+export const ROUTES = {
+  home: "/games/pricetitute",
+  play: "/games/pricetitute/play",
+  newRoom: "/games/pricetitute/rooms/new",
+  leaderboard: "/games/pricetitute/leaderboard",
+} as const;
 
 /**
  * Договор платитутки с платформой — клиентская половина. Серверная лежит в
  * server/manifest.ts и в браузер не едет.
  */
 export const PRICETITUTE: GameManifest = {
-  id: "pricetitute",
+  id: GAME_ID,
   title: "Платитутка",
   commonRoomKey: GLOBAL_ROOM,
   botAvatars: {

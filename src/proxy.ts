@@ -8,7 +8,22 @@ import { readSessionClaims, SESSION_COOKIE } from "@/lib/auth/token";
  * Файл называется proxy.ts, а не middleware.ts: в Next 16 старое соглашение
  * объявлено устаревшим.
  */
-const PROTECTED = ["/profile", "/play", "/leaderboard"];
+/**
+ * За стол и в рейтинг — только со своим аккаунтом.
+ *
+ * Старые адреса перечислены наравне с новыми, хотя редиректы из next.config
+ * срабатывают раньше proxy и досюда их не доводят. Это подстраховка: уберут
+ * редирект — защита останется на месте, а не исчезнет молча.
+ */
+const PROTECTED = [
+  "/profile",
+  "/games/pricetitute/play",
+  "/games/pricetitute/rooms",
+  "/games/pricetitute/leaderboard",
+  "/play",
+  "/rooms",
+  "/leaderboard",
+];
 const ANONYMOUS_ONLY = ["/login", "/register"];
 
 /**
@@ -18,6 +33,9 @@ const ANONYMOUS_ONLY = ["/login", "/register"];
  */
 const CLOSED_TO_GUESTS = [
   "/profile",
+  // Вся полка целиком: гостю не во что играть, кроме своей комнаты, и
+  // объяснять ему про другие игры незачем (docs/BACKLOG.md C1).
+  "/games",
   "/play",
   "/leaderboard",
   "/rooms",
@@ -61,6 +79,7 @@ export async function proxy(request: NextRequest) {
 export const config = {
   matcher: [
     "/profile/:path*",
+    "/games/:path*",
     "/play/:path*",
     "/leaderboard/:path*",
     "/rooms/:path*",

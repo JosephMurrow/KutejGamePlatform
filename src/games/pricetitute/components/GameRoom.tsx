@@ -18,6 +18,7 @@ import { PlayerList } from "./PlayerList";
 import { Reveal } from "./Reveal";
 import { RoomPanel } from "./RoomPanel";
 import { useGameRoom } from "./useGameRoom";
+import { ROUTES } from "../manifest";
 
 export function GameRoom({
   nickname,
@@ -96,13 +97,13 @@ export function GameRoom({
           {!isGuest && (
             <div className="flex flex-col gap-2 sm:flex-row">
               <Link
-                href="/play"
+                href={ROUTES.play}
                 className="rounded-lg bg-crimson px-5 py-2.5 text-sm font-semibold text-paper transition hover:bg-deep"
               >
                 В общую комнату
               </Link>
               <Link
-                href="/rooms/new"
+                href={ROUTES.newRoom}
                 className="rounded-lg border border-line bg-paper px-5 py-2.5 text-sm font-semibold transition hover:border-crimson hover:text-crimson"
               >
                 Создать свою

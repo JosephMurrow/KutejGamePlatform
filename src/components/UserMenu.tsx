@@ -6,15 +6,15 @@ import { Avatar } from "@/components/Avatar";
 import { logoutAction } from "@/lib/auth/actions";
 
 const LINKS = [
-  { href: "/play", label: "В общую комнату" },
-  { href: "/rooms/new", label: "Своя комната" },
+  { href: "/games/pricetitute/play", label: "В общую комнату" },
+  { href: "/games/pricetitute/rooms/new", label: "Своя комната" },
   { href: "/join", label: "Зайти по коду" },
-  { href: "/leaderboard", label: "Рейтинг" },
+  { href: "/games/pricetitute/leaderboard", label: "Рейтинг" },
   { href: "/profile", label: "Профиль" },
 ] as const;
 
 /** Пункт, который в комнате открывает окно вместо перехода. */
-const OVERLAY_HREF = "/leaderboard";
+const OVERLAY_HREF = "/games/pricetitute/leaderboard";
 
 /**
  * Кнопка с меню вместо россыпи ссылок в шапке: переходы между комнатами,
