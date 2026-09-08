@@ -1,5 +1,5 @@
 import { randomBytes, randomInt } from "node:crypto";
-import { normalizeChannel } from "@/server/twitch/chat";
+import { normalizeChannel } from "@/shared/twitch";
 import type { EndMode } from "@/games/pricetitute/engine/room";
 import { defaultGameServer, dropRoomData } from "@/lib/games/servers";
 import { prisma } from "../prisma";

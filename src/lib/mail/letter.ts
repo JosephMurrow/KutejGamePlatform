@@ -4,7 +4,7 @@
  * Рядом с разметкой всегда идёт простой текст — часть почтовиков показывает
  * именно его, а письмо без текстовой части чаще попадает в спам.
  */
-import { BRAND } from "@/components/Brand";
+import { BRAND } from "@/lib/brand";
 
 export interface Letter {
   subject: string;

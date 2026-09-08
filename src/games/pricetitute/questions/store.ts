@@ -7,9 +7,6 @@ import {
 } from "./modes";
 import { QuestionQueue } from "./queue";
 
-/** Ключ очереди общей комнаты. У приватных ключ — идентификатор комнаты. */
-export const GLOBAL_ROOM_KEY = "global";
-
 export interface QuestionPoolOptions {
   /** Брать ли вопросы с флагом 18+. Имеет смысл только в обычном режиме. */
   includeAdult: boolean;

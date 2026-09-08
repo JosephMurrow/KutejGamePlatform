@@ -1,8 +1,4 @@
-/**
- * Название игры. В интерфейсе оно всегда русское — «Платитутка»;
- * латинское Pricetitute остаётся только именем репозитория.
- */
-export const BRAND = "Платитутка";
+export { BRAND } from "@/lib/brand";
 
 export function Brand({ className }: { className?: string }) {
   return (

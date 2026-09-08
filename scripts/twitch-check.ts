@@ -1,8 +1,5 @@
-import {
-  normalizeChannel,
-  parseIrcLine,
-  toMessage,
-} from "../src/server/twitch/chat";
+import { normalizeChannel } from "../src/shared/twitch";
+import { parseIrcLine, toMessage } from "../src/server/twitch/chat";
 
 /**
  * Проверка связи с чатом Твича, по образцу `mail-check.ts`.

@@ -12,11 +12,7 @@ import {
   markEmpty,
   staleRoomIds,
 } from "../lib/rooms/private";
-import { dropExpiredLinks } from "../lib/auth/links";
 import type { SocketUser } from "./auth";
-
-/** Как часто подметать опустевшие приватные комнаты. */
-const CLEANUP_EVERY_MS = 5 * 60 * 1000;
 
 /**
  * Кадр рассылки. Раньше снимок уходил на каждое принятое действие, и двести
@@ -109,10 +105,13 @@ export class RoomManager {
   /** Когда по комнате рассылали в последний раз. */
   private readonly lastSent = new Map<string, number>();
   /**
-   * Комнату гасят. Подписывается мост в чат Твича: держать подключение к
-   * каналу удалённой комнаты незачем.
+   * Кого позвать, когда комнату гасят. Подписан мост в чат Твича: держать
+   * подключение к каналу удалённой комнаты незачем.
+   *
+   * Список, а не один слот: раньше сюда присваивались, и второй подписчик
+   * молча затирал первого (docs/BACKLOG.md A3).
    */
-  onClose?: (roomKey: string) => void;
+  private readonly closeListeners = new Set<(roomKey: string) => void>();
 
   constructor(
     private readonly broadcast: Broadcast,
@@ -247,6 +246,12 @@ export class RoomManager {
     this.leaving.delete(pendingKey);
   }
 
+  /** Подписаться на закрытие комнат. Возвращает функцию отписки. */
+  onClose(listener: (roomKey: string) => void): () => void {
+    this.closeListeners.add(listener);
+    return () => this.closeListeners.delete(listener);
+  }
+
   get(key: string): ManagedRoom | undefined {
     return this.rooms.get(key);
   }
@@ -271,7 +276,13 @@ export class RoomManager {
     managed.game.stop();
     this.servers(managed.setup.gameId).closeRoom?.(key);
     this.rooms.delete(key);
-    this.onClose?.(key);
+    for (const listener of this.closeListeners) {
+      try {
+        listener(key);
+      } catch (error) {
+        console.error(`[room ${key}] подписчик закрытия упал:`, error);
+      }
+    }
   }
 
   closeAll(): void {
@@ -354,31 +365,13 @@ export class RoomManager {
   }
 }
 
-/**
- * Уборка опустевших приватных комнат. Возвращает функцию остановки.
- */
-export function startRoomCleanup(manager: RoomManager): () => void {
-  const sweep = async () => {
-    try {
-      for (const roomId of await staleRoomIds(new Date())) {
-        manager.close(roomId);
-        await deletePrivateRoom(roomId);
-        console.log(`[room ${roomId}] удалена: пустовала полчаса`);
-      }
-
-      // Заодно подметаем протухшие ссылки из писем: отдельный таймер ради
-      // одного запроса раз в пять минут заводить незачем.
-      const links = await dropExpiredLinks();
-      if (links > 0) console.log(`[почта] убрано протухших ссылок: ${links}`);
-    } catch (error) {
-      console.error("[rooms] уборка комнат упала:", error);
-    }
-  };
-
-  const timer = setInterval(() => void sweep(), CLEANUP_EVERY_MS);
-  timer.unref?.();
-
-  return () => clearInterval(timer);
+/** Подмести опустевшие приватные комнаты: получасовой срок вышел. */
+export async function sweepStaleRooms(manager: RoomManager): Promise<void> {
+  for (const roomId of await staleRoomIds(new Date())) {
+    manager.close(roomId);
+    await deletePrivateRoom(roomId);
+    console.log(`[room ${roomId}] удалена: пустовала полчаса`);
+  }
 }
 
 /** Обёртка, чтобы фоновая отметка в базе не роняла обработчик сокета. */

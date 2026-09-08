@@ -27,10 +27,12 @@ import {
 import { authenticateSocket, type SocketUser } from "./auth";
 import { RateLimiter } from "./rate-limit";
 import { TwitchBridge } from "./twitch/bridge";
+import { dropExpiredLinks } from "../lib/auth/links";
+import { startCleanup } from "./cleanup";
 import {
   pushChat,
   RoomManager,
-  startRoomCleanup,
+  sweepStaleRooms,
   type ManagedRoom,
   type RoomSetup,
 } from "./rooms";
@@ -120,7 +122,7 @@ export function createSocketServer(httpServer: HttpServer): SocketServer {
     if (managed) void broadcastState(io, managed, twitch);
   });
 
-  manager.onClose = (roomKey) => twitch.detach(roomKey);
+  manager.onClose((roomKey) => twitch.detach(roomKey));
 
   io.use((socket, next) => {
     void authenticateSocket(socket.handshake.headers)
@@ -151,7 +153,14 @@ export function createSocketServer(httpServer: HttpServer): SocketServer {
     void onConnection(io, manager, twitch, socket);
   });
 
-  const stopCleanup = startRoomCleanup(manager);
+  // Уборка одним таймером, но каждое дело своё: комнаты не знают про почту.
+  const stopCleanup = startCleanup([
+    () => sweepStaleRooms(manager),
+    async () => {
+      const links = await dropExpiredLinks();
+      if (links > 0) console.log(`[почта] убрано протухших ссылок: ${links}`);
+    },
+  ]);
 
   return {
     io,

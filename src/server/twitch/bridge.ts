@@ -1,9 +1,13 @@
 import { randomAvatarId } from "../../lib/avatars";
 import { prisma } from "../../lib/prisma";
 import { checkNickname } from "../../shared/guest";
-import { twitchLogin, twitchNickname } from "../../shared/twitch";
+import {
+  normalizeChannel,
+  twitchLogin,
+  twitchNickname,
+} from "../../shared/twitch";
 import type { RoomManager } from "../rooms";
-import { ChatReader, normalizeChannel, type TwitchMessage } from "./chat";
+import { ChatReader, type TwitchMessage } from "./chat";
 
 /**
  * Мост между чатом Твича и столом.
