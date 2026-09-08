@@ -18,6 +18,9 @@ export const ROUTES = {
 export const PRICETITUTE: GameManifest = {
   id: GAME_ID,
   title: "Платитутка",
+  tagline: "Угадай, за сколько человек на это согласится",
+  adult: true,
+  routes: ROUTES,
   commonRoomKey: GLOBAL_ROOM,
   botAvatars: {
     offset: ROBOT_AVATAR_OFFSET,

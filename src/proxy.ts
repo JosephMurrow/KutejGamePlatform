@@ -43,6 +43,15 @@ const CLOSED_TO_GUESTS = [
   "/register",
 ];
 
+/**
+ * Куда можно вести по параметру `next`: только внутрь сайта. Протокольно
+ * относительный путь (`//чужой-домен`) увёл бы наружу.
+ */
+function safePath(value: string | null): string | null {
+  if (!value || !value.startsWith("/") || value.startsWith("//")) return null;
+  return value;
+}
+
 export async function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
   const token = request.cookies.get(SESSION_COOKIE)?.value;
@@ -69,7 +78,21 @@ export async function proxy(request: NextRequest) {
 
   if (userId && !claims?.guest && ANONYMOUS_ONLY.includes(pathname)) {
     const url = request.nextUrl.clone();
-    url.pathname = "/profile";
+
+    // Вошедший на странице входа — это чаще всего человек, пришедший по
+    // приглашению: комната отправила его сюда, а сессия у него уже была.
+    // Раньше `next` здесь терялся, и приглашение пропадало ровно в тот
+    // момент, когда должно было сработать.
+    const next = safePath(request.nextUrl.searchParams.get("next"));
+    if (next) {
+      const target = new URL(next, request.nextUrl.origin);
+      url.pathname = target.pathname;
+      url.search = target.search;
+    } else {
+      url.pathname = "/games";
+      url.search = "";
+    }
+
     return NextResponse.redirect(url);
   }
 

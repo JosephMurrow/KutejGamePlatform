@@ -20,6 +20,17 @@ export interface BotAvatarPack {
   Render: ComponentType<{ id: number; size: number; className?: string }>;
 }
 
+export interface GameRoutes {
+  /** Страница игры: правила и вход за стол. */
+  home: string;
+  /** Общий зал. */
+  play: string;
+  /** Создание своей комнаты. */
+  newRoom: string;
+  /** Рейтинг. */
+  leaderboard: string;
+}
+
 /**
  * Договор игры с платформой — та его часть, которую видит браузер.
  *
@@ -36,6 +47,12 @@ export interface GameManifest {
   id: string;
   /** Человеческое название. */
   title: string;
+  /** Строчка под названием: чем игра занимается, в одну фразу. */
+  tagline: string;
+  /** Игра взрослая — метка видна на полке, до входа, а не после. */
+  adult: boolean;
+  /** Адреса страниц игры. Витрина ведёт на `home`. */
+  routes: GameRoutes;
   /**
    * Ключ общего зала. Строки в базе нет — общий зал живёт литералом, и за
    * платитуткой он остаётся прежним, потому что за ним лежат живые раунды

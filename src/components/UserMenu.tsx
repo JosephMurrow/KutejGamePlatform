@@ -3,18 +3,27 @@
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import { Avatar } from "@/components/Avatar";
+import { Modal } from "@/components/ui/Modal";
 import { logoutAction } from "@/lib/auth/actions";
 
-const LINKS = [
-  { href: "/games/pricetitute/play", label: "В общую комнату" },
-  { href: "/games/pricetitute/rooms/new", label: "Своя комната" },
-  { href: "/join", label: "Зайти по коду" },
-  { href: "/games/pricetitute/leaderboard", label: "Рейтинг" },
-  { href: "/profile", label: "Профиль" },
-] as const;
+export interface MenuLink {
+  href: string;
+  label: string;
+  /**
+   * Открывать окном, а не переходом. Нужно там, где уход со страницы рвёт
+   * сокет: рейтинг в комнате именно поэтому и переехал в модалку.
+   */
+  overlay?: boolean;
+}
 
-/** Пункт, который в комнате открывает окно вместо перехода. */
-const OVERLAY_HREF = "/games/pricetitute/leaderboard";
+/** Пункты платформы. Игра добавляет свои сверху. */
+const PLATFORM_LINKS: readonly MenuLink[] = [
+  { href: "/join", label: "Зайти по коду" },
+  { href: "/profile", label: "Профиль" },
+];
+
+/** Дорога с игры на витрину. Она обязана быть в каждой игре. */
+const SHELF: MenuLink = { href: "/games", label: "Выйти в меню выбора игр" };
 
 /**
  * Кнопка с меню вместо россыпи ссылок в шапке: переходы между комнатами,
@@ -24,7 +33,9 @@ export function UserMenu({
   nickname,
   avatarId,
   isGuest = false,
-  onLeaderboard,
+  links = [],
+  onOverlay,
+  confirmExit,
 }: {
   nickname: string;
   avatarId: number;
@@ -34,13 +45,18 @@ export function UserMenu({
    * обещать несуществующее.
    */
   isGuest?: boolean;
+  /** Пункты игры: платформа своих добавит сама. */
+  links?: readonly MenuLink[];
+  /** Открыть окно вместо перехода — для пунктов с `overlay`. */
+  onOverlay?: (href: string) => void;
   /**
-   * Показать рейтинг, не уходя со страницы. Передаётся из комнаты: переход по
-   * ссылке рвёт сокет, и человек теряет место за столом.
+   * Спросить перед уходом на витрину. Передаёт игра, когда партия идёт: уход
+   * рвёт сокет и высаживает из-за стола.
    */
-  onLeaderboard?: () => void;
+  confirmExit?: string;
 }) {
   const [open, setOpen] = useState(false);
+  const [asking, setAsking] = useState(false);
   const rootRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
@@ -99,15 +115,15 @@ export function UserMenu({
           role="menu"
           className="absolute right-0 z-50 mt-2 w-56 overflow-hidden rounded-xl border border-line bg-paper py-1 shadow-lg"
         >
-          {(isGuest ? [] : LINKS).map((link) =>
-            link.href === OVERLAY_HREF && onLeaderboard ? (
+          {(isGuest ? [] : [...links, ...PLATFORM_LINKS]).map((link) =>
+            link.overlay && onOverlay ? (
               <button
                 key={link.href}
                 type="button"
                 role="menuitem"
                 onClick={() => {
                   setOpen(false);
-                  onLeaderboard();
+                  onOverlay(link.href);
                 }}
                 className="block w-full px-4 py-2.5 text-left text-sm transition hover:bg-tint hover:text-crimson"
               >
@@ -126,6 +142,36 @@ export function UserMenu({
             ),
           )}
 
+          {/*
+            Выход на витрину платформа рисует сама: человек, доигравший
+            партию, не должен искать дорогу в адресной строке. Гостю его не
+            показываем — витрина для него закрыта, а уход из комнаты его
+            попросту стирает.
+          */}
+          {!isGuest &&
+            (confirmExit ? (
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => {
+                  setOpen(false);
+                  setAsking(true);
+                }}
+                className="block w-full border-t border-line px-4 py-2.5 text-left text-sm transition hover:bg-tint hover:text-crimson"
+              >
+                {SHELF.label}
+              </button>
+            ) : (
+              <Link
+                href={SHELF.href}
+                role="menuitem"
+                onClick={() => setOpen(false)}
+                className="block border-t border-line px-4 py-2.5 text-sm transition hover:bg-tint hover:text-crimson"
+              >
+                {SHELF.label}
+              </Link>
+            ))}
+
           {isGuest && (
             <p className="px-4 py-2.5 text-xs text-muted">
               Гость: только эта комната. Очки остаются здесь.
@@ -143,6 +189,29 @@ export function UserMenu({
           </form>
         </div>
       )}
+
+      <Modal
+        open={asking}
+        onClose={() => setAsking(false)}
+        title="Выйти в меню игр?"
+      >
+        <p className="text-sm text-muted">{confirmExit}</p>
+        <div className="mt-4 flex gap-2">
+          <Link
+            href={SHELF.href}
+            className="rounded-lg bg-crimson px-4 py-2 text-sm font-semibold text-paper transition hover:bg-deep"
+          >
+            Выйти
+          </Link>
+          <button
+            type="button"
+            onClick={() => setAsking(false)}
+            className="rounded-lg border border-line px-4 py-2 text-sm transition hover:border-crimson"
+          >
+            Остаться
+          </button>
+        </div>
+      </Modal>
     </div>
   );
 }

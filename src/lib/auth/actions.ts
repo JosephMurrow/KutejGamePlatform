@@ -27,7 +27,9 @@ import {
  */
 function safeNext(value: FormDataEntryValue | null): string {
   const path = typeof value === "string" ? value : "";
-  return path.startsWith("/") && !path.startsWith("//") ? path : "/profile";
+  // Без `next` — на витрину: человек вошёл, чтобы играть, а не смотреть свой
+  // профиль (docs/BACKLOG.md C1).
+  return path.startsWith("/") && !path.startsWith("//") ? path : "/games";
 }
 
 /** На каком поле сработала уникальность: Prisma кладёт его в meta.target. */

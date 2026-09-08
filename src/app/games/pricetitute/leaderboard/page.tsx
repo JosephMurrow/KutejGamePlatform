@@ -12,6 +12,8 @@ import {
   type LeaderboardPeriod,
 } from "@/games/pricetitute/leaderboard/board";
 
+import { MENU_LINKS } from "@/games/pricetitute/menu";
+import { Header } from "@/components/Header";
 export const metadata: Metadata = {
   title: `Рейтинг — ${BRAND}`,
 };
@@ -43,12 +45,16 @@ export default async function LeaderboardPage({
 
   return (
     <main className="mx-auto w-full max-w-2xl flex-1 px-4 py-8">
-      <header className="mb-6 flex items-center justify-between gap-3">
-        <Link href="/">
-          <GameBrand className="text-xl" />
-        </Link>
-        <UserMenu nickname={user.nickname} avatarId={user.avatarId} />
-      </header>
+      <Header
+        brand={<GameBrand className="text-xl" />}
+        brandHref="/games/pricetitute"
+      >
+        <UserMenu
+          nickname={user.nickname}
+          avatarId={user.avatarId}
+          links={MENU_LINKS}
+        />
+      </Header>
 
       <h1 className="mb-1 text-2xl font-bold">Рейтинг общей комнаты</h1>
       <p className="mb-5 text-sm text-muted">

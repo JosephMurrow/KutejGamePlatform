@@ -1,9 +1,9 @@
-import { Landing } from "@/games/pricetitute/components/Landing";
+import { redirect } from "next/navigation";
 
 /**
- * Корень пока показывает платитутку: игра одна, и отправлять человека на пустую
- * полку незачем. Витрина займёт это место на этапе 5 (docs/PLAN.md).
+ * Корень — это витрина. Отдельного лендинга у платформы нет: полка с играми и
+ * есть её лицо, а держать две страницы с одним и тем же содержимым незачем.
  */
 export default function Home() {
-  return <Landing />;
+  redirect("/games");
 }

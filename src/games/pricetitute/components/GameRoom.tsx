@@ -8,6 +8,7 @@ import { UserMenu } from "@/components/UserMenu";
 import type { Bet } from "@/games/pricetitute/engine/bet";
 import { crownFor, titlesOf } from "@/games/pricetitute/engine/crowns";
 import { Crown } from "./Crown";
+import { MENU_LINKS } from "../menu";
 import type { GameStatePayload } from "@/games/pricetitute/protocol";
 import { BetInput } from "./BetInput";
 import { Chat } from "@/components/room/Chat";
@@ -80,7 +81,15 @@ export function GameRoom({
           nickname={nickname}
           avatarId={avatarId}
           isGuest={isGuest}
-          onLeaderboard={isGuest ? undefined : () => setRatingOpen(true)}
+          links={MENU_LINKS}
+          onOverlay={isGuest ? undefined : () => setRatingOpen(true)}
+          // Посреди партии уход рвёт сокет и высаживает из круга ходов —
+          // спрашиваем, а не выкидываем молча (docs/BACKLOG.md C3).
+          confirmExit={
+            phase && phase !== "waiting" && phase !== "finished"
+              ? "Партия идёт. Если выйдешь, место за столом достанется следующему."
+              : undefined
+          }
         />
       </header>
 
