@@ -83,7 +83,7 @@ export function CreateRoomForm() {
                 value={option}
                 checked={mode === option}
                 onChange={() => setMode(option)}
-                className="mt-0.5 size-4 shrink-0 accent-crimson"
+                className="mt-0.5 size-4 shrink-0 accent-accent"
               />
               <span className="text-sm">
                 {MODE_COPY[option].title}
@@ -124,7 +124,7 @@ export function CreateRoomForm() {
                 value={option}
                 checked={hostRotation === option}
                 onChange={() => setRotation(option)}
-                className="mt-0.5 size-4 shrink-0 accent-crimson"
+                className="mt-0.5 size-4 shrink-0 accent-accent"
               />
               <span className="text-sm">
                 {ROTATION_COPY[option].title}
@@ -177,7 +177,7 @@ export function CreateRoomForm() {
               min={1}
               max={99}
               defaultValue={endMode === "rounds" ? 10 : 5}
-              className="tabular w-20 rounded-lg border border-line bg-blush px-3 py-2 text-center outline-none transition focus:border-crimson"
+              className="tabular w-20 rounded-lg border border-line bg-surface px-3 py-2 text-center outline-none transition focus:border-accent"
             />
           </label>
         )}
@@ -189,7 +189,7 @@ export function CreateRoomForm() {
         честно и не мешаем (см. src/games/pricetitute/docs/BACKLOG.md O6).
       */}
       {hasScreen(kind) && mode !== "normal" && (
-        <p className="rounded-lg border border-crimson/30 bg-tint px-3 py-2 text-xs text-deep">
+        <p className="rounded-lg border border-accent/30 bg-tint px-3 py-2 text-xs text-deep">
           Эти вопросы попадут на экран целиком. Если экран уходит в трансляцию,
           учти: за содержимое картинки площадка спросит с тебя, а не с игры.
         </p>
@@ -205,7 +205,7 @@ export function CreateRoomForm() {
             type="checkbox"
             name="includeAdult"
             defaultChecked
-            className="mt-0.5 size-4 shrink-0 accent-crimson"
+            className="mt-0.5 size-4 shrink-0 accent-accent"
           />
           <span className="text-muted">
             Включить вопросы 18+. Без галочки в комнате будут только безобидные.
@@ -243,7 +243,7 @@ function Durations({
               defaultChecked={choice.value === selected}
               className="peer sr-only"
             />
-            <span className="block rounded-lg border border-line bg-paper px-4 py-2 text-sm transition peer-checked:border-crimson peer-checked:bg-crimson peer-checked:text-paper">
+            <span className="block rounded-lg border border-line bg-paper px-4 py-2 text-sm transition peer-checked:border-accent peer-checked:bg-accent peer-checked:text-paper">
               {choice.label}
             </span>
           </label>
@@ -274,7 +274,7 @@ function Choice({
         value={value}
         checked={checked}
         onChange={onSelect}
-        className="size-4 accent-crimson"
+        className="size-4 accent-accent"
       />
       <span>{children}</span>
     </label>

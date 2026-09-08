@@ -107,13 +107,13 @@ export function GameRoom({
             <div className="flex flex-col gap-2 sm:flex-row">
               <Link
                 href={ROUTES.play}
-                className="rounded-lg bg-crimson px-5 py-2.5 text-sm font-semibold text-paper transition hover:bg-deep"
+                className="rounded-lg bg-accent px-5 py-2.5 text-sm font-semibold text-paper transition hover:bg-deep"
               >
                 В общую комнату
               </Link>
               <Link
                 href={ROUTES.newRoom}
-                className="rounded-lg border border-line bg-paper px-5 py-2.5 text-sm font-semibold transition hover:border-crimson hover:text-crimson"
+                className="rounded-lg border border-line bg-paper px-5 py-2.5 text-sm font-semibold transition hover:border-accent hover:text-accent"
               >
                 Создать свою
               </Link>
@@ -129,7 +129,7 @@ export function GameRoom({
       )}
 
       {room.error && (
-        <p className="rounded-xl border border-crimson/30 bg-tint px-4 py-2.5 text-center text-sm text-deep">
+        <p className="rounded-xl border border-accent/30 bg-tint px-4 py-2.5 text-center text-sm text-deep">
           {room.error}
         </p>
       )}
@@ -245,7 +245,7 @@ function QuestionCard({ state }: { state: GameStatePayload }) {
   return (
     <div className="rounded-2xl border border-line bg-paper p-6">
       {state.questionAdult && (
-        <span className="mb-3 inline-block rounded-md bg-tint px-2 py-0.5 text-xs font-semibold text-crimson">
+        <span className="mb-3 inline-block rounded-md bg-tint px-2 py-0.5 text-xs font-semibold text-accent">
           18+
         </span>
       )}
@@ -304,7 +304,7 @@ function ActionArea({
               <button
                 type="button"
                 onClick={onInviteBots}
-                className="rounded-xl bg-crimson px-4 py-3 font-semibold text-paper transition hover:bg-deep"
+                className="rounded-xl bg-accent px-4 py-3 font-semibold text-paper transition hover:bg-deep"
               >
                 Forever alone
               </button>
@@ -325,7 +325,7 @@ function ActionArea({
           <button
             type="button"
             onClick={() => void onRead()}
-            className="rounded-xl bg-crimson px-4 py-3 text-lg font-semibold text-paper transition hover:bg-deep"
+            className="rounded-xl bg-accent px-4 py-3 text-lg font-semibold text-paper transition hover:bg-deep"
           >
             Прочитал
           </button>
@@ -374,7 +374,7 @@ function ActionArea({
           <button
             type="button"
             onClick={onCloseBetting}
-            className="rounded-xl border border-line bg-paper px-4 py-3 text-sm font-semibold transition hover:border-crimson hover:text-crimson"
+            className="rounded-xl border border-line bg-paper px-4 py-3 text-sm font-semibold transition hover:border-accent hover:text-accent"
           >
             {waiting === 0
               ? "Вскрываем"

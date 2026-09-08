@@ -16,7 +16,7 @@ export function ForgotForm() {
       <FormError>{state.error}</FormError>
 
       {state.ok && (
-        <p className="rounded-xl border border-line bg-blush px-4 py-3 text-sm leading-relaxed text-muted">
+        <p className="rounded-xl border border-line bg-surface px-4 py-3 text-sm leading-relaxed text-muted">
           {state.ok}
         </p>
       )}

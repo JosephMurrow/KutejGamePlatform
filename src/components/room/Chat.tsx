@@ -141,7 +141,7 @@ export function Chat({
                   {badge?.(message.playerId)}
                   <span
                     className={`mr-1 font-medium ${
-                      message.playerId === youId ? "text-crimson" : "text-muted"
+                      message.playerId === youId ? "text-accent" : "text-muted"
                     }`}
                   >
                     {message.nickname}
@@ -157,7 +157,7 @@ export function Chat({
           <button
             type="button"
             onClick={scrollToBottom}
-            className="absolute inset-x-3 bottom-2 truncate rounded-full bg-crimson px-3 py-1.5 text-xs font-medium text-paper shadow-lg transition hover:bg-deep"
+            className="absolute inset-x-3 bottom-2 truncate rounded-full bg-accent px-3 py-1.5 text-xs font-medium text-paper shadow-lg transition hover:bg-deep"
           >
             {unreadLabel(unreadCount, unread.nickname)}
           </button>
@@ -174,7 +174,7 @@ export function Chat({
           <button
             type="button"
             onClick={focusChat}
-            className="pointer-events-auto max-w-full truncate rounded-full bg-crimson px-4 py-2 text-xs font-medium text-paper shadow-lg transition hover:bg-deep"
+            className="pointer-events-auto max-w-full truncate rounded-full bg-accent px-4 py-2 text-xs font-medium text-paper shadow-lg transition hover:bg-deep"
           >
             ↓ {unreadLabel(unreadCount, unread.nickname)}
           </button>
@@ -190,13 +190,13 @@ export function Chat({
           onKeyDown={(event) => {
             if (event.key === "Enter") void submit();
           }}
-          className="min-w-0 flex-1 rounded-lg border border-line bg-blush px-3 py-2 text-sm outline-none transition focus:border-crimson"
+          className="min-w-0 flex-1 rounded-lg border border-line bg-surface px-3 py-2 text-sm outline-none transition focus:border-accent"
         />
         <button
           type="button"
           disabled={busy || text.trim() === ""}
           onClick={() => void submit()}
-          className="rounded-lg bg-crimson px-3 py-2 text-sm font-semibold text-paper transition hover:bg-deep disabled:opacity-50"
+          className="rounded-lg bg-accent px-3 py-2 text-sm font-semibold text-paper transition hover:bg-deep disabled:opacity-50"
         >
           Отправить
         </button>

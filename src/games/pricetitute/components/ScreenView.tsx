@@ -136,7 +136,7 @@ export function ScreenView({
           {state.roomTitle ?? <GameBrand className="text-2xl sm:text-4xl" />}
         </h1>
 
-        <span className="tabular shrink-0 text-2xl font-bold tracking-[0.2em] text-crimson sm:text-4xl">
+        <span className="tabular shrink-0 text-2xl font-bold tracking-[0.2em] text-accent sm:text-4xl">
           {state.roomCode}
         </span>
       </header>
@@ -204,7 +204,7 @@ function JoinBoard({ state }: { state: GameStatePayload }) {
       <Qr link={link} size={168} />
       <div>
         <p className="text-xl text-muted sm:text-2xl">Заходи с телефона</p>
-        <p className="tabular mt-1 text-4xl font-bold tracking-[0.2em] text-crimson sm:text-5xl">
+        <p className="tabular mt-1 text-4xl font-bold tracking-[0.2em] text-accent sm:text-5xl">
           {state.roomCode}
         </p>
       </div>
@@ -228,7 +228,7 @@ function JoinCorner({ state }: { state: GameStatePayload }) {
       <Qr link={link} size={92} />
       <div className="min-w-0">
         <p className="text-sm text-muted">Заходи с телефона</p>
-        <p className="tabular text-xl font-bold tracking-[0.15em] text-crimson">
+        <p className="tabular text-xl font-bold tracking-[0.15em] text-accent">
           {state.roomCode}
         </p>
       </div>
@@ -347,7 +347,7 @@ function Stage({
   return (
     <div className="rounded-3xl border border-line bg-paper p-6 sm:p-10">
       {state.questionAdult && (
-        <span className="mb-4 inline-block rounded-lg bg-tint px-3 py-1 text-base font-semibold text-crimson">
+        <span className="mb-4 inline-block rounded-lg bg-tint px-3 py-1 text-base font-semibold text-accent">
           18+
         </span>
       )}
@@ -385,12 +385,12 @@ function ScreenReveal({
 
   return (
     <div className="flex flex-col gap-5">
-      <div className="rounded-3xl border-2 border-crimson/30 bg-tint p-6 text-center sm:p-8">
+      <div className="rounded-3xl border-2 border-accent/30 bg-tint p-6 text-center sm:p-8">
         <p className="text-lg text-muted sm:text-2xl">
           Ведущий согласился бы за
         </p>
         <p
-          className={`mt-2 text-4xl font-bold text-crimson sm:text-6xl ${
+          className={`mt-2 text-4xl font-bold text-accent sm:text-6xl ${
             isNever(reveal.hostAnswer) ? "" : "tabular"
           }`}
         >
@@ -466,7 +466,7 @@ function Winners({
   return (
     <Card>
       Партия окончена
-      <span className="mt-3 block text-2xl font-semibold text-crimson">
+      <span className="mt-3 block text-2xl font-semibold text-accent">
         {names === "" ? "Без победителя" : names}
       </span>
     </Card>
@@ -537,7 +537,7 @@ function Row({
       </span>
       <Avatar id={player.avatarId} size={32} />
       <span className="min-w-0 flex-1 truncate text-lg">{name}</span>
-      <span className="tabular shrink-0 text-lg font-bold text-crimson">
+      <span className="tabular shrink-0 text-lg font-bold text-accent">
         {player.score}
       </span>
     </li>

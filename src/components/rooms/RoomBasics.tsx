@@ -20,7 +20,7 @@ import {
  */
 
 const FIELD =
-  "rounded-lg border border-line bg-blush px-3 py-2 text-sm outline-none transition focus:border-crimson";
+  "rounded-lg border border-line bg-surface px-3 py-2 text-sm outline-none transition focus:border-accent";
 
 export function RoomKindPicker({
   value,
@@ -44,7 +44,7 @@ export function RoomKindPicker({
               value={option}
               checked={value === option}
               onChange={() => onChange(option)}
-              className="mt-0.5 size-4 shrink-0 accent-crimson"
+              className="mt-0.5 size-4 shrink-0 accent-accent"
             />
             <span className="text-sm">
               {KIND_COPY[option].title}

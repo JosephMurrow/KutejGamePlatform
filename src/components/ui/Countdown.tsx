@@ -43,7 +43,7 @@ export function Countdown({
     <div className={`flex items-center ${big ? "gap-5" : "gap-3"}`}>
       <span
         className={`tabular font-semibold ${big ? "text-3xl" : "text-sm"} ${
-          low ? "text-crimson" : "text-muted"
+          low ? "text-accent" : "text-muted"
         }`}
       >
         {format(remaining)}
@@ -53,7 +53,7 @@ export function Countdown({
       >
         <div
           className={`h-full rounded-full transition-[width] duration-200 ease-linear ${
-            low ? "bg-crimson" : "bg-rose"
+            low ? "bg-accent" : "bg-accent-soft"
           }`}
           style={{ width: `${share * 100}%` }}
         />

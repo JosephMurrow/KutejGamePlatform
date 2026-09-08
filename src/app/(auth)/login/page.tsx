@@ -3,6 +3,7 @@ import Link from "next/link";
 import { LoginForm } from "@/components/auth/LoginForm";
 import { Brand, PLATFORM } from "@/components/Brand";
 
+import { Card } from "@/components/ui/Card";
 export const metadata: Metadata = {
   title: `Вход — ${PLATFORM}`,
 };
@@ -21,10 +22,10 @@ export default async function LoginPage({
           <Brand className="text-2xl" />
         </Link>
 
-        <div className="rounded-2xl border border-line bg-paper p-6">
+        <Card>
           <h1 className="mb-5 text-xl font-semibold">Вход</h1>
           <LoginForm next={next} />
-        </div>
+        </Card>
       </div>
     </main>
   );

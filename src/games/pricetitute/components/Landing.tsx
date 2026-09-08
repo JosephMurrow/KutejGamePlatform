@@ -47,13 +47,13 @@ export async function Landing() {
             <div className="flex flex-col gap-3 sm:flex-row">
               <Link
                 href={ROUTES.play}
-                className="rounded-xl bg-crimson px-8 py-3 text-lg font-semibold text-paper transition hover:bg-deep"
+                className="rounded-xl bg-accent px-8 py-3 text-lg font-semibold text-paper transition hover:bg-deep"
               >
                 В общую комнату
               </Link>
               <Link
                 href={ROUTES.newRoom}
-                className="rounded-xl border border-line bg-paper px-8 py-3 text-lg font-semibold transition hover:border-crimson hover:text-crimson"
+                className="rounded-xl border border-line bg-paper px-8 py-3 text-lg font-semibold transition hover:border-accent hover:text-accent"
               >
                 Своя комната
               </Link>
@@ -61,14 +61,14 @@ export async function Landing() {
 
             <Link
               href="/join"
-              className="text-sm text-muted underline-offset-4 transition hover:text-crimson hover:underline"
+              className="text-sm text-muted underline-offset-4 transition hover:text-accent hover:underline"
             >
               Зайти по коду
             </Link>
 
             <Link
               href="/profile"
-              className="flex items-center gap-3 rounded-2xl border border-line bg-paper px-4 py-2.5 transition hover:border-crimson"
+              className="flex items-center gap-3 rounded-2xl border border-line bg-paper px-4 py-2.5 transition hover:border-accent"
             >
               <Avatar id={user.avatarId} size={36} />
               <span className="text-left">
@@ -83,13 +83,13 @@ export async function Landing() {
           <div className="mt-2 flex flex-col gap-3 sm:flex-row">
             <Link
               href="/register"
-              className="rounded-xl bg-crimson px-8 py-3 text-lg font-semibold text-paper transition hover:bg-deep"
+              className="rounded-xl bg-accent px-8 py-3 text-lg font-semibold text-paper transition hover:bg-deep"
             >
               Начать играть
             </Link>
             <Link
               href="/login"
-              className="rounded-xl border border-line bg-paper px-8 py-3 text-lg font-semibold transition hover:border-crimson hover:text-crimson"
+              className="rounded-xl border border-line bg-paper px-8 py-3 text-lg font-semibold transition hover:border-accent hover:text-accent"
             >
               Войти
             </Link>
@@ -100,7 +100,7 @@ export async function Landing() {
         {!user && (
           <Link
             href="/join"
-            className="text-sm text-muted underline-offset-4 transition hover:text-crimson hover:underline"
+            className="text-sm text-muted underline-offset-4 transition hover:text-accent hover:underline"
           >
             Позвали в комнату? Зайти по коду
           </Link>
@@ -117,7 +117,7 @@ export async function Landing() {
               className="rounded-2xl border border-line bg-paper p-5"
             >
               <div className="mb-2 flex items-center gap-2">
-                <span className="tabular flex size-6 shrink-0 items-center justify-center rounded-full bg-crimson text-xs font-bold text-paper">
+                <span className="tabular flex size-6 shrink-0 items-center justify-center rounded-full bg-accent text-xs font-bold text-paper">
                   {index + 1}
                 </span>
                 <h3 className="font-semibold">{step.title}</h3>
@@ -128,9 +128,9 @@ export async function Landing() {
         </ol>
       </section>
 
-      <section className="mt-10 rounded-2xl border border-crimson/30 bg-tint p-5">
+      <section className="mt-10 rounded-2xl border border-accent/30 bg-tint p-5">
         <h2 className="mb-2 flex items-center gap-2 font-semibold text-deep">
-          <span className="rounded-md bg-crimson px-1.5 py-0.5 text-xs font-bold text-paper">
+          <span className="rounded-md bg-accent px-1.5 py-0.5 text-xs font-bold text-paper">
             18+
           </span>
           Игра для взрослых

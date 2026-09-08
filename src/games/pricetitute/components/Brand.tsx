@@ -9,7 +9,7 @@ export const BRAND = PRICETITUTE.title;
 export function GameBrand({ className }: { className?: string }) {
   return (
     <span className={`font-bold tracking-tight ${className ?? ""}`}>
-      Плати<span className="text-crimson">тутка</span>
+      Плати<span className="text-accent">тутка</span>
     </span>
   );
 }

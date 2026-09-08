@@ -83,7 +83,7 @@ export function PlayerList({
                     onClick={() => setEditing(player.id)}
                     title={`Переименовать ${player.nickname}`}
                     aria-label={`Переименовать ${player.nickname}`}
-                    className="shrink-0 rounded-md px-1.5 py-0.5 text-xs text-muted opacity-0 transition hover:text-crimson focus:opacity-100 group-hover:opacity-100"
+                    className="shrink-0 rounded-md px-1.5 py-0.5 text-xs text-muted opacity-0 transition hover:text-accent focus:opacity-100 group-hover:opacity-100"
                   >
                     ✎
                   </button>
@@ -95,13 +95,13 @@ export function PlayerList({
                   onClick={() => onKick?.(player.id)}
                   title={`Выгнать ${player.nickname}`}
                   aria-label={`Выгнать ${player.nickname}`}
-                  className="shrink-0 rounded-md px-1.5 py-0.5 text-xs text-muted opacity-0 transition hover:text-crimson focus:opacity-100 group-hover:opacity-100"
+                  className="shrink-0 rounded-md px-1.5 py-0.5 text-xs text-muted opacity-0 transition hover:text-accent focus:opacity-100 group-hover:opacity-100"
                 >
                   ✕
                 </button>
               )}
 
-              <span className="tabular shrink-0 text-sm font-semibold text-crimson">
+              <span className="tabular shrink-0 text-sm font-semibold text-accent">
                 {player.score}
               </span>
             </li>
@@ -134,7 +134,7 @@ function Rename({
         if (event.key === "Enter") onDone(value.trim());
         if (event.key === "Escape") onDone(null);
       }}
-      className="w-full rounded-md border border-crimson bg-blush px-2 py-1 text-sm outline-none"
+      className="w-full rounded-md border border-accent bg-surface px-2 py-1 text-sm outline-none"
     />
   );
 }

@@ -71,7 +71,7 @@ export function Finished({
               <span className="min-w-0 flex-1 truncate text-sm font-medium">
                 {player.nickname}
               </span>
-              <span className="tabular text-sm font-semibold text-crimson">
+              <span className="tabular text-sm font-semibold text-accent">
                 {player.score}
               </span>
             </li>
@@ -83,7 +83,7 @@ export function Finished({
         <button
           type="button"
           onClick={onRestart}
-          className="rounded-xl bg-crimson px-4 py-3 font-semibold text-paper transition hover:bg-deep"
+          className="rounded-xl bg-accent px-4 py-3 font-semibold text-paper transition hover:bg-deep"
         >
           Сыграть ещё раз
         </button>

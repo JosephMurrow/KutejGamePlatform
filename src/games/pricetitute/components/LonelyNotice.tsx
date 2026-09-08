@@ -31,14 +31,14 @@ export function LonelyNotice() {
         <button
           type="button"
           onClick={() => setInviteOpen(true)}
-          className="flex-1 rounded-xl bg-crimson px-4 py-2.5 text-sm font-semibold text-paper transition hover:bg-deep"
+          className="flex-1 rounded-xl bg-accent px-4 py-2.5 text-sm font-semibold text-paper transition hover:bg-deep"
         >
           Позвать друга
         </button>
 
         <Link
           href={ROUTES.newRoom}
-          className="flex-1 rounded-xl border border-line bg-paper px-4 py-2.5 text-sm font-semibold transition hover:border-crimson hover:text-crimson"
+          className="flex-1 rounded-xl border border-line bg-paper px-4 py-2.5 text-sm font-semibold transition hover:border-accent hover:text-accent"
         >
           Своя комната с ботами
         </Link>

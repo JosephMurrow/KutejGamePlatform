@@ -103,7 +103,7 @@ function Row({
         {you && <span className="ml-1 text-xs text-muted">· ты</span>}
       </span>
 
-      <span className="tabular w-12 shrink-0 text-right text-sm font-semibold text-crimson">
+      <span className="tabular w-12 shrink-0 text-right text-sm font-semibold text-accent">
         {row.points}
       </span>
       <span className="tabular w-14 shrink-0 text-right text-sm text-muted">

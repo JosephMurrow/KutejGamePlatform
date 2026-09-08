@@ -15,7 +15,7 @@ export default function NotFound() {
 
       <Link
         href="/"
-        className="rounded-lg bg-crimson px-5 py-2.5 text-sm font-semibold text-paper transition hover:bg-deep"
+        className="rounded-lg bg-accent px-5 py-2.5 text-sm font-semibold text-paper transition hover:bg-deep"
       >
         На главную
       </Link>

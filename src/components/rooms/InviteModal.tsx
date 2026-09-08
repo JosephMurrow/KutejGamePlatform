@@ -61,14 +61,14 @@ export function InviteModal({
 
         <p className="text-center text-xs text-muted">{hint}</p>
 
-        <p className="tabular w-full truncate rounded-lg border border-line bg-blush px-3 py-2 text-center text-xs text-muted">
+        <p className="tabular w-full truncate rounded-lg border border-line bg-surface px-3 py-2 text-center text-xs text-muted">
           {link}
         </p>
 
         <button
           type="button"
           onClick={() => void copy()}
-          className="w-full rounded-xl bg-crimson px-4 py-3 text-sm font-semibold text-paper transition hover:bg-deep"
+          className="w-full rounded-xl bg-accent px-4 py-3 text-sm font-semibold text-paper transition hover:bg-deep"
         >
           {copied ? "Ссылка скопирована" : "Скопировать ссылку"}
         </button>

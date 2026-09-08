@@ -47,13 +47,13 @@ export default async function ConfirmPage({
       <div className="flex flex-col gap-2 sm:flex-row">
         <Link
           href="/games/pricetitute/play"
-          className="rounded-lg bg-crimson px-5 py-2.5 text-sm font-semibold text-paper transition hover:bg-deep"
+          className="rounded-lg bg-accent px-5 py-2.5 text-sm font-semibold text-paper transition hover:bg-deep"
         >
           В общую комнату
         </Link>
         <Link
           href="/profile"
-          className="rounded-lg border border-line bg-paper px-5 py-2.5 text-sm font-semibold transition hover:border-crimson hover:text-crimson"
+          className="rounded-lg border border-line bg-paper px-5 py-2.5 text-sm font-semibold transition hover:border-accent hover:text-accent"
         >
           В профиль
         </Link>

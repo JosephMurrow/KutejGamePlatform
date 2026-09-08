@@ -40,7 +40,7 @@ export function GuestGate({
         <h1 className="mt-4 text-2xl font-bold">
           {title ?? "Заходи в комнату"}
         </h1>
-        <p className="tabular mt-1 text-sm tracking-widest text-crimson">
+        <p className="tabular mt-1 text-sm tracking-widest text-accent">
           {code}
         </p>
       </div>
@@ -66,7 +66,7 @@ export function GuestGate({
             type="checkbox"
             name="adult"
             defaultChecked={state.values?.adult === "on"}
-            className="mt-0.5 size-4 shrink-0 accent-crimson"
+            className="mt-0.5 size-4 shrink-0 accent-accent"
           />
           <span className="text-muted">
             Мне есть восемнадцать. Вопросы в игре взрослые и местами
@@ -74,9 +74,7 @@ export function GuestGate({
           </span>
         </label>
         {state.fieldErrors?.adult && (
-          <p className="-mt-2 text-xs text-crimson">
-            {state.fieldErrors.adult}
-          </p>
+          <p className="-mt-2 text-xs text-accent">{state.fieldErrors.adult}</p>
         )}
 
         <SubmitButton>Играть гостем</SubmitButton>
@@ -93,13 +91,13 @@ export function GuestGate({
         <div className="flex flex-col gap-2 sm:flex-row">
           <Link
             href={`/login?next=${encodeURIComponent(next)}`}
-            className="flex-1 rounded-xl border border-line bg-paper px-4 py-2.5 font-semibold transition hover:border-crimson hover:text-crimson"
+            className="flex-1 rounded-xl border border-line bg-paper px-4 py-2.5 font-semibold transition hover:border-accent hover:text-accent"
           >
             Войти
           </Link>
           <Link
             href={`/register?next=${encodeURIComponent(next)}`}
-            className="flex-1 rounded-xl border border-line bg-paper px-4 py-2.5 font-semibold transition hover:border-crimson hover:text-crimson"
+            className="flex-1 rounded-xl border border-line bg-paper px-4 py-2.5 font-semibold transition hover:border-accent hover:text-accent"
           >
             Зарегистрироваться
           </Link>

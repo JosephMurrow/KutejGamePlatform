@@ -28,7 +28,7 @@ export function EmailForm({
       <FormError>{state.error}</FormError>
 
       {state.ok && (
-        <p className="rounded-xl border border-line bg-blush px-4 py-2.5 text-sm text-muted">
+        <p className="rounded-xl border border-line bg-surface px-4 py-2.5 text-sm text-muted">
           {state.ok}
         </p>
       )}

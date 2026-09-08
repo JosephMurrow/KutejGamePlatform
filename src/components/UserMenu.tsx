@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import { Avatar } from "@/components/Avatar";
+import { Button, ButtonLink } from "@/components/ui/Button";
 import { Modal } from "@/components/ui/Modal";
 import { logoutAction } from "@/lib/auth/actions";
 
@@ -85,7 +86,7 @@ export function UserMenu({
         aria-haspopup="menu"
         aria-expanded={open}
         onClick={() => setOpen((value) => !value)}
-        className="flex items-center gap-2 rounded-xl border border-line bg-paper py-1.5 pl-2 pr-3 transition hover:border-crimson"
+        className="flex items-center gap-2 rounded-xl border border-line bg-paper py-1.5 pl-2 pr-3 transition hover:border-accent"
       >
         <Avatar id={avatarId} size={28} />
         <span className="max-w-28 truncate text-sm font-medium sm:max-w-40">
@@ -125,7 +126,7 @@ export function UserMenu({
                   setOpen(false);
                   onOverlay(link.href);
                 }}
-                className="block w-full px-4 py-2.5 text-left text-sm transition hover:bg-tint hover:text-crimson"
+                className="block w-full px-4 py-2.5 text-left text-sm transition hover:bg-tint hover:text-accent"
               >
                 {link.label}
               </button>
@@ -135,7 +136,7 @@ export function UserMenu({
                 href={link.href}
                 role="menuitem"
                 onClick={() => setOpen(false)}
-                className="block px-4 py-2.5 text-sm transition hover:bg-tint hover:text-crimson"
+                className="block px-4 py-2.5 text-sm transition hover:bg-tint hover:text-accent"
               >
                 {link.label}
               </Link>
@@ -157,7 +158,7 @@ export function UserMenu({
                   setOpen(false);
                   setAsking(true);
                 }}
-                className="block w-full border-t border-line px-4 py-2.5 text-left text-sm transition hover:bg-tint hover:text-crimson"
+                className="block w-full border-t border-line px-4 py-2.5 text-left text-sm transition hover:bg-tint hover:text-accent"
               >
                 {SHELF.label}
               </button>
@@ -166,7 +167,7 @@ export function UserMenu({
                 href={SHELF.href}
                 role="menuitem"
                 onClick={() => setOpen(false)}
-                className="block border-t border-line px-4 py-2.5 text-sm transition hover:bg-tint hover:text-crimson"
+                className="block border-t border-line px-4 py-2.5 text-sm transition hover:bg-tint hover:text-accent"
               >
                 {SHELF.label}
               </Link>
@@ -182,7 +183,7 @@ export function UserMenu({
             <button
               type="submit"
               role="menuitem"
-              className="w-full px-4 py-2.5 text-left text-sm text-muted transition hover:bg-tint hover:text-crimson"
+              className="w-full px-4 py-2.5 text-left text-sm text-muted transition hover:bg-tint hover:text-accent"
             >
               Выйти
             </button>
@@ -197,19 +198,14 @@ export function UserMenu({
       >
         <p className="text-sm text-muted">{confirmExit}</p>
         <div className="mt-4 flex gap-2">
-          <Link
-            href={SHELF.href}
-            className="rounded-lg bg-crimson px-4 py-2 text-sm font-semibold text-paper transition hover:bg-deep"
-          >
-            Выйти
-          </Link>
-          <button
+          <ButtonLink href={SHELF.href}>Выйти</ButtonLink>
+          <Button
             type="button"
+            look="secondary"
             onClick={() => setAsking(false)}
-            className="rounded-lg border border-line px-4 py-2 text-sm transition hover:border-crimson"
           >
             Остаться
-          </button>
+          </Button>
         </div>
       </Modal>
     </div>

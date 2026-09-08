@@ -42,7 +42,7 @@ export function RoomPanel({
         <h2 className="min-w-0 truncate text-sm font-semibold text-muted">
           {state.roomTitle ?? "Своя комната"}
         </h2>
-        <span className="tabular shrink-0 text-sm font-bold tracking-widest text-crimson">
+        <span className="tabular shrink-0 text-sm font-bold tracking-widest text-accent">
           {state.roomCode}
         </span>
       </div>
@@ -50,13 +50,13 @@ export function RoomPanel({
       <button
         type="button"
         onClick={() => setInviteOpen(true)}
-        className="w-full rounded-lg border border-line bg-blush px-3 py-2 text-sm transition hover:border-crimson hover:text-crimson"
+        className="w-full rounded-lg border border-line bg-surface px-3 py-2 text-sm transition hover:border-accent hover:text-accent"
       >
         Пригласить друга
       </button>
 
       {state.locked && (
-        <p className="mt-3 rounded-lg border border-crimson/30 bg-tint px-3 py-2 text-xs text-deep">
+        <p className="mt-3 rounded-lg border border-accent/30 bg-tint px-3 py-2 text-xs text-deep">
           Набор закрыт: новые в комнату не войдут.
         </p>
       )}
@@ -70,7 +70,7 @@ export function RoomPanel({
         <button
           type="button"
           onClick={() => onLock(!state.locked)}
-          className="mt-3 w-full rounded-lg border border-line bg-blush px-3 py-2 text-sm transition hover:border-crimson hover:text-crimson"
+          className="mt-3 w-full rounded-lg border border-line bg-surface px-3 py-2 text-sm transition hover:border-accent hover:text-accent"
         >
           {state.locked ? "Открыть набор" : "Закрыть набор"}
         </button>
@@ -84,14 +84,14 @@ export function RoomPanel({
         показывать залу нельзя.
       */}
       {hasScreen(state.roomKind) && (
-        <p className="mt-3 rounded-lg bg-blush px-3 py-2 text-xs text-muted">
+        <p className="mt-3 rounded-lg bg-surface px-3 py-2 text-xs text-muted">
           Вопрос и своя сумма — только на твоём устройстве. Если этот экран
           видит зал, отвечай с телефона: открой ту же комнату там.
         </p>
       )}
 
       {state.twitchChannel && (
-        <p className="mt-3 rounded-lg bg-blush px-3 py-2 text-xs text-muted">
+        <p className="mt-3 rounded-lg bg-surface px-3 py-2 text-xs text-muted">
           Чат Твича: {state.twitchChannel} ·{" "}
           {state.twitchConnected ? "на связи" : "подключаемся…"}
           <span className="mt-1 block">
@@ -150,7 +150,7 @@ function Screen({ link }: { link: string }) {
       <button
         type="button"
         onClick={() => void copy()}
-        className="w-full rounded-lg border border-line bg-blush px-3 py-2 text-sm transition hover:border-crimson hover:text-crimson"
+        className="w-full rounded-lg border border-line bg-surface px-3 py-2 text-sm transition hover:border-accent hover:text-accent"
       >
         {copied ? "Ссылка на экран скопирована" : "Скопировать ссылку на экран"}
       </button>
@@ -188,7 +188,7 @@ function Bots({
             type="button"
             disabled={room < size}
             onClick={() => onInvite(size)}
-            className="rounded-lg border border-line bg-blush px-2.5 py-1 text-xs transition hover:border-crimson hover:text-crimson disabled:opacity-40 disabled:hover:border-line disabled:hover:text-inherit"
+            className="rounded-lg border border-line bg-surface px-2.5 py-1 text-xs transition hover:border-accent hover:text-accent disabled:opacity-40 disabled:hover:border-line disabled:hover:text-inherit"
           >
             +{size}
           </button>
@@ -198,7 +198,7 @@ function Bots({
           <button
             type="button"
             onClick={onDismiss}
-            className="rounded-lg border border-line bg-paper px-2.5 py-1 text-xs text-muted transition hover:border-crimson hover:text-crimson"
+            className="rounded-lg border border-line bg-paper px-2.5 py-1 text-xs text-muted transition hover:border-accent hover:text-accent"
           >
             Выгнать всех
           </button>

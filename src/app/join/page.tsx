@@ -3,6 +3,7 @@ import Link from "next/link";
 import { Brand, PLATFORM } from "@/components/Brand";
 import { JoinByCodeForm } from "@/components/rooms/JoinByCodeForm";
 
+import { Card } from "@/components/ui/Card";
 export const metadata: Metadata = {
   title: `Вход по коду — ${PLATFORM}`,
 };
@@ -28,9 +29,9 @@ export default function JoinPage() {
         </p>
       </div>
 
-      <div className="rounded-2xl border border-line bg-paper p-6">
+      <Card>
         <JoinByCodeForm />
-      </div>
+      </Card>
     </main>
   );
 }

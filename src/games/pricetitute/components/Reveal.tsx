@@ -25,10 +25,10 @@ export function Reveal({ state }: { state: GameStatePayload }) {
 
   return (
     <div className="flex flex-col gap-5">
-      <div className="rounded-2xl border border-crimson/30 bg-tint p-5 text-center">
+      <div className="rounded-2xl border border-accent/30 bg-tint p-5 text-center">
         <p className="text-sm text-muted">Ведущий согласился бы за</p>
         <p
-          className={`mt-1 text-3xl font-bold text-crimson ${
+          className={`mt-1 text-3xl font-bold text-accent ${
             isNever(reveal.hostAnswer) ? "" : "tabular"
           }`}
         >
@@ -85,7 +85,7 @@ export function Reveal({ state }: { state: GameStatePayload }) {
                   <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-tint">
                     <div
                       className={`h-full rounded-full ${
-                        bet.won ? "bg-gold" : "bg-rose/60"
+                        bet.won ? "bg-gold" : "bg-accent-soft/60"
                       }`}
                       style={{ width: `${share * 100}%` }}
                     />
@@ -159,7 +159,7 @@ function Outcome({
               </div>
 
               <span
-                className={`shrink-0 font-bold text-crimson ${
+                className={`shrink-0 font-bold text-accent ${
                   isNever(bet.bet) ? "" : "tabular"
                 }`}
               >

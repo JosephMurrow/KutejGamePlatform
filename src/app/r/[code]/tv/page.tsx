@@ -5,6 +5,7 @@ import { ScreenView } from "@/games/pricetitute/components/ScreenView";
 import { getSessionUserId } from "@/lib/auth/session";
 import { findPrivateRoom } from "@/lib/rooms/private";
 import { hasScreen } from "@/shared/room-settings";
+import { GameTheme } from "@/components/games/GameTheme";
 
 export const metadata: Metadata = {
   title: `Экран — ${PLATFORM}`,
@@ -40,5 +41,9 @@ export default async function ScreenPage({
     if (userId !== room.hostId) notFound();
   }
 
-  return <ScreenView roomCode={room.code} screenKey={room.screenKey} />;
+  return (
+    <GameTheme id={room.gameId}>
+      <ScreenView roomCode={room.code} screenKey={room.screenKey} />
+    </GameTheme>
+  );
 }

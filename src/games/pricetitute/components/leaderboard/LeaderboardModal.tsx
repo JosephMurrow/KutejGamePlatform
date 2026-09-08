@@ -104,8 +104,8 @@ function Tab({
       onClick={onSelect}
       className={`rounded-lg border px-4 py-1.5 text-sm font-medium transition ${
         active
-          ? "border-crimson bg-crimson text-paper"
-          : "border-line bg-paper hover:border-crimson hover:text-crimson"
+          ? "border-accent bg-accent text-paper"
+          : "border-line bg-paper hover:border-accent hover:text-accent"
       }`}
     >
       {children}

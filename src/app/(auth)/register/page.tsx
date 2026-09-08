@@ -3,6 +3,7 @@ import Link from "next/link";
 import { RegisterForm } from "@/components/auth/RegisterForm";
 import { Brand, PLATFORM } from "@/components/Brand";
 
+import { Card } from "@/components/ui/Card";
 export const metadata: Metadata = {
   title: `Регистрация — ${PLATFORM}`,
 };
@@ -21,10 +22,10 @@ export default async function RegisterPage({
           <Brand className="text-2xl" />
         </Link>
 
-        <div className="rounded-2xl border border-line bg-paper p-6">
+        <Card>
           <h1 className="mb-5 text-xl font-semibold">Регистрация</h1>
           <RegisterForm next={next} />
-        </div>
+        </Card>
       </div>
     </main>
   );

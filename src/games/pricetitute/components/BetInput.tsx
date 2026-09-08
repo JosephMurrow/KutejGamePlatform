@@ -51,8 +51,8 @@ export function BetInput({
           onChange={(event) =>
             setDigits(event.target.value.replace(/\D/g, "").slice(0, 13))
           }
-          className={`tabular w-full rounded-xl border bg-blush py-3 pl-4 pr-11 text-right text-2xl font-semibold outline-none transition disabled:opacity-60 sm:py-4 sm:pr-12 sm:text-3xl ${
-            overflow ? "border-crimson" : "border-line focus:border-crimson"
+          className={`tabular w-full rounded-xl border bg-surface py-3 pl-4 pr-11 text-right text-2xl font-semibold outline-none transition disabled:opacity-60 sm:py-4 sm:pr-12 sm:text-3xl ${
+            overflow ? "border-accent" : "border-line focus:border-accent"
           }`}
         />
         <span className="pointer-events-none absolute right-4 top-1/2 -translate-y-1/2 text-xl text-muted sm:text-2xl">
@@ -61,7 +61,7 @@ export function BetInput({
       </div>
 
       {overflow && (
-        <p className="text-xs text-crimson">
+        <p className="text-xs text-accent">
           Больше миллиарда ставить нельзя — это уже не про деньги
         </p>
       )}
@@ -73,7 +73,7 @@ export function BetInput({
             type="button"
             disabled={disabled || busy}
             onClick={() => setDigits(String(preset))}
-            className="tabular shrink-0 rounded-lg border border-line bg-paper px-3 py-1.5 text-sm transition hover:border-crimson hover:text-crimson disabled:opacity-60"
+            className="tabular shrink-0 rounded-lg border border-line bg-paper px-3 py-1.5 text-sm transition hover:border-accent hover:text-accent disabled:opacity-60"
           >
             {preset.toLocaleString("ru-RU")}
           </button>
@@ -83,7 +83,7 @@ export function BetInput({
             type="button"
             disabled={disabled || busy}
             onClick={() => setDigits("")}
-            className="shrink-0 rounded-lg px-3 py-1.5 text-sm text-muted transition hover:text-crimson disabled:opacity-60"
+            className="shrink-0 rounded-lg px-3 py-1.5 text-sm text-muted transition hover:text-accent disabled:opacity-60"
           >
             Стереть
           </button>
@@ -94,7 +94,7 @@ export function BetInput({
         type="button"
         disabled={!canSubmit}
         onClick={() => void send(amount ?? 0)}
-        className="rounded-xl bg-crimson px-4 py-3 font-semibold text-paper transition hover:bg-deep disabled:cursor-not-allowed disabled:opacity-50"
+        className="rounded-xl bg-accent px-4 py-3 font-semibold text-paper transition hover:bg-deep disabled:cursor-not-allowed disabled:opacity-50"
       >
         {submitLabel}
       </button>
@@ -112,7 +112,7 @@ export function BetInput({
           type="button"
           disabled={disabled || busy}
           onClick={() => void send(NEVER)}
-          className="flex-1 rounded-xl border border-line bg-paper px-3 py-2.5 text-sm font-medium transition hover:border-crimson hover:text-crimson disabled:opacity-60 sm:px-4"
+          className="flex-1 rounded-xl border border-line bg-paper px-3 py-2.5 text-sm font-medium transition hover:border-accent hover:text-accent disabled:opacity-60 sm:px-4"
         >
           Ни за какие деньги
         </button>

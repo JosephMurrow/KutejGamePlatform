@@ -33,13 +33,13 @@ export default function RouteError({
         <button
           type="button"
           onClick={reset}
-          className="rounded-lg bg-crimson px-5 py-2.5 text-sm font-semibold text-paper transition hover:bg-deep"
+          className="rounded-lg bg-accent px-5 py-2.5 text-sm font-semibold text-paper transition hover:bg-deep"
         >
           Попробовать снова
         </button>
         <Link
           href="/"
-          className="rounded-lg border border-line bg-paper px-5 py-2.5 text-sm font-semibold transition hover:border-crimson hover:text-crimson"
+          className="rounded-lg border border-line bg-paper px-5 py-2.5 text-sm font-semibold transition hover:border-accent hover:text-accent"
         >
           На главную
         </Link>

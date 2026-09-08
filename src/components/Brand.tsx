@@ -7,7 +7,7 @@ export { PLATFORM } from "@/lib/brand";
 export function Brand({ className }: { className?: string }) {
   return (
     <span className={`font-bold tracking-tight ${className ?? ""}`}>
-      Кут<span className="text-crimson">ёж</span>
+      Кут<span className="text-accent">ёж</span>
     </span>
   );
 }

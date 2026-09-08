@@ -41,7 +41,7 @@ export function HardcoreGate({
 
   return (
     <main className="mx-auto flex w-full max-w-lg flex-1 items-center px-4 py-8">
-      <div className="flex w-full flex-col gap-4 rounded-2xl border-2 border-crimson bg-paper p-6">
+      <div className="flex w-full flex-col gap-4 rounded-2xl border-2 border-accent bg-paper p-6">
         <h1 className="text-xl font-bold">Тут будет совсем жёстко</h1>
 
         <p className="text-sm leading-relaxed text-muted">
@@ -58,13 +58,13 @@ export function HardcoreGate({
           <button
             type="button"
             onClick={accept}
-            className="flex-1 rounded-xl bg-crimson px-4 py-3 text-sm font-semibold text-paper transition hover:bg-deep"
+            className="flex-1 rounded-xl bg-accent px-4 py-3 text-sm font-semibold text-paper transition hover:bg-deep"
           >
             Я понимаю
           </button>
           <Link
             href={ROUTES.play}
-            className="flex-1 rounded-xl border border-line bg-paper px-4 py-3 text-center text-sm font-semibold transition hover:border-crimson hover:text-crimson"
+            className="flex-1 rounded-xl border border-line bg-paper px-4 py-3 text-center text-sm font-semibold transition hover:border-accent hover:text-accent"
           >
             Я на такое не согласен
           </Link>
