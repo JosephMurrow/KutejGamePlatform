@@ -13,9 +13,7 @@ function optional<T extends z.ZodTypeAny>(schema: T) {
 const schema = z.object({
   APP_URL: optional(z.string().url().default("http://localhost:3000")),
   MAIL_PORT: optional(z.coerce.number().int().positive().default(587)),
-  MAIL_FROM: optional(
-    z.string().min(1).default("Платитутка <no-reply@localhost>"),
-  ),
+  MAIL_FROM: optional(z.string().min(1).default("Кутёж <no-reply@localhost>")),
 });
 
 describe("Окружение терпит пустые значения", () => {
@@ -24,7 +22,7 @@ describe("Окружение терпит пустые значения", () => 
 
     assert.equal(parsed.APP_URL, "http://localhost:3000");
     assert.equal(parsed.MAIL_PORT, 587);
-    assert.ok(parsed.MAIL_FROM.includes("Платитутка"));
+    assert.ok(parsed.MAIL_FROM.includes("Кутёж"));
   });
 
   it("отсутствие переменной работает так же", () => {

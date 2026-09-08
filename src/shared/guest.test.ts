@@ -5,7 +5,7 @@ import { checkNickname, GUEST_NICKNAME_MAX, nicknameLooksBad } from "./guest";
 /**
  * Ник гостя — это то, что стример покажет в эфире, поэтому фильтр здесь
  * намеренно грубый: он отсекает ленивых, а не решает задачу целиком
- * (см. docs/BACKLOG.md O4).
+ * (см. src/games/pricetitute/docs/BACKLOG.md O4).
  */
 
 describe("фильтр ников", () => {

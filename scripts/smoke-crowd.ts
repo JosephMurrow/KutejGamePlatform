@@ -1,12 +1,9 @@
 import { io, type Socket } from "socket.io-client";
 import { signSessionToken } from "../src/lib/auth/token";
 import { prisma } from "../src/lib/prisma";
-import {
-  CLIENT_EVENT,
-  SERVER_EVENT,
-  SOCKET_PATH,
-  type RoomStatePayload,
-} from "../src/shared/protocol";
+import { SERVER_EVENT, SOCKET_PATH } from "../src/shared/protocol";
+import { type GameStatePayload } from "../src/games/pricetitute/protocol";
+import { GAME_EVENT } from "../src/games/pricetitute/protocol";
 
 /**
  * Наплыв игроков в общей комнате: проверяем, что круг ходов не разваливается,
@@ -31,7 +28,7 @@ interface Bot {
   id: string;
   nickname: string;
   socket: Socket;
-  states: RoomStatePayload[];
+  states: GameStatePayload[];
 }
 
 async function main() {
@@ -60,7 +57,7 @@ async function main() {
     const bot: Bot = { id: user.id, nickname, socket, states: [] };
     bots.push(bot);
 
-    socket.on(SERVER_EVENT.state, (state: RoomStatePayload) => {
+    socket.on(SERVER_EVENT.state, (state: GameStatePayload) => {
       bot.states.push(state);
       void react(bot, state);
     });
@@ -92,7 +89,7 @@ async function main() {
 
   console.log("\nСостав комнаты");
   // Считаем по playerCount, а не по длине списка: на большой комнате в снимок
-  // едет верхушка таблицы, а не все подряд (см. docs/BACKLOG.md N4).
+  // едет верхушка таблицы, а не все подряд (см. src/games/pricetitute/docs/BACKLOG.md N4).
   check(
     "все игроки за столом",
     last?.playerCount === COUNT,
@@ -145,20 +142,20 @@ async function main() {
   process.exit(failures === 0 ? 0 : 1);
 }
 
-async function react(bot: Bot, state: RoomStatePayload) {
+async function react(bot: Bot, state: GameStatePayload) {
   const isHost = state.hostId === bot.id;
   const you = state.players.find((player) => player.id === bot.id);
 
   if (isHost && state.phase === "ready") {
-    bot.socket.emit(CLIENT_EVENT.read, {});
+    bot.socket.emit(GAME_EVENT.read, {});
     return;
   }
   if (isHost && state.phase === "host_answer") {
-    bot.socket.emit(CLIENT_EVENT.answer, { bet: 10_000 });
+    bot.socket.emit(GAME_EVENT.answer, { bet: 10_000 });
     return;
   }
   if (!isHost && state.phase === "betting" && you && !you.hasBet) {
-    bot.socket.emit(CLIENT_EVENT.bet, {
+    bot.socket.emit(GAME_EVENT.bet, {
       bet: 1000 + Math.floor(Math.random() * 90_000),
     });
   }

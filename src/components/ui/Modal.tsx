@@ -70,7 +70,7 @@ export function Modal({
             type="button"
             onClick={onClose}
             aria-label="Закрыть"
-            className="-mr-1 rounded-md px-2 py-0.5 text-lg leading-none text-muted transition hover:text-crimson"
+            className="-mr-1 rounded-md px-2 py-0.5 text-lg leading-none text-muted transition hover:text-accent"
           >
             ✕
           </button>

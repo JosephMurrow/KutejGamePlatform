@@ -34,7 +34,7 @@ export function LoginForm({ next }: { next?: string }) {
       <p className="-mt-2 text-right text-xs">
         <Link
           href="/forgot"
-          className="text-muted hover:text-crimson hover:underline"
+          className="text-muted hover:text-accent hover:underline"
         >
           Забыл пароль?
         </Link>
@@ -44,7 +44,7 @@ export function LoginForm({ next }: { next?: string }) {
 
       <p className="text-center text-sm text-muted">
         Нет аккаунта?{" "}
-        <Link href="/register" className="text-crimson hover:underline">
+        <Link href="/register" className="text-accent hover:underline">
           Зарегистрироваться
         </Link>
       </p>

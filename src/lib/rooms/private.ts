@@ -1,35 +1,21 @@
 import { randomBytes, randomInt } from "node:crypto";
-import { normalizeChannel } from "@/server/twitch/chat";
-import type { EndMode } from "../game/room";
-import { dropScores } from "../game/store";
+import { normalizeChannel } from "@/shared/twitch";
+import { defaultGameServer, dropRoomData } from "@/lib/games/servers";
 import { prisma } from "../prisma";
 import {
-  dbValue,
-  parseMode,
-  type QuestionMode,
-  type QuestionModeDb,
-} from "../questions/modes";
-import { dropQuestionQueue } from "../questions/store";
-import {
-  defaultRotation,
   kindDbValue,
   normalizeTitle,
   parseKind,
-  parseRevealMs,
   MAX_PLAYERS_LIMIT,
   MIN_PLAYERS_LIMIT,
-  parseRotation,
   ROOM_CODE_LENGTH,
-  rotationDbValue,
-  type HostRotation,
-  type HostRotationDb,
   type RoomKind,
   type RoomKindDb,
 } from "@/shared/room-settings";
 
 /**
  * Приватные комнаты: создание, разбор ссылки-приглашения и уборка опустевших
- * (см. docs/SPEC.md §3.2).
+ * (см. src/games/pricetitute/docs/SPEC.md §3.2).
  */
 
 /** Без нуля, единицы и похожих букв: код диктуют голосом. */
@@ -38,25 +24,15 @@ const ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 /** Через сколько после ухода последнего игрока комната удаляется. */
 export const EMPTY_LIFETIME_MS = 30 * 60 * 1000;
 
-export const MIN_BETTING_MS = 30_000;
-export const MAX_BETTING_MS = 15 * 60 * 1000;
-export const MAX_END_VALUE = 99;
-
+/**
+ * Настройки комнаты глазами платформы. Правила партии сюда не входят: их
+ * объявляет игра и хранит у себя (docs/BACKLOG.md A4).
+ */
 export interface PrivateRoomSettings {
-  bettingMs: number;
-  /** Сколько показывать вскрышку. */
-  revealMs: number;
-  includeAdult: boolean;
-  /** Каким набором паков играет комната. */
-  mode: QuestionMode;
-  endMode: EndMode;
-  endValue: number | null;
   /** Какого рода комната: своя, стримерская или домашняя. */
   kind: RoomKind;
   /** Название комнаты: рисуется на экране. У обычной приватной его нет. */
   title: string | null;
-  /** Кто ведёт раунды. */
-  hostRotation: HostRotation;
   /** Набор закрыт: новых за стол не пускают. */
   locked: boolean;
   /** Больше этого числа за стол не сажаем. null — без ограничения. */
@@ -69,25 +45,16 @@ export interface PrivateRoomInfo extends PrivateRoomSettings {
   id: string;
   code: string;
   hostId: string;
+  /** Во что тут играют. */
+  gameId: string;
   /** Ключ вида «экран»: по нему туда пускают без сессии. */
   screenKey: string;
 }
 
-const MODE_TO_DB = {
-  endless: "ENDLESS",
-  rounds: "ROUNDS",
-  points: "POINTS",
-} as const;
-
-const MODE_FROM_DB = {
-  ENDLESS: "endless",
-  ROUNDS: "rounds",
-  POINTS: "points",
-} as const;
-
 export async function createPrivateRoom(
   hostId: string,
   settings: PrivateRoomSettings,
+  gameId: string = defaultGameServer().id,
 ): Promise<PrivateRoomInfo> {
   // Код короткий, поэтому столкновения возможны — пробуем несколько раз.
   for (let attempt = 0; attempt < 5; attempt++) {
@@ -98,18 +65,12 @@ export async function createPrivateRoom(
         data: {
           code,
           hostId,
+          gameId,
           kind: kindDbValue(settings.kind),
           title: settings.title,
-          hostRotation: rotationDbValue(settings.hostRotation),
           maxPlayers: settings.maxPlayers,
           twitchChannel: settings.twitchChannel,
           screenKey: generateScreenKey(),
-          bettingMs: settings.bettingMs,
-          revealMs: settings.revealMs,
-          includeAdult: settings.includeAdult,
-          mode: dbValue(settings.mode),
-          endMode: MODE_TO_DB[settings.endMode],
-          endValue: settings.endValue,
         },
       });
 
@@ -150,8 +111,8 @@ export async function markBusy(roomId: string): Promise<void> {
 
 /** Убрать комнату вместе с её очередью вопросов и счётом. */
 export async function deletePrivateRoom(roomId: string): Promise<void> {
-  await dropQuestionQueue(roomId);
-  await dropScores(roomId);
+  // Свои таблицы убирает сама игра: платформа их не знает.
+  await dropRoomData(defaultGameServer().id, roomId);
   await prisma.privateRoom.deleteMany({ where: { id: roomId } });
 }
 
@@ -183,52 +144,18 @@ export function generateScreenKey(): string {
 
 /** Настройки из формы: всё за пределами разумного отбрасывается. */
 export function normalizeSettings(input: {
-  bettingMs?: unknown;
-  revealMs?: unknown;
-  includeAdult?: unknown;
-  mode?: unknown;
-  endMode?: unknown;
-  endValue?: unknown;
   kind?: unknown;
   title?: unknown;
-  hostRotation?: unknown;
   maxPlayers?: unknown;
   twitchChannel?: unknown;
 }): PrivateRoomSettings {
-  const bettingMs = clamp(
-    Number(input.bettingMs) || 300_000,
-    MIN_BETTING_MS,
-    MAX_BETTING_MS,
-  );
-
-  const endMode: EndMode =
-    input.endMode === "rounds" || input.endMode === "points"
-      ? input.endMode
-      : "endless";
-
-  const rawValue = Number(input.endValue);
-  const endValue =
-    endMode === "endless" || !Number.isFinite(rawValue)
-      ? null
-      : clamp(Math.trunc(rawValue), 1, MAX_END_VALUE);
-
   const kind = parseKind(input.kind);
 
   return {
-    bettingMs,
-    revealMs: parseRevealMs(input.revealMs),
-    includeAdult: input.includeAdult !== false,
-    mode: parseMode(input.mode),
-    endMode,
-    endValue,
     kind,
     // Название есть только у комнат с экраном: у обычной приватной его негде
     // показать, и хранить его там значило бы обещать несуществующее.
     title: kind === "private" ? null : normalizeTitle(input.title),
-    hostRotation:
-      input.hostRotation === undefined
-        ? defaultRotation(kind)
-        : parseRotation(input.hostRotation),
     // Замок при создании всегда открыт: закрывать пустую комнату бессмысленно.
     locked: false,
     maxPlayers: parseMaxPlayers(input.maxPlayers),
@@ -264,40 +191,28 @@ export async function setRoomLocked(
 }
 
 function toInfo(room: {
+  gameId: string;
   id: string;
   code: string;
   hostId: string;
   kind: RoomKindDb;
   title: string | null;
   screenKey: string;
-  hostRotation: HostRotationDb;
   locked: boolean;
   maxPlayers: number | null;
   twitchChannel: string | null;
-  bettingMs: number;
-  revealMs: number;
-  includeAdult: boolean;
-  mode: QuestionModeDb;
-  endMode: keyof typeof MODE_FROM_DB;
-  endValue: number | null;
 }): PrivateRoomInfo {
   return {
     id: room.id,
     code: room.code,
     hostId: room.hostId,
+    gameId: room.gameId,
     kind: parseKind(room.kind),
     title: room.title,
     screenKey: room.screenKey,
-    hostRotation: parseRotation(room.hostRotation),
     locked: room.locked,
     maxPlayers: room.maxPlayers,
     twitchChannel: room.twitchChannel,
-    bettingMs: room.bettingMs,
-    revealMs: room.revealMs,
-    includeAdult: room.includeAdult,
-    mode: parseMode(room.mode),
-    endMode: MODE_FROM_DB[room.endMode],
-    endValue: room.endValue,
   };
 }
 

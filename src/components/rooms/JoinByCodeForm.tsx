@@ -33,7 +33,7 @@ export function JoinByCodeForm() {
         defaultValue={state.values?.code}
         placeholder="ABC123"
         aria-label="Код комнаты"
-        className="tabular w-full rounded-xl border border-line bg-blush px-4 py-4 text-center text-3xl font-bold uppercase tracking-[0.3em] outline-none transition placeholder:text-muted/40 focus:border-crimson"
+        className="tabular w-full rounded-xl border border-line bg-surface px-4 py-4 text-center text-3xl font-bold uppercase tracking-[0.3em] outline-none transition placeholder:text-muted/40 focus:border-accent"
       />
 
       <SubmitButton>Зайти</SubmitButton>

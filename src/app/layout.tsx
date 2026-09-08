@@ -1,6 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
-import { BRAND } from "@/components/Brand";
+import { PLATFORM } from "@/components/Brand";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -14,7 +14,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: BRAND,
+  title: PLATFORM,
   description: "Угадай, за какую сумму человек согласился бы это сделать.",
 };
 

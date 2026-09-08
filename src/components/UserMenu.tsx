@@ -5,26 +5,36 @@ import { useEffect, useRef, useState } from "react";
 import { Avatar } from "@/components/Avatar";
 import { logoutAction } from "@/lib/auth/actions";
 
-const LINKS = [
-  { href: "/play", label: "В общую комнату" },
-  { href: "/rooms/new", label: "Своя комната" },
-  { href: "/join", label: "Зайти по коду" },
-  { href: "/leaderboard", label: "Рейтинг" },
-  { href: "/profile", label: "Профиль" },
-] as const;
+export interface MenuLink {
+  href: string;
+  label: string;
+  /**
+   * Открывать окном, а не переходом. Нужно там, где уход со страницы рвёт
+   * сокет: рейтинг в комнате именно поэтому и переехал в модалку.
+   */
+  overlay?: boolean;
+}
 
-/** Пункт, который в комнате открывает окно вместо перехода. */
-const OVERLAY_HREF = "/leaderboard";
+/** Пункты платформы. Игра добавляет свои сверху. */
+const PLATFORM_LINKS: readonly MenuLink[] = [
+  { href: "/join", label: "Зайти по коду" },
+  { href: "/profile", label: "Профиль" },
+];
 
 /**
  * Кнопка с меню вместо россыпи ссылок в шапке: переходы между комнатами,
- * рейтинг, профиль и выход в одном месте.
+ * рейтинг и профиль в одном месте.
+ *
+ * Выхода на витрину здесь нет. Он переехал в отдельную кнопку в углу страницы
+ * (`components/games/ExitToShelf`): меню видит только залогиненный, а страница
+ * игры открыта и постороннему — дорога назад обязана быть и у него.
  */
 export function UserMenu({
   nickname,
   avatarId,
   isGuest = false,
-  onLeaderboard,
+  links = [],
+  onOverlay,
 }: {
   nickname: string;
   avatarId: number;
@@ -34,11 +44,10 @@ export function UserMenu({
    * обещать несуществующее.
    */
   isGuest?: boolean;
-  /**
-   * Показать рейтинг, не уходя со страницы. Передаётся из комнаты: переход по
-   * ссылке рвёт сокет, и человек теряет место за столом.
-   */
-  onLeaderboard?: () => void;
+  /** Пункты игры: платформа своих добавит сама. */
+  links?: readonly MenuLink[];
+  /** Открыть окно вместо перехода — для пунктов с `overlay`. */
+  onOverlay?: (href: string) => void;
 }) {
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement | null>(null);
@@ -69,7 +78,7 @@ export function UserMenu({
         aria-haspopup="menu"
         aria-expanded={open}
         onClick={() => setOpen((value) => !value)}
-        className="flex items-center gap-2 rounded-xl border border-line bg-paper py-1.5 pl-2 pr-3 transition hover:border-crimson"
+        className="flex items-center gap-2 rounded-xl border border-line bg-paper py-1.5 pl-2 pr-3 transition hover:border-accent"
       >
         <Avatar id={avatarId} size={28} />
         <span className="max-w-28 truncate text-sm font-medium sm:max-w-40">
@@ -99,17 +108,17 @@ export function UserMenu({
           role="menu"
           className="absolute right-0 z-50 mt-2 w-56 overflow-hidden rounded-xl border border-line bg-paper py-1 shadow-lg"
         >
-          {(isGuest ? [] : LINKS).map((link) =>
-            link.href === OVERLAY_HREF && onLeaderboard ? (
+          {(isGuest ? [] : [...links, ...PLATFORM_LINKS]).map((link) =>
+            link.overlay && onOverlay ? (
               <button
                 key={link.href}
                 type="button"
                 role="menuitem"
                 onClick={() => {
                   setOpen(false);
-                  onLeaderboard();
+                  onOverlay(link.href);
                 }}
-                className="block w-full px-4 py-2.5 text-left text-sm transition hover:bg-tint hover:text-crimson"
+                className="block w-full px-4 py-2.5 text-left text-sm transition hover:bg-tint hover:text-accent"
               >
                 {link.label}
               </button>
@@ -119,7 +128,7 @@ export function UserMenu({
                 href={link.href}
                 role="menuitem"
                 onClick={() => setOpen(false)}
-                className="block px-4 py-2.5 text-sm transition hover:bg-tint hover:text-crimson"
+                className="block px-4 py-2.5 text-sm transition hover:bg-tint hover:text-accent"
               >
                 {link.label}
               </Link>
@@ -136,7 +145,7 @@ export function UserMenu({
             <button
               type="submit"
               role="menuitem"
-              className="w-full px-4 py-2.5 text-left text-sm text-muted transition hover:bg-tint hover:text-crimson"
+              className="w-full px-4 py-2.5 text-left text-sm text-muted transition hover:bg-tint hover:text-accent"
             >
               Выйти
             </button>

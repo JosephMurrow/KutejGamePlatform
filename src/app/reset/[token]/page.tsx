@@ -1,9 +1,9 @@
 import type { Metadata } from "next";
-import { BRAND, Brand } from "@/components/Brand";
+import { Brand, PLATFORM } from "@/components/Brand";
 import { ResetForm } from "@/components/auth/ResetForm";
 
 export const metadata: Metadata = {
-  title: `Новый пароль — ${BRAND}`,
+  title: `Новый пароль — ${PLATFORM}`,
 };
 
 /**
@@ -21,7 +21,7 @@ export default async function ResetPage({
   return (
     <main className="mx-auto flex w-full max-w-md flex-1 flex-col justify-center px-6 py-16">
       <div className="mb-6 text-center">
-        <Brand className="text-2xl" />
+        <Brand className="h-10" />
       </div>
 
       <h1 className="mb-1 text-2xl font-bold">Новый пароль</h1>

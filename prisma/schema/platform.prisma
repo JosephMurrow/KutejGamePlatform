@@ -1,0 +1,166 @@
+// Схема платформы. Здесь только то, что переиспользует любая игра: аккаунты,
+// одноразовые ссылки и комната как оболочка.
+//
+// У каждой игры своя схема Postgres — своя среда обитания, без перемешек
+// (docs/BACKLOG.md A5). Внешние ключи между схемами живут: игровая таблица
+// очков ссылается на platform.users, и это то, ради чего выбраны схемы, а не
+// отдельные базы.
+
+generator client {
+  provider = "prisma-client"
+  output   = "../../src/generated/prisma"
+}
+// В Prisma 7 строка подключения живёт в prisma.config.ts, а не здесь.
+datasource db {
+  provider = "postgresql"
+  schemas  = ["platform", "pricetitute"]
+}
+/// Какого рода комната. От этого зависит, есть ли у неё вид «экран», пускают ли
+/// туда гостей и как выглядит приглашение (см. docs/BACKLOG.md Q4).
+enum RoomKind {
+  /// Своя комната по ссылке: как было до 1.04.
+  PRIVATE
+  /// Стримерская: код показывают в эфире, вход гостем, экран уходит в трансляцию.
+  STREAM
+  /// Домашняя: картинка на телевизоре, вход только по аккаунту.
+  HOME
+
+  @@schema("platform")
+}
+/// Приватная комната: счёт внутри неё наружу не уходит (см. docs/SPEC.md §3.2).
+model PrivateRoom {
+  id   String @id @default(cuid())
+
+  /// Во что тут играют. Умолчание — ради старых строк: до появления платформы
+  /// игра была одна, и все существующие комнаты платитуткины.
+  gameId String @default("pricetitute")
+  /// Короткий код из ссылки-приглашения.
+  code String @unique
+
+  hostId String
+  host   User   @relation("HostedRooms", fields: [hostId], references: [id], onDelete: Cascade)
+
+  /// Какого рода комната.
+  kind      RoomKind @default(PRIVATE)
+  /// Название комнаты: рисуется на экране. У обычной приватной пусто.
+  title     String?
+  /// Ключ вида «экран». Браузерный источник OBS ходит со своей пустой банкой
+  /// кук, нашей сессии у него нет, — поэтому экран открывается по ключу в
+  /// адресе. Утечка ключа не страшна: на экране нет секретов.
+  screenKey String   @unique
+
+  /// Набор закрыт: код висит в эфире, и в какой-то момент новых пускать хватит.
+  locked        Boolean @default(false)
+  /// Больше этого числа за стол не сажаем. null — без ограничения.
+  maxPlayers    Int?
+  /// Канал Твича, чей чат слушает комната. Чтение анонимно, разрешений не
+  /// требует — достаточно имени (см. src/games/pricetitute/docs/BACKLOG.md P1).
+  twitchChannel String?
+
+  /// Настройки партии здесь не лежат: тайминги фаз, режим вопросов, ротация
+  /// ведущего и условие конца — правила игры, и живут они в её схеме
+  /// (docs/BACKLOG.md A4).
+
+  createdAt  DateTime  @default(now())
+  /// Когда комната опустела. Через полчаса после этого её удаляют.
+  emptySince DateTime?
+
+  /// Гости этой комнаты. Умирают вместе с ней: каскад уносит и их ставки.
+  guests User[] @relation("Guests")
+
+  @@index([emptySince])
+  @@map("private_rooms")
+
+  @@schema("platform")
+}
+/// Зачем выдана одноразовая ссылка.
+enum LinkPurpose {
+  /// Подтверждение адреса почты.
+  EMAIL_CONFIRM
+  /// Сброс забытого пароля.
+  PASSWORD_RESET
+
+  @@schema("platform")
+}
+/// Одноразовая ссылка из письма.
+///
+/// Хранится хеш, а не сама ссылка: утёкшая таблица не должна давать доступ к
+/// аккаунтам. Протухшие подметает уборщик комнат.
+model OneTimeLink {
+  id String @id @default(cuid())
+
+  /// SHA-256 от ссылки. По нему и ищем.
+  tokenHash String      @unique
+  purpose   LinkPurpose
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  /// Адрес, на который ушло письмо. Подтверждаем именно его: человек мог
+  /// успеть поменять почту в профиле, пока письмо шло.
+  email String
+
+  expiresAt DateTime
+  /// Когда ссылкой воспользовались. Второй раз не сработает.
+  usedAt    DateTime?
+
+  createdAt DateTime @default(now())
+
+  @@index([userId, purpose])
+  @@index([expiresAt])
+  @@map("one_time_links")
+
+  @@schema("platform")
+}
+/// Игрок. Регистрация — логин, пароль и почта,
+/// восстановление пароля идёт по письму (см. docs/SPEC.md §2).
+model User {
+  id           String @id @default(cuid())
+  /// Хранится в нижнем регистре: логин уникален без учёта регистра.
+  login        String @unique
+  passwordHash String
+
+  /// Отображаемое имя, не равно логину.
+  nickname String
+  /// Индекс картинки из пула аватаров (0..29).
+  avatarId Int
+
+  /// Момент подтверждения возраста 18+ при регистрации.
+  adultConfirmedAt DateTime?
+
+  /// Почта. Пустая допускается: аккаунты, заведённые до появления писем,
+  /// живут как жили, а адрес предлагается прикрепить в профиле.
+  email            String?   @unique
+  /// Момент подтверждения адреса. Сброс пароля работает только с
+  /// подтверждённого: иначе опечатка при регистрации отдаёт аккаунт чужому.
+  emailConfirmedAt DateTime?
+
+  /// Сессии, выданные раньше этого момента, недействительны. Сдвигается при
+  /// смене пароля: увести аккаунт и остаться в нём после сброса нельзя.
+  sessionsValidFrom DateTime?
+
+  /// Бот из режима «Forever alone»: войти под ним нельзя.
+  isBot Boolean @default(false)
+
+  /// Гость стримерской комнаты: одноразовый профиль без пароля и без почты.
+  /// В общий зал, в рейтинг и в профиль он не ходит, а живёт не дольше своей
+  /// комнаты (см. docs/BACKLOG.md O3).
+  isGuest     Boolean      @default(false)
+  /// Комната, ради которой гость заведён. Больше он никуда не ходит.
+  guestRoomId String?
+  guestRoom   PrivateRoom? @relation("Guests", fields: [guestRoomId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  links        OneTimeLink[]
+  hostedRounds Round[]       @relation("HostedRounds")
+  hostedRooms  PrivateRoom[] @relation("HostedRooms")
+  bets         RoundBet[]
+  scores       Score[]
+
+  @@index([guestRoomId])
+  @@map("users")
+
+  @@schema("platform")
+}

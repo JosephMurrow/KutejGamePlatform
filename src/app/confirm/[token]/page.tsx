@@ -1,11 +1,11 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { BRAND, Brand } from "@/components/Brand";
+import { Brand, PLATFORM } from "@/components/Brand";
 import { claimLink } from "@/lib/auth/links";
 import { prisma } from "@/lib/prisma";
 
 export const metadata: Metadata = {
-  title: `Подтверждение адреса — ${BRAND}`,
+  title: `Подтверждение адреса — ${PLATFORM}`,
 };
 
 /**
@@ -31,7 +31,7 @@ export default async function ConfirmPage({
 
   return (
     <main className="mx-auto flex w-full max-w-md flex-1 flex-col items-center justify-center gap-5 px-6 py-16 text-center">
-      <Brand className="text-2xl" />
+      <Brand className="h-10" />
 
       <div>
         <h1 className="text-xl font-semibold">
@@ -46,14 +46,14 @@ export default async function ConfirmPage({
 
       <div className="flex flex-col gap-2 sm:flex-row">
         <Link
-          href="/play"
-          className="rounded-lg bg-crimson px-5 py-2.5 text-sm font-semibold text-paper transition hover:bg-deep"
+          href="/games/pricetitute/play"
+          className="rounded-lg bg-accent px-5 py-2.5 text-sm font-semibold text-paper transition hover:bg-deep"
         >
           В общую комнату
         </Link>
         <Link
           href="/profile"
-          className="rounded-lg border border-line bg-paper px-5 py-2.5 text-sm font-semibold transition hover:border-crimson hover:text-crimson"
+          className="rounded-lg border border-line bg-paper px-5 py-2.5 text-sm font-semibold transition hover:border-accent hover:text-accent"
         >
           В профиль
         </Link>

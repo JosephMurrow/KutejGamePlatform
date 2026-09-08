@@ -1,10 +1,10 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { BRAND } from "@/components/Brand";
+import { PLATFORM } from "@/components/Brand";
 import { ForgotForm } from "@/components/auth/ForgotForm";
 
 export const metadata: Metadata = {
-  title: `Забыл пароль — ${BRAND}`,
+  title: `Забыл пароль — ${PLATFORM}`,
 };
 
 export default function ForgotPage() {
@@ -19,10 +19,7 @@ export default function ForgotPage() {
 
       <p className="mt-6 text-center text-sm text-muted">
         Вспомнил?{" "}
-        <Link
-          href="/login"
-          className="font-medium text-crimson hover:underline"
-        >
+        <Link href="/login" className="font-medium text-accent hover:underline">
           Войти
         </Link>
       </p>

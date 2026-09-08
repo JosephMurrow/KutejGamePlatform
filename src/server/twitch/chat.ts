@@ -5,7 +5,7 @@
  * чат: ни регистрации приложения, ни OAuth, ни разрешения стримера — комнате
  * достаточно знать имя канала. Это и есть причина, по которой чтение сделано
  * отдельно от отправки: отправка требует приложения и токенов, а чтение даёт
- * весь игровой смысл и не требует от стримера ничего (см. docs/BACKLOG.md P1).
+ * весь игровой смысл и не требует от стримера ничего (см. src/games/pricetitute/docs/BACKLOG.md P1).
  *
  * IRC у Твича живой: в 2025-м выключили незащищённые WebSocket-подключения и
  * убрали чат-команды, а чтение и отправку сообщений оставили. EventSub —
@@ -121,18 +121,6 @@ export function toMessage(line: IrcLine): TwitchMessage | null {
       badges.includes("broadcaster/") ||
       badges.includes("moderator/"),
   };
-}
-
-/** Имя канала как его понимает IRC: в нижнем регистре и без решётки. */
-export function normalizeChannel(raw: string): string | null {
-  const channel = raw
-    .trim()
-    .toLowerCase()
-    .replace(/^#/, "")
-    .replace(/^https?:\/\/(www\.)?twitch\.tv\//, "")
-    .replace(/\/.*$/, "");
-
-  return /^[a-z0-9_]{3,25}$/.test(channel) ? channel : null;
 }
 
 export interface ChatReaderOptions {

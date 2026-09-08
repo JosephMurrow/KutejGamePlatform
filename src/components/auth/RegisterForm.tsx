@@ -57,21 +57,21 @@ export function RegisterForm({ next }: { next?: string }) {
           type="checkbox"
           name="adult"
           defaultChecked={state.values?.adult === "on"}
-          className="mt-0.5 size-4 shrink-0 accent-crimson"
+          className="mt-0.5 size-4 shrink-0 accent-accent"
         />
         <span className="text-muted">
           Мне есть 18 лет. Понимаю, что вопросы бывают откровенными.
         </span>
       </label>
       {state.fieldErrors?.adult && (
-        <p className="-mt-2 text-xs text-crimson">{state.fieldErrors.adult}</p>
+        <p className="-mt-2 text-xs text-accent">{state.fieldErrors.adult}</p>
       )}
 
       <SubmitButton>Зарегистрироваться</SubmitButton>
 
       <p className="text-center text-sm text-muted">
         Уже есть аккаунт?{" "}
-        <Link href="/login" className="text-crimson hover:underline">
+        <Link href="/login" className="text-accent hover:underline">
           Войти
         </Link>
       </p>

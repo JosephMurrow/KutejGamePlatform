@@ -48,7 +48,7 @@ describe("Оформление письма", () => {
   });
 
   it("название игры в письме русское", () => {
-    assert.ok(letter.text.startsWith("Платитутка"));
+    assert.ok(letter.text.startsWith("Кутёж"));
     assert.ok(letter.html.includes("Плати"));
   });
 });

@@ -27,16 +27,14 @@ export function Field({
         type={type}
         defaultValue={defaultValue}
         autoComplete={autoComplete}
-        className={`w-full rounded-lg border bg-blush px-3 py-2.5 text-ink outline-none transition placeholder:text-muted focus:border-crimson ${
-          error ? "border-crimson" : "border-line"
+        className={`w-full rounded-lg border bg-surface px-3 py-2.5 text-ink outline-none transition placeholder:text-muted focus:border-accent ${
+          error ? "border-accent" : "border-line"
         }`}
       />
       {hint && !error && (
         <span className="mt-1 block text-xs text-muted">{hint}</span>
       )}
-      {error && (
-        <span className="mt-1 block text-xs text-crimson">{error}</span>
-      )}
+      {error && <span className="mt-1 block text-xs text-accent">{error}</span>}
     </label>
   );
 }
@@ -48,7 +46,7 @@ export function SubmitButton({ children }: { children: React.ReactNode }) {
     <button
       type="submit"
       disabled={pending}
-      className="w-full rounded-lg bg-crimson px-4 py-2.5 font-semibold text-paper transition hover:bg-deep disabled:cursor-not-allowed disabled:opacity-60"
+      className="w-full rounded-lg bg-accent px-4 py-2.5 font-semibold text-paper transition hover:bg-deep disabled:cursor-not-allowed disabled:opacity-60"
     >
       {pending ? "Секунду…" : children}
     </button>
@@ -59,7 +57,7 @@ export function FormError({ children }: { children?: string }) {
   if (!children) return null;
 
   return (
-    <p className="rounded-lg border border-crimson/30 bg-tint px-3 py-2 text-sm text-deep">
+    <p className="rounded-lg border border-accent/30 bg-tint px-3 py-2 text-sm text-deep">
       {children}
     </p>
   );

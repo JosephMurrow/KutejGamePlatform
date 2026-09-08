@@ -40,7 +40,7 @@ async function main() {
   const sockets = createSocketServer(httpServer);
 
   httpServer.listen(env.PORT, env.HOST, () => {
-    console.log(`▲ Платитутка: http://${env.HOST}:${env.PORT}`);
+    console.log(`▲ Кутёж: http://${env.HOST}:${env.PORT}`);
     console.log(`  сокеты: ${SOCKET_PATH}, режим: ${dev ? "dev" : "prod"}`);
   });
 

@@ -1,10 +1,11 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { BRAND, Brand } from "@/components/Brand";
+import { Brand, PLATFORM } from "@/components/Brand";
 import { JoinByCodeForm } from "@/components/rooms/JoinByCodeForm";
 
+import { Card } from "@/components/ui/Card";
 export const metadata: Metadata = {
-  title: `Вход по коду — ${BRAND}`,
+  title: `Вход по коду — ${PLATFORM}`,
 };
 
 /**
@@ -20,7 +21,7 @@ export default function JoinPage() {
     <main className="mx-auto flex w-full max-w-md flex-1 flex-col justify-center gap-6 px-4 py-10">
       <div className="text-center">
         <Link href="/">
-          <Brand className="text-3xl" />
+          <Brand className="h-12" />
         </Link>
         <h1 className="mt-4 text-2xl font-bold">Код комнаты</h1>
         <p className="mt-1 text-sm text-muted">
@@ -28,9 +29,9 @@ export default function JoinPage() {
         </p>
       </div>
 
-      <div className="rounded-2xl border border-line bg-paper p-6">
+      <Card>
         <JoinByCodeForm />
-      </div>
+      </Card>
     </main>
   );
 }

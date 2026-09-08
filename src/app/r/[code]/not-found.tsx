@@ -4,7 +4,7 @@ import { Brand } from "@/components/Brand";
 export default function RoomNotFound() {
   return (
     <main className="flex flex-1 flex-col items-center justify-center gap-5 px-6 py-16 text-center">
-      <Brand className="text-2xl" />
+      <Brand className="h-10" />
 
       <div>
         <h1 className="text-xl font-semibold">Такой комнаты нет</h1>
@@ -16,14 +16,14 @@ export default function RoomNotFound() {
 
       <div className="flex flex-col gap-2 sm:flex-row">
         <Link
-          href="/rooms/new"
-          className="rounded-lg bg-crimson px-5 py-2.5 text-sm font-semibold text-paper transition hover:bg-deep"
+          href="/games/pricetitute/rooms/new"
+          className="rounded-lg bg-accent px-5 py-2.5 text-sm font-semibold text-paper transition hover:bg-deep"
         >
           Создать свою
         </Link>
         <Link
-          href="/play"
-          className="rounded-lg border border-line bg-paper px-5 py-2.5 text-sm font-semibold transition hover:border-crimson hover:text-crimson"
+          href="/games/pricetitute/play"
+          className="rounded-lg border border-line bg-paper px-5 py-2.5 text-sm font-semibold transition hover:border-accent hover:text-accent"
         >
           В общую комнату
         </Link>

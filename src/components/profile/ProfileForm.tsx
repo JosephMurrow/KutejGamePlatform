@@ -1,7 +1,7 @@
 "use client";
 
 import { useActionState, useState } from "react";
-import { Avatar } from "@/components/Avatar";
+import { Avatar, avatarName } from "@/components/Avatar";
 import { Field, FormError, FormOk, SubmitButton } from "@/components/ui/form";
 import { updateProfileAction } from "@/lib/auth/actions";
 import { EMPTY_FORM_STATE } from "@/lib/auth/form-state";
@@ -41,11 +41,15 @@ export function ProfileForm({
               key={id}
               type="button"
               onClick={() => setSelected(id)}
-              aria-label={`Аватар ${id + 1}`}
+              aria-label={avatarName(id)}
+              title={avatarName(id)}
               aria-pressed={selected === id}
-              className={`rounded-full transition ${
+              // Размер задаёт кнопка, а не картинка: аватары грузятся лениво,
+              // и до загрузки `<img>` не занимает места — без своей высоты
+              // сетка складывалась в кашу.
+              className={`aspect-square w-full rounded-full transition ${
                 selected === id
-                  ? "ring-2 ring-crimson ring-offset-2 ring-offset-paper"
+                  ? "ring-2 ring-accent ring-offset-2 ring-offset-paper"
                   : "opacity-70 hover:opacity-100"
               }`}
             >
@@ -54,7 +58,7 @@ export function ProfileForm({
           ))}
         </div>
         {state.fieldErrors?.avatarId && (
-          <p className="mt-1 text-xs text-crimson">
+          <p className="mt-1 text-xs text-accent">
             {state.fieldErrors.avatarId}
           </p>
         )}

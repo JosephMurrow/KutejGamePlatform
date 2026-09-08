@@ -14,7 +14,7 @@ import { joinAsGuestAction } from "@/lib/rooms/actions";
  *
  * Гость — не поблажка, а условие жизнеспособности эфирной комнаты: зритель не
  * пойдёт заводить аккаунт ради одного раунда. Взамен он получает только эту
- * комнату: ни общего зала, ни рейтинга, ни профиля (см. docs/BACKLOG.md O3).
+ * комнату: ни общего зала, ни рейтинга, ни профиля (см. src/games/pricetitute/docs/BACKLOG.md O3).
  */
 export function GuestGate({
   code,
@@ -35,12 +35,12 @@ export function GuestGate({
     <main className="mx-auto flex w-full max-w-md flex-1 flex-col justify-center gap-6 px-4 py-10">
       <div className="text-center">
         <Link href="/">
-          <Brand className="text-3xl" />
+          <Brand className="h-12" />
         </Link>
         <h1 className="mt-4 text-2xl font-bold">
           {title ?? "Заходи в комнату"}
         </h1>
-        <p className="tabular mt-1 text-sm tracking-widest text-crimson">
+        <p className="tabular mt-1 text-sm tracking-widest text-accent">
           {code}
         </p>
       </div>
@@ -66,7 +66,7 @@ export function GuestGate({
             type="checkbox"
             name="adult"
             defaultChecked={state.values?.adult === "on"}
-            className="mt-0.5 size-4 shrink-0 accent-crimson"
+            className="mt-0.5 size-4 shrink-0 accent-accent"
           />
           <span className="text-muted">
             Мне есть восемнадцать. Вопросы в игре взрослые и местами
@@ -74,9 +74,7 @@ export function GuestGate({
           </span>
         </label>
         {state.fieldErrors?.adult && (
-          <p className="-mt-2 text-xs text-crimson">
-            {state.fieldErrors.adult}
-          </p>
+          <p className="-mt-2 text-xs text-accent">{state.fieldErrors.adult}</p>
         )}
 
         <SubmitButton>Играть гостем</SubmitButton>
@@ -93,13 +91,13 @@ export function GuestGate({
         <div className="flex flex-col gap-2 sm:flex-row">
           <Link
             href={`/login?next=${encodeURIComponent(next)}`}
-            className="flex-1 rounded-xl border border-line bg-paper px-4 py-2.5 font-semibold transition hover:border-crimson hover:text-crimson"
+            className="flex-1 rounded-xl border border-line bg-paper px-4 py-2.5 font-semibold transition hover:border-accent hover:text-accent"
           >
             Войти
           </Link>
           <Link
             href={`/register?next=${encodeURIComponent(next)}`}
-            className="flex-1 rounded-xl border border-line bg-paper px-4 py-2.5 font-semibold transition hover:border-crimson hover:text-crimson"
+            className="flex-1 rounded-xl border border-line bg-paper px-4 py-2.5 font-semibold transition hover:border-accent hover:text-accent"
           >
             Зарегистрироваться
           </Link>

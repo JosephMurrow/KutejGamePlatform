@@ -7,6 +7,11 @@ import { useEffect } from "react";
  * обычный error.tsx отрисовать уже негде. Поэтому здесь свой html и никаких
  * общих компонентов — они могут быть как раз тем, что сломалось.
  */
+/*
+ * Цвета здесь числами намеренно: global-error подменяет корневой layout, а с
+ * ним и подключение globals.css, — переменных темы на этой странице нет.
+ * Значения повторяют палитру платформы.
+ */
 export default function GlobalError({
   error,
   reset,
@@ -31,18 +36,18 @@ export default function GlobalError({
           gap: "1rem",
           padding: "2rem",
           textAlign: "center",
-          background: "#fff5f8",
-          color: "#2a0912",
+          background: "#453466",
+          color: "#f3eeff",
           fontFamily: "system-ui, sans-serif",
         }}
       >
         <p style={{ fontSize: "1.5rem", fontWeight: 700 }}>
-          Плати<span style={{ color: "#d31450" }}>тутка</span>
+          Кут<span style={{ color: "#c9a2ff" }}>ёж</span>
         </p>
         <h1 style={{ fontSize: "1.125rem", margin: 0 }}>
           Приложение не запустилось
         </h1>
-        <p style={{ maxWidth: "24rem", color: "#96697a", margin: 0 }}>
+        <p style={{ maxWidth: "24rem", color: "#cabfe2", margin: 0 }}>
           Это уже наша поломка, а не твоя. Попробуй обновить страницу.
         </p>
         <button
@@ -51,8 +56,8 @@ export default function GlobalError({
           style={{
             border: 0,
             borderRadius: "0.5rem",
-            background: "#d31450",
-            color: "#fff",
+            background: "#c9a2ff",
+            color: "#241640",
             padding: "0.65rem 1.25rem",
             fontSize: "0.875rem",
             fontWeight: 600,
