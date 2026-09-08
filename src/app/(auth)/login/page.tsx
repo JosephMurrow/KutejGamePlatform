@@ -19,7 +19,7 @@ export default async function LoginPage({
     <main className="flex flex-1 items-center justify-center px-4 py-12">
       <div className="w-full max-w-sm">
         <Link href="/" className="mb-8 block text-center">
-          <Brand className="text-2xl" />
+          <Brand className="h-10" />
         </Link>
 
         <Card>

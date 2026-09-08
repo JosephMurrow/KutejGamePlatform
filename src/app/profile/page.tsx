@@ -21,7 +21,7 @@ export default async function ProfilePage() {
 
   return (
     <main className="mx-auto w-full max-w-2xl flex-1 px-4 py-10">
-      <Header brand={<Brand className="text-xl" />} brandHref="/games">
+      <Header brand={<Brand className="h-8" />} brandHref="/games">
         <UserMenu nickname={user.nickname} avatarId={user.avatarId} />
       </Header>
 

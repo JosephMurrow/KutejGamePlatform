@@ -4,7 +4,7 @@ import { Brand } from "@/components/Brand";
 export default function NotFound() {
   return (
     <main className="flex flex-1 flex-col items-center justify-center gap-5 px-6 py-16 text-center">
-      <Brand className="text-2xl" />
+      <Brand className="h-10" />
 
       <div>
         <h1 className="text-xl font-semibold">Страница не найдена</h1>

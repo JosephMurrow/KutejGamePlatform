@@ -26,7 +26,7 @@ export default async function GamesPage() {
     <>
       <ShelfBackdrop />
       <main className="mx-auto w-full max-w-3xl flex-1 px-5 py-8">
-        <Header brand={<Brand className="text-xl" />} brandHref="/games">
+        <Header brand={<Brand className="h-8" />} brandHref="/games">
           {user ? (
             <UserMenu nickname={user.nickname} avatarId={user.avatarId} />
           ) : (

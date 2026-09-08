@@ -31,7 +31,7 @@ export default async function ConfirmPage({
 
   return (
     <main className="mx-auto flex w-full max-w-md flex-1 flex-col items-center justify-center gap-5 px-6 py-16 text-center">
-      <Brand className="text-2xl" />
+      <Brand className="h-10" />
 
       <div>
         <h1 className="text-xl font-semibold">

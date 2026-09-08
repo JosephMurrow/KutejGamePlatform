@@ -35,7 +35,7 @@ export function GuestGate({
     <main className="mx-auto flex w-full max-w-md flex-1 flex-col justify-center gap-6 px-4 py-10">
       <div className="text-center">
         <Link href="/">
-          <Brand className="text-3xl" />
+          <Brand className="h-12" />
         </Link>
         <h1 className="mt-4 text-2xl font-bold">
           {title ?? "Заходи в комнату"}
