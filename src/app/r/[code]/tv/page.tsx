@@ -1,13 +1,13 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
-import { BRAND } from "@/components/Brand";
+import { PLATFORM } from "@/components/Brand";
 import { ScreenView } from "@/games/pricetitute/components/ScreenView";
 import { getSessionUserId } from "@/lib/auth/session";
 import { findPrivateRoom } from "@/lib/rooms/private";
 import { hasScreen } from "@/shared/room-settings";
 
 export const metadata: Metadata = {
-  title: `Экран — ${BRAND}`,
+  title: `Экран — ${PLATFORM}`,
 };
 
 /**

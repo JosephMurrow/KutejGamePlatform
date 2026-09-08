@@ -1,10 +1,10 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { LoginForm } from "@/components/auth/LoginForm";
-import { BRAND, Brand } from "@/components/Brand";
+import { Brand, PLATFORM } from "@/components/Brand";
 
 export const metadata: Metadata = {
-  title: `Вход — ${BRAND}`,
+  title: `Вход — ${PLATFORM}`,
 };
 
 export default async function LoginPage({

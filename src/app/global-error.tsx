@@ -37,7 +37,7 @@ export default function GlobalError({
         }}
       >
         <p style={{ fontSize: "1.5rem", fontWeight: 700 }}>
-          Плати<span style={{ color: "#d31450" }}>тутка</span>
+          Кут<span style={{ color: "#d31450" }}>ёж</span>
         </p>
         <h1 style={{ fontSize: "1.125rem", margin: 0 }}>
           Приложение не запустилось

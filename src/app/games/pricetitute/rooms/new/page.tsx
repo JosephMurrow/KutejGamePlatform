@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { BRAND, Brand } from "@/components/Brand";
+import { BRAND, GameBrand } from "@/games/pricetitute/components/Brand";
 import { CreateRoomForm } from "@/games/pricetitute/components/CreateRoomForm";
 import { UserMenu } from "@/components/UserMenu";
 import { getCurrentUser } from "@/lib/auth/session";
@@ -20,7 +20,7 @@ export default async function NewRoomPage() {
     <main className="mx-auto w-full max-w-lg flex-1 px-4 py-8">
       <header className="mb-6 flex items-center justify-between gap-3">
         <Link href="/">
-          <Brand className="text-xl" />
+          <GameBrand className="text-xl" />
         </Link>
         <UserMenu nickname={user.nickname} avatarId={user.avatarId} />
       </header>

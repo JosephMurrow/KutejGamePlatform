@@ -48,9 +48,7 @@ const envSchema = z.object({
   MAIL_PORT: optional(z.coerce.number().int().positive().default(587)),
   MAIL_USER: z.string().default(""),
   MAIL_PASSWORD: z.string().default(""),
-  MAIL_FROM: optional(
-    z.string().min(1).default("Платитутка <no-reply@localhost>"),
-  ),
+  MAIL_FROM: optional(z.string().min(1).default("Кутёж <no-reply@localhost>")),
 });
 
 type Env = z.infer<typeof envSchema>;

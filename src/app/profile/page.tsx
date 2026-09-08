@@ -2,14 +2,14 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { Avatar } from "@/components/Avatar";
-import { BRAND, Brand } from "@/components/Brand";
+import { Brand, PLATFORM } from "@/components/Brand";
 import { EmailForm } from "@/components/profile/EmailForm";
 import { ProfileForm } from "@/components/profile/ProfileForm";
 import { UserMenu } from "@/components/UserMenu";
 import { getCurrentUser } from "@/lib/auth/session";
 
 export const metadata: Metadata = {
-  title: `Профиль — ${BRAND}`,
+  title: `Профиль — ${PLATFORM}`,
 };
 
 export default async function ProfilePage() {

@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
-import { Brand } from "@/components/Brand";
+import { GameBrand } from "./Brand";
 import { LeaderboardModal } from "@/games/pricetitute/components/leaderboard/LeaderboardModal";
 import { UserMenu } from "@/components/UserMenu";
 import type { Bet } from "@/games/pricetitute/engine/bet";
@@ -73,7 +73,7 @@ export function GameRoom({
     <div className="mx-auto flex w-full max-w-5xl flex-1 flex-col gap-4 px-4 py-5">
       <header className="flex items-center justify-between gap-3">
         <Link href="/">
-          <Brand className="text-xl" />
+          <GameBrand className="text-xl" />
         </Link>
 
         <UserMenu

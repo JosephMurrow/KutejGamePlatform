@@ -1,10 +1,10 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { BRAND, Brand } from "@/components/Brand";
+import { Brand, PLATFORM } from "@/components/Brand";
 import { JoinByCodeForm } from "@/components/rooms/JoinByCodeForm";
 
 export const metadata: Metadata = {
-  title: `Вход по коду — ${BRAND}`,
+  title: `Вход по коду — ${PLATFORM}`,
 };
 
 /**

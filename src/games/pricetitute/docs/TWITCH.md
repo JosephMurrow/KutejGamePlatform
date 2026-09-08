@@ -19,8 +19,8 @@
 стримера. Проверка связи: `npm run twitch:check -- <канал>`.
 
 **Не работает.** Бот молчит. `!вопрос` и `!топ` разобраны в
-[twitch.ts](../src/shared/twitch.ts) и на мосту заканчиваются пустым `return`
-([bridge.ts](../src/server/twitch/bridge.ts) — ветка `question`/`top`). Ставки
+[twitch.ts](../twitch.ts) и на мосту заканчиваются пустым `return`
+([bridge.ts](../../../server/twitch/bridge.ts) — ветка `question`/`top`). Ставки
 из чата остаются висеть у всех на виду, потому что удалять их нечем.
 
 **Игра без этого работает целиком.** Это единственный кусок версии, который
@@ -46,7 +46,7 @@ Client Type — `Confidential`, Category — `Chat Bot`, OAuth Redirect URLs —
 
 - `http://localhost:3000/twitch/callback` — разработка;
 - `https://pricetitute.duckdns.org:8443/twitch/callback` — бой, ровно как
-  `APP_URL` в [.env.prod.example](../.env.prod.example), вместе с портом;
+  `APP_URL` в [.env.prod.example](../../../../.env.prod.example), вместе с портом;
 - `http://localhost:3000` — голый, под Twitch CLI: с ним отправку можно
   проверить до того, как появится экран привязки.
 
@@ -75,7 +75,7 @@ TWITCH_CLIENT_ID=
 TWITCH_CLIENT_SECRET=
 ```
 
-В [.env.example](../.env.example) и [.env.prod.example](../.env.prod.example) —
+В [.env.example](../../../../.env.example) и [.env.prod.example](../../../../.env.prod.example) —
 с пояснением, что без них игра работает как сегодня. Адрес возврата отдельной
 переменной не заводим: собирается из `APP_URL` плюс `/twitch/callback`.
 
@@ -163,7 +163,7 @@ TWITCH_CLIENT_SECRET=
 ставка в чате видна всем до вскрытия.
 
 **Идентификатор сообщения сейчас теряется.** `toMessage` в
-[chat.ts](../src/server/twitch/chat.ts) складывает `user-id`, ник, текст и
+[chat.ts](../../../server/twitch/chat.ts) складывает `user-id`, ник, текст и
 значки, а тег `id` выбрасывает — без него удалять нечего. Строчка работы, но
 про неё легко забыть и упереться.
 

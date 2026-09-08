@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { BRAND } from "@/components/Brand";
+import { BRAND } from "@/games/pricetitute/components/Brand";
 import { Landing } from "@/games/pricetitute/components/Landing";
 
 export const metadata: Metadata = {

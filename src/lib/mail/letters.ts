@@ -1,11 +1,11 @@
 import { buildLetter, type Letter } from "./letter";
 import { appLink } from "./send";
 
-/** Готовые письма игры. Тексты собраны здесь, чтобы не растекались по коду. */
+/** Готовые письма платформы. Тексты собраны здесь, чтобы не растекались по коду. */
 
 export function welcomeLetter(login: string, token: string): Letter {
   return buildLetter({
-    subject: "Ты в игре — Платитутка",
+    subject: "Ты в игре — Кутёж",
     heading: "Регистрация прошла",
     lines: [
       `Твой логин: ${login}. Входить в игру нужно им, а не адресом почты.`,
@@ -19,7 +19,7 @@ export function welcomeLetter(login: string, token: string): Letter {
 
 export function confirmLetter(login: string, token: string): Letter {
   return buildLetter({
-    subject: "Подтверди адрес — Платитутка",
+    subject: "Подтверди адрес — Кутёж",
     heading: "Подтверждение почты",
     lines: [
       `Этот адрес указан для аккаунта ${login}.`,
@@ -34,7 +34,7 @@ export function confirmLetter(login: string, token: string): Letter {
 
 export function resetLetter(login: string, token: string): Letter {
   return buildLetter({
-    subject: "Восстановление пароля — Платитутка",
+    subject: "Восстановление пароля — Кутёж",
     heading: "Новый пароль",
     lines: [
       `Кто-то запросил восстановление пароля для аккаунта ${login}.`,

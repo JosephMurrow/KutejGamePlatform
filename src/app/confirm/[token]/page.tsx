@@ -1,11 +1,11 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { BRAND, Brand } from "@/components/Brand";
+import { Brand, PLATFORM } from "@/components/Brand";
 import { claimLink } from "@/lib/auth/links";
 import { prisma } from "@/lib/prisma";
 
 export const metadata: Metadata = {
-  title: `Подтверждение адреса — ${BRAND}`,
+  title: `Подтверждение адреса — ${PLATFORM}`,
 };
 
 /**

@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Avatar } from "@/components/Avatar";
-import { Brand } from "@/components/Brand";
+import { GameBrand } from "./Brand";
 import { formatBet, isNever } from "@/games/pricetitute/engine/bet";
 import { buildQr } from "@/lib/qr";
 import type {
@@ -133,7 +133,7 @@ export function ScreenView({
     <div className="flex h-svh flex-col gap-6 overflow-hidden p-6 sm:p-10">
       <header className="flex items-baseline justify-between gap-6">
         <h1 className="min-w-0 truncate text-2xl font-bold sm:text-4xl">
-          {state.roomTitle ?? <Brand className="text-2xl sm:text-4xl" />}
+          {state.roomTitle ?? <GameBrand className="text-2xl sm:text-4xl" />}
         </h1>
 
         <span className="tabular shrink-0 text-2xl font-bold tracking-[0.2em] text-crimson sm:text-4xl">
@@ -261,7 +261,7 @@ function Qr({ link, size }: { link: string; size: number }) {
 function Curtain({ title, hint }: { title: string; hint?: string }) {
   return (
     <div className="flex min-h-svh flex-col items-center justify-center gap-3 p-10 text-center">
-      <Brand className="text-3xl" />
+      <GameBrand className="text-3xl" />
       <p className="text-xl font-semibold">{title}</p>
       {hint && <p className="text-sm text-muted">{hint}</p>}
     </div>

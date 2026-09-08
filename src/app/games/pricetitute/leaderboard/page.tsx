@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { BRAND, Brand } from "@/components/Brand";
+import { BRAND, GameBrand } from "@/games/pricetitute/components/Brand";
 import { UserMenu } from "@/components/UserMenu";
 import { getCurrentUser } from "@/lib/auth/session";
 import { loadChampions } from "@/games/pricetitute/leaderboard/champions";
@@ -45,7 +45,7 @@ export default async function LeaderboardPage({
     <main className="mx-auto w-full max-w-2xl flex-1 px-4 py-8">
       <header className="mb-6 flex items-center justify-between gap-3">
         <Link href="/">
-          <Brand className="text-xl" />
+          <GameBrand className="text-xl" />
         </Link>
         <UserMenu nickname={user.nickname} avatarId={user.avatarId} />
       </header>

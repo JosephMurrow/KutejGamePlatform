@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import { notFound, redirect } from "next/navigation";
-import { BRAND } from "@/components/Brand";
+import { PLATFORM } from "@/components/Brand";
 import { GameRoom } from "@/games/pricetitute/components/GameRoom";
 import { GuestGate } from "@/components/rooms/GuestGate";
 import { HardcoreGate } from "@/games/pricetitute/components/HardcoreGate";
@@ -11,7 +11,7 @@ import { findPrivateRoom } from "@/lib/rooms/private";
 import { allowsGuests } from "@/shared/room-settings";
 
 export const metadata: Metadata = {
-  title: `Своя комната — ${BRAND}`,
+  title: `Своя комната — ${PLATFORM}`,
 };
 
 export default async function PrivateRoomPage({

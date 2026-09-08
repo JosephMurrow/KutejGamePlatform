@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import { redirect } from "next/navigation";
-import { BRAND } from "@/components/Brand";
+import { BRAND } from "@/games/pricetitute/components/Brand";
 import { GameRoom } from "@/games/pricetitute/components/GameRoom";
 import { getCurrentUser } from "@/lib/auth/session";
 

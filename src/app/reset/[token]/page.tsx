@@ -1,9 +1,9 @@
 import type { Metadata } from "next";
-import { BRAND, Brand } from "@/components/Brand";
+import { Brand, PLATFORM } from "@/components/Brand";
 import { ResetForm } from "@/components/auth/ResetForm";
 
 export const metadata: Metadata = {
-  title: `Новый пароль — ${BRAND}`,
+  title: `Новый пароль — ${PLATFORM}`,
 };
 
 /**

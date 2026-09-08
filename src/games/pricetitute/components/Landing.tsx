@@ -6,7 +6,7 @@
  */
 import Link from "next/link";
 import { Avatar } from "@/components/Avatar";
-import { Brand } from "@/components/Brand";
+import { GameBrand } from "./Brand";
 import { getCurrentUser } from "@/lib/auth/session";
 import { ROUTES } from "../manifest";
 
@@ -35,7 +35,7 @@ export async function Landing() {
   return (
     <main className="mx-auto w-full max-w-3xl flex-1 px-5 py-12">
       <section className="flex flex-col items-center gap-5 text-center">
-        <Brand className="text-5xl sm:text-6xl" />
+        <GameBrand className="text-5xl sm:text-6xl" />
 
         <p className="max-w-lg text-balance text-lg text-muted">
           Угадай, за какую сумму человек согласился бы это сделать. Кто ближе

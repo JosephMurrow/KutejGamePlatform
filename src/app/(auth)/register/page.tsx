@@ -1,10 +1,10 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { RegisterForm } from "@/components/auth/RegisterForm";
-import { BRAND, Brand } from "@/components/Brand";
+import { Brand, PLATFORM } from "@/components/Brand";
 
 export const metadata: Metadata = {
-  title: `Регистрация — ${BRAND}`,
+  title: `Регистрация — ${PLATFORM}`,
 };
 
 export default async function RegisterPage({

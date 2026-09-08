@@ -1,10 +1,10 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { BRAND } from "@/components/Brand";
+import { PLATFORM } from "@/components/Brand";
 import { ForgotForm } from "@/components/auth/ForgotForm";
 
 export const metadata: Metadata = {
-  title: `Забыл пароль — ${BRAND}`,
+  title: `Забыл пароль — ${PLATFORM}`,
 };
 
 export default function ForgotPage() {
