@@ -16,8 +16,11 @@ export interface BotAvatarPack {
   offset: number;
   /** Сколько номеров занято. */
   count: number;
-  /** Чем рисовать. Платформа зовёт, но внутрь не смотрит. */
-  Render: ComponentType<{ id: number; size: number; className?: string }>;
+  /**
+   * Адрес картинки по номеру аватара. Путь, а не компонент: аватары —
+   * картинки в `public`, и платформе достаточно ссылки (docs/BACKLOG.md D5).
+   */
+  src: (avatarId: number) => string;
 }
 
 export interface GameRoutes {

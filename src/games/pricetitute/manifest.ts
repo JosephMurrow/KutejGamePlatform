@@ -1,6 +1,9 @@
 import type { GameManifest } from "@/lib/games/manifest";
-import { ROBOT_AVATAR_OFFSET, ROBOT_COUNT } from "./bots/avatars";
-import { BotAvatar } from "./components/BotAvatar";
+import {
+  ROBOT_AVATAR_OFFSET,
+  ROBOT_COUNT,
+  robotAvatarSrc,
+} from "./bots/avatars";
 import { PricetituteBox } from "./components/Box";
 import { GAME_ID, GLOBAL_ROOM } from "./protocol";
 
@@ -29,6 +32,6 @@ export const PRICETITUTE: GameManifest = {
   botAvatars: {
     offset: ROBOT_AVATAR_OFFSET,
     count: ROBOT_COUNT,
-    Render: BotAvatar,
+    src: robotAvatarSrc,
   },
 };
