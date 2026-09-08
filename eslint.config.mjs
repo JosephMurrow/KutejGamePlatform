@@ -39,6 +39,7 @@ const eslintConfig = defineConfig([
       // Их два: клиентский едет в браузер, серверный тянет движок.
       "src/lib/games/registry.ts",
       "src/lib/games/servers.ts",
+      "src/lib/games/seeds.ts",
       // Приватная комната пока держит игровые настройки колонками в
       // платформенной таблице. Это записанный долг: он уходит вместе с
       // переездом схем (docs/BACKLOG.md A4, этап 2 в docs/PLAN.md).

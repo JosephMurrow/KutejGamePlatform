@@ -1,140 +1,20 @@
+// Схема платформы. Здесь только то, что переиспользует любая игра: аккаунты,
+// одноразовые ссылки и комната как оболочка.
+//
+// У каждой игры своя схема Postgres — своя среда обитания, без перемешек
+// (docs/BACKLOG.md A5). Внешние ключи между схемами живут: игровая таблица
+// очков ссылается на platform.users, и это то, ради чего выбраны схемы, а не
+// отдельные базы.
+
 generator client {
   provider = "prisma-client"
-  output   = "../src/generated/prisma"
+  output   = "../../src/generated/prisma"
 }
-
 // В Prisma 7 строка подключения живёт в prisma.config.ts, а не здесь.
 datasource db {
   provider = "postgresql"
+  schemas  = ["platform", "pricetitute"]
 }
-
-/// Тематический пак вопроса. Пришёл на смену тональности: режим комнаты
-/// набирается из паков, а не из категорий (см. docs/BACKLOG.md F1).
-enum QuestionPack {
-  /// Нынешние 500: бытовое, социальное и откровенное.
-  STANDARD
-  /// Пьянка без жести.
-  DRUNK
-  /// Прямее и подробнее, чем откровенное из «Стандарта».
-  SEX
-  /// Чужое, подельники, нары.
-  CRIME
-  /// Самое дно, 21+. Есть ровно в одном режиме и только вручную.
-  BLACK
-}
-
-/// Набор паков, которым играет комната.
-enum QuestionMode {
-  /// Стандарт.
-  NORMAL
-  /// Стандарт, пьянка, секс, криминал.
-  DRUNK_PARTY
-  /// Пьянка, секс, криминал, чернота. Стандарта нет намеренно.
-  HARDCORE
-}
-
-/// Вопрос из пула. Задаётся ведущему, тот отвечает суммой (см. docs/SPEC.md §6).
-model Question {
-  id     String       @id @default(cuid())
-  text   String       @unique
-  pack   QuestionPack @default(STANDARD)
-  /// Взрослое содержимое. В «Обычном» режиме хост может это выключить;
-  /// в остальных паках взрослое всё, и галочка там не показывается.
-  adult  Boolean      @default(false)
-  /// Выключенный вопрос не попадает в новые очереди.
-  active Boolean      @default(true)
-
-  createdAt DateTime @default(now())
-
-  rounds Round[]
-
-  @@index([active, pack, adult])
-  @@map("questions")
-}
-
-/// Сыгранный раунд: что спросили, что ответил ведущий, кто сколько поставил.
-model Round {
-  id      String @id @default(cuid())
-  /// "global" для общей комнаты, иначе идентификатор приватной.
-  roomKey String
-
-  questionId String
-  question   Question @relation(fields: [questionId], references: [id], onDelete: Cascade)
-
-  hostId String
-  host   User   @relation("HostedRounds", fields: [hostId], references: [id], onDelete: Cascade)
-
-  /// Сумма ведущего в рублях; null, если он выбрал «Ни за какие деньги».
-  hostSum   Int?
-  hostNever Boolean @default(false)
-
-  finishedAt DateTime
-
-  bets RoundBet[]
-
-  @@index([roomKey, finishedAt])
-  @@map("rounds")
-}
-
-/// Ставка игрока в раунде.
-model RoundBet {
-  id String @id @default(cuid())
-
-  roundId String
-  round   Round  @relation(fields: [roundId], references: [id], onDelete: Cascade)
-
-  playerId String
-  player   User   @relation(fields: [playerId], references: [id], onDelete: Cascade)
-
-  sum   Int?
-  never Boolean @default(false)
-  /// Взял ли очко за этот раунд.
-  won   Boolean @default(false)
-
-  @@unique([roundId, playerId])
-  @@map("round_bets")
-}
-
-/// Накопленный счёт игрока в конкретной комнате.
-/// Очки приватных комнат наружу не идут: они лежат под своим roomKey.
-model Score {
-  id String @id @default(cuid())
-
-  userId String
-  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  roomKey      String
-  points       Int    @default(0)
-  roundsPlayed Int    @default(0)
-
-  updatedAt DateTime @updatedAt
-
-  @@unique([userId, roomKey])
-  @@index([roomKey, points])
-  @@map("scores")
-}
-
-/// Очередь вопросов конкретной комнаты: порядок сохраняется между
-/// перезапусками сервера. Голова очереди — нулевой элемент массива.
-model RoomQuestionQueue {
-  id           String       @id @default(cuid())
-  /// "global" для общей комнаты, иначе идентификатор приватной.
-  roomKey      String       @unique
-  /// Идентификаторы вопросов в порядке выдачи.
-  queue        String[]
-  /// Уже выданные в текущем круге: без этого после перезапуска сервера
-  /// показанные вопросы вернулись бы в очередь как новые.
-  consumed     String[]
-  /// Учитываются ли в этой очереди вопросы 18+.
-  includeAdult Boolean      @default(true)
-  /// Каким режимом собрана очередь: смена режима собирает её заново.
-  mode         QuestionMode @default(NORMAL)
-
-  updatedAt DateTime @updatedAt
-
-  @@map("room_question_queues")
-}
-
 /// Какого рода комната. От этого зависит, есть ли у неё вид «экран», пускают ли
 /// туда гостей и как выглядит приглашение (см. docs/BACKLOG.md Q4).
 enum RoomKind {
@@ -144,27 +24,9 @@ enum RoomKind {
   STREAM
   /// Домашняя: картинка на телевизоре, вход только по аккаунту.
   HOME
-}
 
-/// Кто ведёт раунды.
-enum HostRotation {
-  /// По кругу в порядке входа, как в общем зале.
-  CIRCLE
-  /// Всегда хозяин комнаты. Круг ходов рассыпается на аудитории: двести
-  /// зрителей по шесть минут дают свой ход раз в двадцать часов.
-  OWNER
+  @@schema("platform")
 }
-
-/// Чем заканчивается партия в приватной комнате.
-enum RoomEndMode {
-  /// Играем, пока хост не остановит.
-  ENDLESS
-  /// До заданного числа раундов.
-  ROUNDS
-  /// Пока кто-нибудь не наберёт заданное число очков.
-  POINTS
-}
-
 /// Приватная комната: счёт внутри неё наружу не уходит (см. docs/SPEC.md §3.2).
 model PrivateRoom {
   id   String @id @default(cuid())
@@ -211,16 +73,18 @@ model PrivateRoom {
 
   @@index([emptySince])
   @@map("private_rooms")
-}
 
+  @@schema("platform")
+}
 /// Зачем выдана одноразовая ссылка.
 enum LinkPurpose {
   /// Подтверждение адреса почты.
   EMAIL_CONFIRM
   /// Сброс забытого пароля.
   PASSWORD_RESET
-}
 
+  @@schema("platform")
+}
 /// Одноразовая ссылка из письма.
 ///
 /// Хранится хеш, а не сама ссылка: утёкшая таблица не должна давать доступ к
@@ -248,8 +112,9 @@ model OneTimeLink {
   @@index([userId, purpose])
   @@index([expiresAt])
   @@map("one_time_links")
-}
 
+  @@schema("platform")
+}
 /// Игрок. Регистрация — логин, пароль и почта,
 /// восстановление пароля идёт по письму (см. docs/SPEC.md §2).
 model User {
@@ -299,4 +164,6 @@ model User {
 
   @@index([guestRoomId])
   @@map("users")
+
+  @@schema("platform")
 }

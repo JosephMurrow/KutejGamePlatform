@@ -43,10 +43,11 @@ docker compose -f docker-compose.prod.yml exec app npx prisma db seed
 
 ```bash
 docker compose -f docker-compose.prod.yml exec -T postgres \
-  psql -U platitutka -d platitutka -c "select count(*) from questions;"
+  psql -U platitutka -d platitutka -c "select count(*) from pricetitute.questions;"
 ```
 
-Число должно совпадать с размером пула из `prisma/seed/questions`. Если оно
+Число должно совпадать с размером пула из
+`src/games/pricetitute/seed/questions`. Если оно
 вдвое больше — сид отработал раньше переименования; чинится удалением строк,
 на которые не ссылается ни один раунд, и последующим переименованием
 оригиналов.
@@ -64,7 +65,53 @@ docker compose -f docker-compose.prod.yml restart app
 если инстансов больше одного, они подерутся за одну и ту же миграцию.
 
 Сид безопасен при повторном запуске: `createMany` со `skipDuplicates` не
-плодит копии и добавляет только новые вопросы.
+плодит копии и добавляет только новые вопросы. Сид платформы идёт по реестру
+игр и зовёт сид каждой — каждая сеет в свою схему.
+
+### Разовое: переезд таблиц по схемам
+
+Миграция `20260908120000_schemas_per_game` раскладывает таблицы по схемам:
+`platform` — аккаунты, ссылки и комнаты, `pricetitute` — вопросы, раунды,
+ставки и очки. Журнал миграций остаётся в `public`.
+
+**Это единственная миграция версии 2.0, которая трогает живые данные
+необратимо.** `ALTER TABLE … SET SCHEMA` переносит таблицы вместе с данными,
+индексами и ключами — ничего не переливается, — но откатить это «само» нельзя.
+Порядок такой:
+
+```bash
+# 1. Бэкап до всего остального.
+docker compose -f docker-compose.prod.yml exec -T postgres \
+  pg_dump -U platitutka -d platitutka --format=custom > before-schemas.dump
+
+# 2. Прогон на копии: восстанавливаем дамп в отдельную базу и мигрируем её.
+docker compose -f docker-compose.prod.yml exec -T postgres \
+  createdb -U platitutka platitutka_copy
+docker compose -f docker-compose.prod.yml exec -T postgres \
+  pg_restore -U platitutka -d platitutka_copy < before-schemas.dump
+DATABASE_URL=…/platitutka_copy npx prisma migrate deploy
+
+# 3. Только после этого — на боевой.
+docker compose -f docker-compose.prod.yml exec app npx prisma migrate deploy
+```
+
+**Что проверить после переезда:**
+
+```sql
+\dt platform.*      -- users, one_time_links, private_rooms
+\dt pricetitute.*   -- questions, rounds, round_bets, scores, room_question_queues
+\dt public.*        -- только _prisma_migrations
+```
+
+И что межсхемные ключи живы — очки по-прежнему ссылаются на пользователя:
+
+```sql
+select count(*) from pricetitute.scores s
+  join platform.users u on u.id = s."userId";
+```
+
+**Приложение выкладывается вместе с этой миграцией, а не после.** Старый код
+ходит в `public` и после переезда перестанет находить таблицы.
 
 ### Почта
 
