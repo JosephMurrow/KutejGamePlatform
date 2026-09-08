@@ -252,7 +252,7 @@ export function CreateRoomForm() {
       {/*
         Экран рисуем мы, а отвечает за картинку хозяин канала: откровенные паки
         крупным планом в эфире — прямое нарушение правил площадок. Предупреждаем
-        честно и не мешаем (см. docs/BACKLOG.md O6).
+        честно и не мешаем (см. src/games/pricetitute/docs/BACKLOG.md O6).
       */}
       {hasScreen(kind) && mode !== "normal" && (
         <p className="rounded-lg border border-crimson/30 bg-tint px-3 py-2 text-xs text-deep">

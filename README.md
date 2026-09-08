@@ -3,10 +3,14 @@
 Онлайн-игра: участники угадывают, за какую сумму ведущий согласился бы
 совершить провокационное действие. Кто ближе всех — забирает очко.
 
-- Правила и функционал — [docs/SPEC.md](docs/SPEC.md)
-- План работ — [docs/ROADMAP.md](docs/ROADMAP.md)
-- Выкладка — [docs/DEPLOY.md](docs/DEPLOY.md)
-- Что дальше — [docs/BACKLOG.md](docs/BACKLOG.md)
+Документация разведена надвое: общая по платформе — в `docs/`, по самой игре —
+рядом с её кодом.
+
+- Платформа: бэклог — [docs/BACKLOG.md](docs/BACKLOG.md), план работ —
+  [docs/PLAN.md](docs/PLAN.md), выкладка — [docs/DEPLOY.md](docs/DEPLOY.md)
+- Платитутка: правила — [SPEC.md](src/games/pricetitute/docs/SPEC.md), пройденный
+  план — [ROADMAP.md](src/games/pricetitute/docs/ROADMAP.md), бэклог игры —
+  [BACKLOG.md](src/games/pricetitute/docs/BACKLOG.md)
 
 ## Стек
 

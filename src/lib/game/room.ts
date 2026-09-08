@@ -3,7 +3,7 @@ import type { Bet } from "./bet";
 import { resolveRound, type PlayerBet, type RoundOutcome } from "./scoring";
 
 /**
- * Машина состояний комнаты (см. docs/SPEC.md §4).
+ * Машина состояний комнаты (см. src/games/pricetitute/docs/SPEC.md §4).
  *
  * Внутри нет ни таймеров, ни сокетов, ни базы: время приходит снаружи
  * параметром `now`, вопросы — через QuestionSource. Транспорт дёргает `tick`
@@ -19,7 +19,7 @@ export type Phase =
   /** Партия доиграна до условия конца: висит экран победителя. */
   | "finished";
 
-/** Чем заканчивается партия (см. docs/SPEC.md §3.2). */
+/** Чем заканчивается партия (см. src/games/pricetitute/docs/SPEC.md §3.2). */
 export type EndMode = "endless" | "rounds" | "points";
 
 export interface RoomOptions {

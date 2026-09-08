@@ -40,7 +40,7 @@ export { SOCKET_PATH };
 /**
  * Сколько игроков влезает в снимок. Пока за столом не больше — шлём всех и
  * ничего не меняется; дальше состав режется, потому что рассылка иначе растёт
- * квадратом от числа людей (см. docs/BACKLOG.md N4).
+ * квадратом от числа людей (см. src/games/pricetitute/docs/BACKLOG.md N4).
  */
 const PLAYERS_IN_SNAPSHOT = 12;
 
@@ -68,7 +68,7 @@ export type Viewer = { kind: "player"; id: string } | { kind: "screen" };
 
 /**
  * Комната только для игроков. Чат уходит сюда, а не всем подряд: экран его не
- * показывает (см. docs/BACKLOG.md O4), и незачем ему туда и попадать.
+ * показывает (см. src/games/pricetitute/docs/BACKLOG.md O4), и незачем ему туда и попадать.
  */
 function playersRoom(key: string): string {
   return `${key}:players`;

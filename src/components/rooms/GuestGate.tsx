@@ -14,7 +14,7 @@ import { joinAsGuestAction } from "@/lib/rooms/actions";
  *
  * Гость — не поблажка, а условие жизнеспособности эфирной комнаты: зритель не
  * пойдёт заводить аккаунт ради одного раунда. Взамен он получает только эту
- * комнату: ни общего зала, ни рейтинга, ни профиля (см. docs/BACKLOG.md O3).
+ * комнату: ни общего зала, ни рейтинга, ни профиля (см. src/games/pricetitute/docs/BACKLOG.md O3).
  */
 export function GuestGate({
   code,

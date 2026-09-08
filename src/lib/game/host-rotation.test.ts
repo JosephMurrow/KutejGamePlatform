@@ -7,7 +7,7 @@ import { DEFAULT_TIMINGS, Room, type QuestionSource } from "./room";
  *
  * И то и другое заведено ради толпы: круг ходов на аудитории доходит до
  * зрителя раз в сутки, а «закрываем, когда поставили все» не наступает никогда
- * (см. docs/BACKLOG.md N3 и N5).
+ * (см. src/games/pricetitute/docs/BACKLOG.md N3 и N5).
  */
 
 class Endless implements QuestionSource {

@@ -92,7 +92,7 @@ async function main() {
 
   console.log("\nСостав комнаты");
   // Считаем по playerCount, а не по длине списка: на большой комнате в снимок
-  // едет верхушка таблицы, а не все подряд (см. docs/BACKLOG.md N4).
+  // едет верхушка таблицы, а не все подряд (см. src/games/pricetitute/docs/BACKLOG.md N4).
   check(
     "все игроки за столом",
     last?.playerCount === COUNT,
