@@ -1,0 +1,40 @@
+# Прогон проверок на пуш и на пул-реквест.
+#
+# Смоуков здесь нет намеренно: smoke:sockets и smoke:crowd поднимают живой
+# сервер и ходят в базу, это отдельная история. Здесь только то, что считается
+# по исходникам.
+name: Проверки
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+
+    env:
+      # Настоящие секреты для этих команд не нужны: env-схема ленивая и
+      # проверяется при первом обращении, а не при сборке (см. src/lib/env.ts).
+      # Значения-заглушки стоят затем, чтобы prisma generate и next build не
+      # спотыкались о пустоту.
+      DATABASE_URL: postgresql://ci:ci@localhost:5432/ci
+      SESSION_SECRET: ci-secret-not-used-anywhere-32-chars-long
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          # Та же версия, что в боевом образе (см. Dockerfile).
+          node-version: 22
+          cache: npm
+
+      # postinstall сам зовёт prisma generate — клиент в репозитории не лежит.
+      - run: npm ci
+
+      - run: npm run lint
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run format:check
+      - run: npm run build
