@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { BRAND, Brand } from "@/components/Brand";
-import { CreateRoomForm } from "@/components/rooms/CreateRoomForm";
+import { CreateRoomForm } from "@/games/pricetitute/components/CreateRoomForm";
 import { UserMenu } from "@/components/UserMenu";
 import { getCurrentUser } from "@/lib/auth/session";
 

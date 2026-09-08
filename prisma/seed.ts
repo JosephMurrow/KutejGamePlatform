@@ -1,65 +1,18 @@
-import { PrismaPg } from "@prisma/adapter-pg";
-import { PrismaClient } from "../src/generated/prisma/client";
-import { QUESTIONS } from "./seed/questions";
-
-const connectionString = process.env.DATABASE_URL;
-if (!connectionString) {
-  throw new Error("DATABASE_URL не задан — нечего сидировать");
-}
-
-const prisma = new PrismaClient({
-  adapter: new PrismaPg({ connectionString }),
-});
+/**
+ * Сид платформы. Своё сеет каждая игра сама: платформа только зовёт их по
+ * очереди и не знает ни одной игровой таблицы.
+ *
+ * Пока игра одна и зовётся напрямую. Диспетчер по реестру появится вместе с
+ * разъездом схем (docs/BACKLOG.md A5, этап 2 в docs/PLAN.md) — тогда же
+ * станет важен и порядок: сперва платформенный сид, потом игровые.
+ */
+import { seedPricetitute } from "../src/games/pricetitute/seed/run";
 
 async function main() {
-  const duplicates = findDuplicates(QUESTIONS.map((question) => question.text));
-  if (duplicates.length > 0) {
-    throw new Error(
-      `В пуле есть повторы, поправь их перед заливкой:\n${duplicates.join("\n")}`,
-    );
-  }
-
-  // createMany со skipDuplicates: повторный запуск не ломается и не плодит
-  // копии, а новые вопросы просто добавляются.
-  const { count } = await prisma.question.createMany({
-    data: QUESTIONS,
-    skipDuplicates: true,
-  });
-
-  const stats = await prisma.question.groupBy({
-    by: ["pack", "adult"],
-    _count: { _all: true },
-    orderBy: [{ pack: "asc" }, { adult: "asc" }],
-  });
-
-  const total = await prisma.question.count();
-
-  console.log(`Добавлено новых вопросов: ${count}`);
-  console.log(`Всего в пуле: ${total}`);
-  for (const row of stats) {
-    const mark = row.adult ? " 18+" : "";
-    console.log(`  ${row.pack}${mark}: ${row._count?._all ?? 0}`);
-  }
+  await seedPricetitute();
 }
 
-function findDuplicates(texts: string[]): string[] {
-  const seen = new Set<string>();
-  const repeated = new Set<string>();
-
-  for (const text of texts) {
-    const key = text.trim().toLowerCase();
-    if (seen.has(key)) repeated.add(text);
-    seen.add(key);
-  }
-
-  return [...repeated];
-}
-
-main()
-  .catch((error) => {
-    console.error(error);
-    process.exit(1);
-  })
-  .finally(() => {
-    void prisma.$disconnect();
-  });
+main().catch((error: unknown) => {
+  console.error(error);
+  process.exit(1);
+});

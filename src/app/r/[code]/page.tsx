@@ -1,11 +1,11 @@
 import type { Metadata } from "next";
 import { notFound, redirect } from "next/navigation";
 import { BRAND } from "@/components/Brand";
-import { GameRoom } from "@/components/game/GameRoom";
+import { GameRoom } from "@/games/pricetitute/components/GameRoom";
 import { GuestGate } from "@/components/rooms/GuestGate";
-import { HardcoreGate } from "@/components/rooms/HardcoreGate";
+import { HardcoreGate } from "@/games/pricetitute/components/HardcoreGate";
 import { getCurrentUser } from "@/lib/auth/session";
-import { isHardcore } from "@/lib/questions/modes";
+import { isHardcore } from "@/games/pricetitute/questions/modes";
 import { findPrivateRoom } from "@/lib/rooms/private";
 import { allowsGuests } from "@/shared/room-settings";
 

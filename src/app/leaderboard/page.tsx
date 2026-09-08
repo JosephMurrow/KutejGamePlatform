@@ -4,10 +4,13 @@ import { redirect } from "next/navigation";
 import { BRAND, Brand } from "@/components/Brand";
 import { UserMenu } from "@/components/UserMenu";
 import { getCurrentUser } from "@/lib/auth/session";
-import { loadChampions } from "@/lib/champions";
-import { LeaderboardTable } from "@/components/leaderboard/LeaderboardTable";
-import type { Titles } from "@/lib/game/crowns";
-import { loadLeaderboard, type LeaderboardPeriod } from "@/lib/leaderboard";
+import { loadChampions } from "@/games/pricetitute/leaderboard/champions";
+import { LeaderboardTable } from "@/games/pricetitute/components/leaderboard/LeaderboardTable";
+import type { Titles } from "@/games/pricetitute/engine/crowns";
+import {
+  loadLeaderboard,
+  type LeaderboardPeriod,
+} from "@/games/pricetitute/leaderboard/board";
 
 export const metadata: Metadata = {
   title: `Рейтинг — ${BRAND}`,

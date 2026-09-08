@@ -1,12 +1,7 @@
 import { randomAvatarId } from "../../lib/avatars";
 import { prisma } from "../../lib/prisma";
 import { checkNickname } from "../../shared/guest";
-import {
-  parseCommand,
-  twitchLogin,
-  twitchNickname,
-  type TwitchCommand,
-} from "../../shared/twitch";
+import { twitchLogin, twitchNickname } from "../../shared/twitch";
 import type { RoomManager } from "../rooms";
 import { ChatReader, normalizeChannel, type TwitchMessage } from "./chat";
 
@@ -115,7 +110,7 @@ export class TwitchBridge {
 
     for (const seat of attachment.seats.values()) {
       managed.profiles.delete(seat.userId);
-      managed.runner.run((room, at) => room.leave(seat.userId, at));
+      managed.game.leave(seat.userId);
     }
   }
 
@@ -131,8 +126,10 @@ export class TwitchBridge {
     const managed = this.manager.get(roomKey);
     if (!attachment || !managed) return;
 
-    const command = parseCommand(message.text);
-    if (command === null) return;
+    // Что значит строчка — решает игра: `!500` это ставка платитутки, а не
+    // платформы (docs/BACKLOG.md A1).
+    const intent = managed.game.fromChat?.(message.text) ?? null;
+    if (intent === null) return;
 
     const now = Date.now();
     const seat = attachment.seats.get(message.userId);
@@ -142,8 +139,8 @@ export class TwitchBridge {
     if (seat && now - seat.lastActedAt < COOLDOWN_MS) return;
     if (seat) seat.lastActedAt = now;
 
-    switch (command.kind) {
-      case "join":
+    switch (intent.kind) {
+      case "sit":
         await this.seat(roomKey, message);
         break;
 
@@ -151,22 +148,15 @@ export class TwitchBridge {
         this.unseat(roomKey, message.userId);
         break;
 
-      case "bet": {
-        // Ставка сама сажает за стол: заставлять зрителя писать `!я` перед
+      case "act": {
+        // Действие само сажает за стол: заставлять зрителя писать `!я` перед
         // первой ставкой — верный способ потерять половину чата.
         const player = seat ?? (await this.seat(roomKey, message));
         if (!player) return;
 
-        managed.runner.run((room, at) =>
-          room.placeBet(player.userId, command.bet, at),
-        );
+        await managed.game.act(intent.event, player.userId, intent.payload);
         break;
       }
-
-      // Отвечать в чат мост пока не умеет: это отдельный этап с OAuth.
-      case "question":
-      case "top":
-        return;
     }
 
     this.broadcast(roomKey);
@@ -187,7 +177,7 @@ export class TwitchBridge {
     // Замок и лимит комнаты действуют и на чат: закрыл набор — значит закрыл.
     if (managed.locked) return null;
     const limit = managed.maxPlayers;
-    if (limit !== null && managed.room.view().players.length >= limit) {
+    if (limit !== null && managed.game.seated().length >= limit) {
       return null;
     }
 
@@ -220,11 +210,11 @@ export class TwitchBridge {
 
     managed.profiles.set(user.id, {
       id: user.id,
-      guestRoomId: roomKey,
       nickname,
       avatarId: user.avatarId,
+      isGuest: true,
     });
-    managed.runner.run((room, at) => room.join(user.id, at));
+    managed.game.join(user.id);
 
     return seat;
   }
@@ -239,8 +229,6 @@ export class TwitchBridge {
 
     attachment.seats.delete(twitchUserId);
     managed.profiles.delete(seat.userId);
-    managed.runner.run((room, at) => room.leave(seat.userId, at));
+    managed.game.leave(seat.userId);
   }
 }
-
-export type { TwitchCommand };

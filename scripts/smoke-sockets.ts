@@ -10,10 +10,11 @@ import {
   VIEW_QUERY,
   type Ack,
   type ChatMessagePayload,
-  type RoomStatePayload,
 } from "../src/shared/protocol";
+import { type GameStatePayload } from "../src/games/pricetitute/protocol";
 import { createPrivateRoom, deletePrivateRoom } from "../src/lib/rooms/private";
 import { createGuest } from "../src/lib/auth/guest";
+import { GAME_EVENT } from "../src/games/pricetitute/protocol";
 
 const URL = "http://localhost:3000";
 
@@ -25,7 +26,7 @@ function check(label: string, condition: boolean, extra = "") {
 }
 
 class Client {
-  readonly states: RoomStatePayload[] = [];
+  readonly states: GameStatePayload[] = [];
   readonly chat: ChatMessagePayload[] = [];
   /** Причина, по которой сервер выставил из комнаты. */
   kicked: string | null = null;
@@ -44,7 +45,7 @@ class Client {
       forceNew: true,
     });
 
-    this.socket.on(SERVER_EVENT.state, (state: RoomStatePayload) => {
+    this.socket.on(SERVER_EVENT.state, (state: GameStatePayload) => {
       this.states.push(state);
     });
     this.socket.on(SERVER_EVENT.chatMessage, (message: ChatMessagePayload) => {
@@ -61,7 +62,7 @@ class Client {
     });
   }
 
-  get last(): RoomStatePayload | undefined {
+  get last(): GameStatePayload | undefined {
     return this.states.at(-1);
   }
 
@@ -79,9 +80,9 @@ class Client {
 
   /** Дождаться состояния, удовлетворяющего условию. */
   async waitState(
-    predicate: (state: RoomStatePayload) => boolean,
+    predicate: (state: GameStatePayload) => boolean,
     label: string,
-  ): Promise<RoomStatePayload> {
+  ): Promise<GameStatePayload> {
     const deadline = Date.now() + 5000;
     while (Date.now() < deadline) {
       const found = this.states.findLast(predicate);
@@ -149,10 +150,10 @@ async function main() {
   console.log(`      вопрос: ${hostView.question}`);
 
   console.log("\n[3] Чужие действия и права");
-  const wrongRead = await b.emit(CLIENT_EVENT.read);
+  const wrongRead = await b.emit(GAME_EVENT.read);
   check("не ведущему нажать «Прочитал» нельзя", !wrongRead.ok, wrongRead.error);
 
-  const read = await a.emit(CLIENT_EVENT.read);
+  const read = await a.emit(GAME_EVENT.read);
   check("ведущий подтвердил, что прочитал", read.ok);
   const opened = await b.waitState(
     (s) => s.phase === "host_answer",
@@ -164,10 +165,10 @@ async function main() {
   );
 
   console.log("\n[4] Ответ ведущего скрыт до вскрышки");
-  const badBet = await a.emit(CLIENT_EVENT.answer, { bet: 10_000_000_000 });
+  const badBet = await a.emit(GAME_EVENT.answer, { bet: 10_000_000_000 });
   check("сумма сверх потолка отклонена", !badBet.ok, badBet.error);
 
-  const answer = await a.emit(CLIENT_EVENT.answer, { bet: 100_000 });
+  const answer = await a.emit(GAME_EVENT.answer, { bet: 100_000 });
   check("ведущий назвал сумму", answer.ok);
 
   const betting = await b.waitState(
@@ -181,14 +182,14 @@ async function main() {
   );
 
   console.log("\n[5] Ставки");
-  const hostBet = await a.emit(CLIENT_EVENT.bet, { bet: 50_000 });
+  const hostBet = await a.emit(GAME_EVENT.bet, { bet: 50_000 });
   check("ведущий ставить не может", !hostBet.ok, hostBet.error);
 
   // Полуторный промах: очко даётся, если ошибиться не больше чем вдвое.
-  const bet = await b.emit(CLIENT_EVENT.bet, { bet: 150_000 });
+  const bet = await b.emit(GAME_EVENT.bet, { bet: 150_000 });
   check("игрок поставил", bet.ok);
 
-  const repeat = await b.emit(CLIENT_EVENT.bet, { bet: 1000 });
+  const repeat = await b.emit(GAME_EVENT.bet, { bet: 1000 });
   check("ставку не поменять", !repeat.ok, repeat.error);
 
   console.log("\n[6] Вскрышка");

@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { BRAND } from "@/components/Brand";
-import { ScreenView } from "@/components/game/ScreenView";
+import { ScreenView } from "@/games/pricetitute/components/ScreenView";
 import { getSessionUserId } from "@/lib/auth/session";
 import { findPrivateRoom } from "@/lib/rooms/private";
 import { hasScreen } from "@/shared/room-settings";

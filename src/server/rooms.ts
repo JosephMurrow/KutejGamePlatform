@@ -1,14 +1,8 @@
-import { Room, type GameEvent, type RoomOptions } from "../lib/game/room";
-import { RoomRunner } from "../lib/game/runner";
-import { loadScores, persistRound } from "../lib/game/store";
-import type { QuestionQueue } from "../lib/questions/queue";
-import {
-  getQuestionCard,
-  loadQuestionQueue,
-  saveQuestionQueue,
-  type QuestionCard,
-  type QuestionPoolOptions,
-} from "../lib/questions/store";
+import type {
+  GameRoomState,
+  GameServer,
+  RoomProfile,
+} from "@/lib/games/engine";
 import type { ChatMessagePayload } from "../shared/protocol";
 import { CHAT_HISTORY_SIZE } from "../shared/protocol";
 import type { RoomKind } from "../shared/room-settings";
@@ -28,53 +22,43 @@ const CLEANUP_EVERY_MS = 5 * 60 * 1000;
  * Кадр рассылки. Раньше снимок уходил на каждое принятое действие, и двести
  * зрителей, ставящих одновременно, давали двести рассылок по двести сокетов.
  * Склейка в кадр превращает это в десяток рассылок в секунду и незаметна:
- * фазы живут секундами, а не миллисекундами (см. docs/BACKLOG.md N4).
+ * фазы живут секундами, а не миллисекундами (см. src/games/pricetitute/docs/BACKLOG.md N4).
  */
 const BROADCAST_FRAME_MS = 100;
 
-/** С чем поднимать комнату: пул вопросов и правила партии. */
+/**
+ * С чем поднимать комнату. Всё здесь платформенное, кроме `settings`: их
+ * собирает сама игра, и платформа только передаёт их дальше.
+ */
 export interface RoomSetup {
-  pool: QuestionPoolOptions;
-  rules: RoomOptions;
+  /** Во что тут играют. */
+  gameId: string;
   /** Приватные комнаты умирают, когда опустеют; общая живёт всегда. */
   isPrivate: boolean;
   /** Какого рода комната. У общего зала экрана нет, отсюда `private`. */
   kind: RoomKind;
   /** Название комнаты: рисуется на экране. */
   title: string | null;
+  /** Хозяин комнаты; в общем зале — null. */
+  ownerId: string | null;
   /** Набор закрыт: новых за стол не пускают. */
   locked: boolean;
   /** Больше этого числа за стол не сажаем. null — без ограничения. */
   maxPlayers: number | null;
   /** Канал Твича, чей чат слушает комната. */
   twitchChannel: string | null;
+  /** Настройки партии глазами игры. Платформа внутрь не смотрит. */
+  settings: unknown;
 }
-
-export const GLOBAL_SETUP: RoomSetup = {
-  // Общий зал играет «Обычным» и настройке не подлежит: пьянка, секс,
-  // криминал и чернота живут только в приватных комнатах.
-  pool: { includeAdult: true, mode: "normal" },
-  rules: {},
-  isPrivate: false,
-  kind: "private",
-  title: null,
-  // Общий зал не запирается и лимита не имеет: он один на всех.
-  locked: false,
-  maxPlayers: null,
-  twitchChannel: null,
-};
 
 export interface ManagedRoom {
   key: string;
-  room: Room;
-  runner: RoomRunner;
-  queue: QuestionQueue;
   setup: RoomSetup;
-  /** Текст текущего вопроса, чтобы не ходить в базу на каждую рассылку. */
-  question: QuestionCard | null;
+  /** Партия: всё, что происходит по правилам, делает она. */
+  game: GameRoomState;
   chat: ChatMessagePayload[];
-  /** Ники и аватары игроков комнаты. */
-  profiles: Map<string, SocketUser>;
+  /** Кто за столом: ники и аватары. */
+  profiles: Map<string, RoomProfile>;
   /** Сколько вкладок открыто у каждого игрока. */
   connections: Map<string, number>;
   /**
@@ -87,11 +71,12 @@ export interface ManagedRoom {
   locked: boolean;
   /** Потолок числа игроков. */
   maxPlayers: number | null;
-  /** Очередь побочных эффектов: записи в базу не должны обгонять друг друга. */
-  tail: Promise<void>;
 }
 
 export type Broadcast = (room: ManagedRoom) => void;
+
+/** Где взять серверную часть игры по её коду. */
+export type GameServers = (gameId: string) => GameServer;
 
 /**
  * Сколько ждать перед тем, как убрать отключившегося из круга. Без этой паузы
@@ -100,9 +85,19 @@ export type Broadcast = (room: ManagedRoom) => void;
  */
 const DISCONNECT_GRACE_MS = 15_000;
 
+/** Профиль игрока глазами комнаты: столько платформа о нём и знает. */
+function profileOf(user: SocketUser): RoomProfile {
+  return {
+    id: user.id,
+    nickname: user.nickname,
+    avatarId: user.avatarId,
+    isGuest: user.guestRoomId != null,
+  };
+}
+
 /**
- * Живые комнаты процесса. Состояние игры держится в памяти, в базу уходят
- * только итоги раундов и порядок очереди вопросов.
+ * Живые комнаты процесса. Состояние партии держит игра, платформа — состав,
+ * чат, подключения и срок жизни комнаты.
  */
 export class RoomManager {
   private readonly rooms = new Map<string, ManagedRoom>();
@@ -114,37 +109,32 @@ export class RoomManager {
   /** Когда по комнате рассылали в последний раз. */
   private readonly lastSent = new Map<string, number>();
   /**
-   * Подписчик на события комнат. Ставит режиссёр ботов: ему нужно знать про
-   * сгоревшие раунды, а опрашивать состояние для этого недостаточно —
-   * аннулирование не оставляет следа в снимке.
-   */
-  onEvents?: (roomKey: string, events: GameEvent[]) => void;
-  /**
    * Комнату гасят. Подписывается мост в чат Твича: держать подключение к
    * каналу удалённой комнаты незачем.
    */
   onClose?: (roomKey: string) => void;
 
-  constructor(private readonly broadcast: Broadcast) {}
+  constructor(
+    private readonly broadcast: Broadcast,
+    private readonly servers: GameServers,
+  ) {}
 
   /** Игрок подключился. Первая вкладка сажает его за стол. */
   async join(
     user: SocketUser,
     key: string,
-    setup: RoomSetup = GLOBAL_SETUP,
+    setup: RoomSetup,
   ): Promise<ManagedRoom> {
     const managed = await this.acquire(key, setup);
 
     // Вернулся раньше, чем истекла отсрочка — значит и не уходил.
     this.cancelLeave(key, user.id);
 
-    managed.profiles.set(user.id, user);
+    managed.profiles.set(user.id, profileOf(user));
     const tabs = (managed.connections.get(user.id) ?? 0) + 1;
     managed.connections.set(user.id, tabs);
 
-    if (tabs === 1) {
-      managed.runner.run((room, now) => room.join(user.id, now));
-    }
+    if (tabs === 1) managed.game.join(user.id);
 
     if (setup.isPrivate) void markBusy(key).catch(logFailure(key, "занятость"));
 
@@ -163,15 +153,15 @@ export class RoomManager {
     setup: RoomSetup,
   ): Promise<string | null> {
     const managed = await this.acquire(key, setup);
-    const view = managed.room.view();
+    const seated = managed.game.seated();
 
-    if (view.ownerId === user.id) return null;
-    if (view.players.some((player) => player.id === user.id)) return null;
+    if (managed.setup.ownerId === user.id) return null;
+    if (seated.includes(user.id)) return null;
 
     if (managed.locked) return "Хозяин закрыл набор в эту комнату";
 
     const limit = managed.maxPlayers;
-    if (limit !== null && view.players.length >= limit) {
+    if (limit !== null && seated.length >= limit) {
       return "В комнате нет свободных мест";
     }
 
@@ -185,7 +175,7 @@ export class RoomManager {
   async watch(
     socketId: string,
     key: string,
-    setup: RoomSetup = GLOBAL_SETUP,
+    setup: RoomSetup,
   ): Promise<ManagedRoom> {
     const managed = await this.acquire(key, setup);
     managed.screens.add(socketId);
@@ -239,8 +229,7 @@ export class RoomManager {
 
     const timer = setTimeout(() => {
       this.leaving.delete(pendingKey);
-      const room = this.rooms.get(key);
-      room?.runner.run((state, now) => state.leave(user.id, now));
+      this.rooms.get(key)?.game.leave(user.id);
     }, DISCONNECT_GRACE_MS);
     timer.unref?.();
 
@@ -268,7 +257,7 @@ export class RoomManager {
     if (!managed) return;
 
     for (const [pendingKey, timer] of this.leaving) {
-      if (pendingKey.startsWith(`${key} `)) {
+      if (pendingKey.startsWith(`${key}\0`)) {
         clearTimeout(timer);
         this.leaving.delete(pendingKey);
       }
@@ -279,7 +268,8 @@ export class RoomManager {
     this.framed.delete(key);
     this.lastSent.delete(key);
 
-    managed.runner.stop();
+    managed.game.stop();
+    this.servers(managed.setup.gameId).closeRoom?.(key);
     this.rooms.delete(key);
     this.onClose?.(key);
   }
@@ -305,56 +295,36 @@ export class RoomManager {
   }
 
   private async open(key: string, setup: RoomSetup): Promise<ManagedRoom> {
-    const queue = await loadQuestionQueue(key, setup.pool);
-    const scores = await loadScores(key);
-
-    // QuestionQueue структурно подходит под QuestionSource движка.
-    const room = new Room(key, queue, setup.rules);
-    for (const [playerId, stats] of scores) room.setStats(playerId, stats);
-
-    // Раннер ищет комнату по ключу, а не держит ссылку: иначе объект и раннер
-    // ссылались бы друг на друга и один из них пришлось бы досоздавать.
-    const runner = new RoomRunner(room, (events) => {
-      const current = this.rooms.get(key);
-      if (current) this.enqueue(current, events);
-    });
-
     const managed: ManagedRoom = {
       key,
-      room,
-      runner,
-      queue,
       setup,
-      question: null,
+      // Партия появляется следом: движку нужен контекст, а контексту — сама
+      // комната. Ссылку доставляем сразу после создания.
+      game: null as unknown as GameRoomState,
       chat: [],
       profiles: new Map(),
       connections: new Map(),
       screens: new Set(),
       locked: setup.locked,
       maxPlayers: setup.maxPlayers,
-      tail: Promise.resolve(),
     };
 
+    managed.game = await this.servers(setup.gameId).createRoom({
+      key,
+      ownerId: setup.ownerId,
+      isPrivate: setup.isPrivate,
+      settings: setup.settings,
+      connections: () => managed.connections.size,
+      introduce: (profile) => managed.profiles.set(profile.id, profile),
+      forget: (playerId) => managed.profiles.delete(playerId),
+      changed: () => {
+        if (this.rooms.has(key)) this.frame(managed);
+      },
+    });
+
     this.rooms.set(key, managed);
-    runner.start();
 
     return managed;
-  }
-
-  /**
-   * Побочные эффекты одной цепочкой: запись раунда, обновление очереди и
-   * рассылка идут строго по порядку, даже если события пришли пачкой.
-   */
-  private enqueue(managed: ManagedRoom, events: GameEvent[]): void {
-    managed.tail = managed.tail
-      .then(() => this.applyEvents(managed, events))
-      .catch((error: unknown) => {
-        console.error(`[room ${managed.key}] обработка событий упала:`, error);
-      })
-      .then(() => {
-        this.frame(managed);
-        this.onEvents?.(managed.key, events);
-      });
   }
 
   /**
@@ -381,40 +351,6 @@ export class RoomManager {
     timer.unref?.();
 
     this.framed.set(key, timer);
-  }
-
-  private async applyEvents(
-    managed: ManagedRoom,
-    events: GameEvent[],
-  ): Promise<void> {
-    let queueTouched = false;
-
-    for (const event of events) {
-      switch (event.type) {
-        case "round_started":
-          managed.question = await getQuestionCard(event.questionId);
-          queueTouched = true;
-          break;
-
-        case "round_resolved":
-          await persistRound(managed.key, event.record);
-          break;
-
-        case "round_aborted":
-          managed.question = null;
-          queueTouched = true;
-          break;
-
-        case "paused":
-          managed.question = null;
-          queueTouched = true;
-          break;
-      }
-    }
-
-    if (queueTouched) {
-      await saveQuestionQueue(managed.key, managed.queue, managed.setup.pool);
-    }
   }
 }
 
@@ -454,7 +390,7 @@ function logFailure(key: string, what: string) {
 
 /** Ключ отложенного выхода: ни ключ комнаты, ни id игрока пробелов не содержат. */
 function leaveKey(roomKey: string, userId: string): string {
-  return `${roomKey} ${userId}`;
+  return `${roomKey}\0${userId}`;
 }
 
 /** Добавить сообщение в кольцевой буфер чата комнаты. */

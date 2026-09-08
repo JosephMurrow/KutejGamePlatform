@@ -1,15 +1,14 @@
 import { randomBytes, randomInt } from "node:crypto";
 import { normalizeChannel } from "@/server/twitch/chat";
-import type { EndMode } from "../game/room";
-import { dropScores } from "../game/store";
+import type { EndMode } from "@/games/pricetitute/engine/room";
+import { defaultGameServer, dropRoomData } from "@/lib/games/servers";
 import { prisma } from "../prisma";
 import {
   dbValue,
   parseMode,
   type QuestionMode,
   type QuestionModeDb,
-} from "../questions/modes";
-import { dropQuestionQueue } from "../questions/store";
+} from "@/games/pricetitute/questions/modes";
 import {
   defaultRotation,
   kindDbValue,
@@ -150,8 +149,8 @@ export async function markBusy(roomId: string): Promise<void> {
 
 /** Убрать комнату вместе с её очередью вопросов и счётом. */
 export async function deletePrivateRoom(roomId: string): Promise<void> {
-  await dropQuestionQueue(roomId);
-  await dropScores(roomId);
+  // Свои таблицы убирает сама игра: платформа их не знает.
+  await dropRoomData(defaultGameServer().id, roomId);
   await prisma.privateRoom.deleteMany({ where: { id: roomId } });
 }
 

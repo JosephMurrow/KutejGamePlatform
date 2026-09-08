@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 import { BRAND } from "@/components/Brand";
-import { GameRoom } from "@/components/game/GameRoom";
+import { GameRoom } from "@/games/pricetitute/components/GameRoom";
 import { getCurrentUser } from "@/lib/auth/session";
 
 export const metadata: Metadata = {
