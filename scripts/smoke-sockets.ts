@@ -15,6 +15,10 @@ import { type GameStatePayload } from "../src/games/pricetitute/protocol";
 import { createPrivateRoom, deletePrivateRoom } from "../src/lib/rooms/private";
 import { createGuest } from "../src/lib/auth/guest";
 import { GAME_EVENT } from "../src/games/pricetitute/protocol";
+import {
+  defaultRoomSettings,
+  saveRoomSettings,
+} from "../src/games/pricetitute/rooms/store";
 
 const URL = "http://localhost:3000";
 
@@ -251,20 +255,21 @@ async function main() {
   check("без сессии не пускают", rejected);
 
   console.log("\n[10] Вид «экран»");
+  // Платформа заводит комнату, игра дописывает свои настройки — ровно как в
+  // экшене создания.
   const room = await createPrivateRoom(anya.id, {
-    bettingMs: 60_000,
-    revealMs: 10_000,
-    includeAdult: true,
-    mode: "normal",
-    endMode: "endless",
-    endValue: null,
     kind: "stream",
     title: "Смоук",
-    // Смоук проверяет круг ходов, поэтому здесь он обычный.
-    hostRotation: "circle",
     locked: false,
     maxPlayers: null,
     twitchChannel: null,
+  });
+  await saveRoomSettings(room.id, {
+    ...defaultRoomSettings("stream"),
+    bettingMs: 60_000,
+    revealMs: 10_000,
+    // Смоук проверяет круг ходов, поэтому ведущий обычный, по кругу.
+    hostRotation: "circle",
   });
   const roomQuery = { [ROOM_QUERY]: room.code };
 

@@ -49,24 +49,17 @@ model PrivateRoom {
   /// адресе. Утечка ключа не страшна: на экране нет секретов.
   screenKey String   @unique
 
-  /// Длительность фазы ставок, мс.
-  bettingMs     Int          @default(300000)
-  /// Сколько показывать вскрышку, мс.
-  revealMs      Int          @default(30000)
-  includeAdult  Boolean      @default(true)
-  mode          QuestionMode @default(NORMAL)
-  /// Кто ведёт раунды.
-  hostRotation  HostRotation @default(CIRCLE)
   /// Набор закрыт: код висит в эфире, и в какой-то момент новых пускать хватит.
-  locked        Boolean      @default(false)
+  locked        Boolean @default(false)
   /// Больше этого числа за стол не сажаем. null — без ограничения.
   maxPlayers    Int?
   /// Канал Твича, чей чат слушает комната. Чтение анонимно, разрешений не
-  /// требует — достаточно имени (см. docs/BACKLOG.md P1).
+  /// требует — достаточно имени (см. src/games/pricetitute/docs/BACKLOG.md P1).
   twitchChannel String?
-  endMode       RoomEndMode  @default(ENDLESS)
-  /// Сколько раундов или очков до конца партии.
-  endValue      Int?
+
+  /// Настройки партии здесь не лежат: тайминги фаз, режим вопросов, ротация
+  /// ведущего и условие конца — правила игры, и живут они в её схеме
+  /// (docs/BACKLOG.md A4).
 
   createdAt  DateTime  @default(now())
   /// Когда комната опустела. Через полчаса после этого её удаляют.

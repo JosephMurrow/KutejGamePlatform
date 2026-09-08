@@ -159,3 +159,33 @@ enum RoomEndMode {
 
   @@schema("pricetitute")
 }
+
+/// Настройки партии платитутки в конкретной комнате.
+///
+/// Лежат в схеме игры, а не колонками в platform.private_rooms: платформа не
+/// знает, какие у игры настройки, и для второй игры завести их у себя не
+/// смогла бы (docs/BACKLOG.md A4).
+///
+/// Внешнего ключа на комнату нет намеренно — как и у раундов с очками, тут
+/// обычная строка. Убирает эти строки сама игра, когда платформа сообщает ей
+/// об удалении комнаты.
+model RoomSettings {
+  /// Идентификатор комнаты из platform.private_rooms.
+  roomId String @id
+
+  /// Длительность фазы ставок, мс.
+  bettingMs    Int
+  /// Сколько показывать вскрышку, мс.
+  revealMs     Int
+  includeAdult Boolean
+  /// Каким набором паков играет комната.
+  mode         QuestionMode
+  /// Кто ведёт раунды.
+  hostRotation HostRotation
+  endMode      RoomEndMode
+  /// Сколько раундов или очков до конца партии.
+  endValue     Int?
+
+  @@map("room_settings")
+  @@schema("pricetitute")
+}

@@ -5,6 +5,7 @@ import { createGuest } from "../auth/guest";
 import { getSessionUserId, startSession } from "../auth/session";
 import type { FormState } from "../auth/form-state";
 import { allowsGuests, ROOM_CODE_LENGTH } from "@/shared/room-settings";
+import { defaultGameServer, gameServerById } from "@/lib/games/servers";
 import {
   createPrivateRoom,
   findPrivateRoom,
@@ -20,23 +21,26 @@ export async function createRoomAction(
     redirect("/login?next=/games/pricetitute/rooms/new");
   }
 
+  // Платформа разбирает только своё. Что за поля у игры и что они значат,
+  // знает она сама — форму ей передаём как есть (docs/BACKLOG.md A4).
   const settings = normalizeSettings({
-    bettingMs: formData.get("bettingMs"),
-    revealMs: formData.get("revealMs"),
-    includeAdult: formData.get("includeAdult") === "on",
-    mode: formData.get("mode"),
-    endMode: formData.get("endMode"),
-    endValue: formData.get("endValue"),
     kind: formData.get("kind"),
     title: formData.get("title"),
-    hostRotation: formData.get("hostRotation"),
     maxPlayers: formData.get("maxPlayers"),
     twitchChannel: formData.get("twitchChannel"),
   });
 
+  const asked = formData.get("game");
+  const game =
+    typeof asked === "string" && asked !== ""
+      ? gameServerById(asked)
+      : defaultGameServer();
+  if (!game) return { error: "Неизвестная игра" };
+
   let code: string;
   try {
-    const room = await createPrivateRoom(userId, settings);
+    const room = await createPrivateRoom(userId, settings, game.id);
+    await game.saveRoomSettings(room.id, formData);
     code = room.code;
   } catch (error) {
     console.error("Не удалось создать комнату:", error);

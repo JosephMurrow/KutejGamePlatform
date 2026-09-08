@@ -1,4 +1,4 @@
-import type { HostRotation } from "@/shared/room-settings";
+import type { HostRotation } from "@/games/pricetitute/rooms/settings";
 import type { Bet } from "./bet";
 import { resolveRound, type PlayerBet, type RoundOutcome } from "./scoring";
 

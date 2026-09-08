@@ -10,24 +10,25 @@ import {
   type QuestionMode,
 } from "@/games/pricetitute/questions/modes";
 import { createRoomAction } from "@/lib/rooms/actions";
+import { hasScreen, type RoomKind } from "@/shared/room-settings";
+import {
+  PlayerLimitField,
+  RoomKindPicker,
+  RoomTitleField,
+  TwitchChannelField,
+} from "@/components/rooms/RoomBasics";
+import { GAME_ID } from "@/games/pricetitute/protocol";
 import {
   BETTING_CHOICES,
   DEFAULT_BETTING_MS,
   DEFAULT_REVEAL_MS,
   defaultRotation,
   HOST_ROTATIONS,
-  KIND_COPY,
-  MAX_PLAYERS_LIMIT,
-  MIN_PLAYERS_LIMIT,
   REVEAL_CHOICES,
-  ROOM_KINDS,
-  ROOM_TITLE_MAX,
-  hasScreen,
   ROTATION_COPY,
   type Choice,
   type HostRotation,
-  type RoomKind,
-} from "@/shared/room-settings";
+} from "@/games/pricetitute/rooms/settings";
 
 export function CreateRoomForm() {
   const [state, formAction] = useActionState(
@@ -46,53 +47,13 @@ export function CreateRoomForm() {
 
   return (
     <form action={formAction} className="flex flex-col gap-6">
+      <input type="hidden" name="game" value={GAME_ID} />
+
       <FormError>{state.error}</FormError>
 
-      <fieldset>
-        <legend className="mb-2 text-sm font-medium">Какая комната</legend>
-        <div className="flex flex-col gap-2">
-          {ROOM_KINDS.map((option) => (
-            <label
-              key={option}
-              className="flex cursor-pointer items-start gap-2.5"
-            >
-              <input
-                type="radio"
-                name="kind"
-                value={option}
-                checked={kind === option}
-                onChange={() => setKind(option)}
-                className="mt-0.5 size-4 shrink-0 accent-crimson"
-              />
-              <span className="text-sm">
-                {KIND_COPY[option].title}
-                <span className="block text-xs text-muted">
-                  {KIND_COPY[option].hint}
-                </span>
-              </span>
-            </label>
-          ))}
-        </div>
-      </fieldset>
+      <RoomKindPicker value={kind} onChange={setKind} />
 
-      {/*
-        Название есть только у комнат с экраном: у обычной приватной его негде
-        показать, и спрашивать его там значило бы обещать несуществующее.
-      */}
-      {kind !== "private" && (
-        <label className="flex flex-col gap-1.5">
-          <span className="text-sm font-medium">Название комнаты</span>
-          <input
-            name="title"
-            maxLength={ROOM_TITLE_MAX}
-            placeholder="Стрим клёвого Толи"
-            className="rounded-lg border border-line bg-blush px-3 py-2 text-sm outline-none transition focus:border-crimson"
-          />
-          <span className="text-xs text-muted">
-            Крупно на экране. Можно не заполнять.
-          </span>
-        </label>
-      )}
+      {kind !== "private" && <RoomTitleField />}
 
       <Durations
         legend="Время на ставки"
@@ -136,45 +97,18 @@ export function CreateRoomForm() {
       </fieldset>
 
       {kind === "stream" && (
-        <label className="flex flex-col gap-1.5">
-          <span className="text-sm font-medium">Канал на Твиче</span>
-          <input
-            name="twitchChannel"
-            autoComplete="off"
-            placeholder="имя канала"
-            className="rounded-lg border border-line bg-blush px-3 py-2 text-sm outline-none transition focus:border-crimson"
-          />
-          <span className="text-xs text-muted">
-            Зрители смогут ставить прямо из чата: «!10000», «!бесплатно»,
-            «!никогда». Разрешений это не требует — достаточно имени канала. Но
-            ставка в чате видна всем, в отличие от ставки в игре.
-          </span>
-        </label>
+        <TwitchChannelField
+          hint={
+            <>
+              Зрители смогут ставить прямо из чата: «!10000», «!бесплатно»,
+              «!никогда». Разрешений это не требует — достаточно имени канала.
+              Но ставка в чате видна всем, в отличие от ставки в игре.
+            </>
+          }
+        />
       )}
 
-      {kind !== "private" && (
-        <label className="flex flex-col gap-1.5">
-          <span className="text-sm font-medium">Лимит игроков</span>
-          <span className="flex items-center gap-2">
-            {/*
-              Без `tabular`: моноширинный шрифт заведён для сумм, и подсказка
-              «без лимита» в нём выпирает из поля и из всей формы.
-            */}
-            <input
-              name="maxPlayers"
-              type="number"
-              min={MIN_PLAYERS_LIMIT}
-              max={MAX_PLAYERS_LIMIT}
-              placeholder="без лимита"
-              className="w-36 rounded-lg border border-line bg-blush px-3 py-2 text-sm outline-none transition focus:border-crimson"
-            />
-            <span className="text-sm text-muted">человек</span>
-          </span>
-          <span className="text-xs text-muted">
-            Не больше {MAX_PLAYERS_LIMIT}. Пустое поле — без ограничения.
-          </span>
-        </label>
-      )}
+      {kind !== "private" && <PlayerLimitField />}
 
       <fieldset>
         <legend className="mb-2 text-sm font-medium">Кто ведёт</legend>

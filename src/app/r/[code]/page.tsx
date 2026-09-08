@@ -5,6 +5,7 @@ import { GameRoom } from "@/games/pricetitute/components/GameRoom";
 import { GuestGate } from "@/components/rooms/GuestGate";
 import { HardcoreGate } from "@/games/pricetitute/components/HardcoreGate";
 import { getCurrentUser } from "@/lib/auth/session";
+import { loadRoomSettings } from "@/games/pricetitute/rooms/store";
 import { isHardcore } from "@/games/pricetitute/questions/modes";
 import { findPrivateRoom } from "@/lib/rooms/private";
 import { allowsGuests } from "@/shared/room-settings";
@@ -55,7 +56,7 @@ export default async function PrivateRoomPage({
   );
 
   // В комнату с чернотой человек попадает только через предупреждение.
-  if (isHardcore(room.mode)) {
+  if (isHardcore((await loadRoomSettings(room.id, room.kind)).mode)) {
     return <HardcoreGate code={room.code}>{game}</HardcoreGate>;
   }
 

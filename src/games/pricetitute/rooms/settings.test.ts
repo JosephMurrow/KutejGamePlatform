@@ -1,10 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import {
-  DEFAULT_REVEAL_MS,
-  parseRevealMs,
-  REVEAL_CHOICES,
-} from "./room-settings";
+import { DEFAULT_REVEAL_MS, parseRevealMs, REVEAL_CHOICES } from "./settings";
 
 describe("Время вскрытия", () => {
   it("принимает любое значение из списка", () => {

@@ -241,7 +241,7 @@ async function resolveRoom(socket: Socket): Promise<RoomTarget | null> {
       locked: room.locked,
       maxPlayers: room.maxPlayers,
       twitchChannel: room.twitchChannel,
-      settings: owner.roomSettings(room),
+      settings: await owner.loadRoomSettings(room),
     },
   };
 }
