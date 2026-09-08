@@ -1,6 +1,7 @@
 import type { GameManifest } from "@/lib/games/manifest";
 import { ROBOT_AVATAR_OFFSET, ROBOT_COUNT } from "./bots/avatars";
 import { BotAvatar } from "./components/BotAvatar";
+import { PricetituteBox } from "./components/Box";
 import { GAME_ID, GLOBAL_ROOM } from "./protocol";
 
 /** Адреса страниц игры. Отсюда их берут и витрина, и сама игра. */
@@ -21,6 +22,7 @@ export const PRICETITUTE: GameManifest = {
   tagline: "Угадай, за сколько человек на это согласится",
   adult: true,
   routes: ROUTES,
+  Box: PricetituteBox,
   commonRoomKey: GLOBAL_ROOM,
   botAvatars: {
     offset: ROBOT_AVATAR_OFFSET,
