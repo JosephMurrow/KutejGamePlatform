@@ -1,0 +1,40 @@
+import type { GameRoomContext, GameServer } from "@/lib/games/engine";
+import { defaultRoomSettings, type ChessRoomSettings } from "../rooms/store";
+import { ChessRoom } from "./room";
+
+/**
+ * Серверная часть шахмат: живые партии и всё, что игра держит у себя на весь
+ * срок жизни процесса. Пока держать нечего — движок ботов и пул процессов
+ * появятся на своём этапе (src/games/chess/docs/PLAN.md, этап 7).
+ */
+class ChessServer implements GameServer {
+  private readonly rooms = new Map<string, ChessRoom>();
+
+  createRoom(context: GameRoomContext): Promise<ChessRoom> {
+    // Настройки приносит платформа — той формы, какой их отдал наш серверный
+    // манифест. Если комната старее настроек, играем умолчанием.
+    const settings = (context.settings ??
+      defaultRoomSettings()) as ChessRoomSettings;
+
+    const room = new ChessRoom(context, settings);
+    this.rooms.set(context.key, room);
+
+    return Promise.resolve(room);
+  }
+
+  closeRoom(key: string): void {
+    this.rooms.delete(key);
+  }
+
+  stop(): void {
+    this.rooms.clear();
+  }
+}
+
+/**
+ * Ведущего платформа даёт для чата от имени ботов — шахматам он понадобится
+ * вместе с ними (src/games/chess/docs/PLAN.md, этап 8), а пока не берём.
+ */
+export function createChessServer(): GameServer {
+  return new ChessServer();
+}

@@ -2,6 +2,7 @@ import type { ComponentType } from "react";
 import type { CurrentUser } from "@/lib/auth/session";
 import type { PrivateRoomInfo } from "@/lib/rooms/private";
 import { PRICETITUTE_PAGES } from "@/games/pricetitute/pages";
+import { CHESS_PAGES } from "@/games/chess/pages";
 
 /**
  * Страничный реестр: что игра рисует в комнате и на экране.
@@ -39,6 +40,7 @@ export interface GamePages {
 
 const PAGES: Readonly<Record<string, GamePages>> = {
   pricetitute: PRICETITUTE_PAGES,
+  chess: CHESS_PAGES,
 };
 
 /** Страницы игры по её коду. `null` — игра из базы платформе незнакома. */

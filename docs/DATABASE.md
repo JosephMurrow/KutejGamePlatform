@@ -1,7 +1,8 @@
 # База
 
 PostgreSQL 17, Prisma 7. Схема разложена по файлам:
-`prisma/schema/platform.prisma` и `prisma/schema/pricetitute.prisma`.
+`prisma/schema/platform.prisma`, `prisma/schema/pricetitute.prisma` и
+`prisma/schema/chess.prisma`.
 
 ## У каждой игры своя схема
 
@@ -9,8 +10,16 @@ PostgreSQL 17, Prisma 7. Схема разложена по файлам:
 platform     users · one_time_links · private_rooms
 pricetitute  questions · rounds · round_bets · scores · room_question_queues
              room_settings
+chess        room_settings
 public       только _prisma_migrations
 ```
+
+**Имена моделей Prisma глобальны — схема Postgres их не разводит.** Две игры
+не могут обе назвать модель `RoomSettings`, хотя таблицы у них лежат в разных
+схемах и не встречаются: генератор откажется. Поэтому модель и перечисления
+игры начинаются с её кода — `ChessRoomSettings`, `ChessTimeControl`, — а
+таблица через `@@map` зовётся коротко: `chess.room_settings`. Платитутка
+успела занять простые имена первой, и трогать их незачем.
 
 **Почему схемы, а не отдельные базы.** Игровые таблицы ссылаются на
 пользователя внешними ключами: `scores.userId`, `rounds.hostId`,

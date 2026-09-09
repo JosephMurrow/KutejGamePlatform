@@ -1,11 +1,17 @@
 import type { GameServerManifest } from "./engine";
 import { PRICETITUTE_SERVER } from "@/games/pricetitute/server/manifest";
+import { CHESS_SERVER } from "@/games/chess/server/manifest";
 
 /**
  * Реестр серверных половин игр. Отдельно от клиентского реестра: сюда тянется
  * движок со всем хвостом, и в браузер этому попадать нельзя.
  */
-export const GAME_SERVERS: readonly GameServerManifest[] = [PRICETITUTE_SERVER];
+export const GAME_SERVERS: readonly GameServerManifest[] = [
+  // Платитутка первой и остаётся: `defaultGameServer` — это первый элемент,
+  // и на нём висит совместимость старых вкладок (docs/BACKLOG.md A4).
+  PRICETITUTE_SERVER,
+  CHESS_SERVER,
+];
 
 export function gameServerById(id: string): GameServerManifest | null {
   return GAME_SERVERS.find((game) => game.id === id) ?? null;

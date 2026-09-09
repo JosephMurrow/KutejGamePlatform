@@ -23,16 +23,29 @@ const PROTECTED = ["/profile", "/play", "/rooms", "/leaderboard"];
 const ANONYMOUS_ONLY = ["/login", "/register"];
 
 /**
- * Внутренности игры: общий зал, своя комната, рейтинг — всё, что глубже её
- * первой страницы.
+ * Разделы игры, куда пускают только со своим аккаунтом. Одни и те же у всех
+ * игр — это платформенные адреса из `GameRoutes`, а не выдумка каждой.
+ */
+const GAME_SECTIONS = ["play", "rooms", "leaderboard"];
+
+/**
+ * Внутренности игры: общий зал, своя комната, рейтинг.
  *
  * Витрина `/games` и страница самой игры `/games/<игра>` остаются открытыми:
  * посторонний должен увидеть, во что тут играют, до всякой регистрации, а
- * войти просят на пороге игры, а не на пороге полки (docs/BACKLOG.md C1).
+ * войти просят на пороге стола, а не на пороге полки (docs/BACKLOG.md C1).
+ *
+ * Раздел сверяется со списком, а не «всё, что глубже первой страницы»: под
+ * адресом игры лежат ещё её знак, иконка вкладки и картинки ботов, и запрет
+ * на всё подряд отдавал бы вместо них редирект на вход — незаметно, потому
+ * что у вошедшего всё работает (src/games/chess/docs/BACKLOG.md A4).
  */
-function insideGame(pathname: string): boolean {
-  const parts = pathname.split("/").filter(Boolean);
-  return parts[0] === "games" && parts.length > 2;
+export function insideGame(pathname: string): boolean {
+  const [root, game, section] = pathname.split("/").filter(Boolean);
+
+  return (
+    root === "games" && !!game && !!section && GAME_SECTIONS.includes(section)
+  );
 }
 
 /**
