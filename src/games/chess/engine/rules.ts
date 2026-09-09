@@ -98,6 +98,15 @@ export class ChessGame {
     return this.chess.history();
   }
 
+  /**
+   * Хеш текущей позиции. По нему ищется дебютная книга: одна и та же
+   * расстановка приходит разными порядками ходов, и по номеру хода её не
+   * найти (src/games/chess/docs/BACKLOG.md D2).
+   */
+  position(): string {
+    return this.chess.hash();
+  }
+
   /** Откуда и куда пошли последний раз; `null` — ходов ещё не было. */
   lastMove(): { from: string; to: string } | null {
     return this.last;

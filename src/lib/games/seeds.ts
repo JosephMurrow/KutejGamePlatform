@@ -1,4 +1,5 @@
 import { seedPricetitute } from "@/games/pricetitute/seed/run";
+import { seedChess } from "@/games/chess/seed/run";
 
 /**
  * Реестр сидов. Третий из четырёх реестров платформы (четвёртый — страничный,
@@ -16,4 +17,5 @@ export interface GameSeed {
 
 export const GAME_SEEDS: readonly GameSeed[] = [
   { id: "pricetitute", run: seedPricetitute },
+  { id: "chess", run: seedChess },
 ];

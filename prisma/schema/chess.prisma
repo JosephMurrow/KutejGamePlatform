@@ -128,3 +128,24 @@ model ChessMatch {
   @@map("matches")
   @@schema("chess")
 }
+
+/// Дебютный репертуар бота.
+///
+/// Без книги бот на слабых уровнях ходит крайними пешками и разрушает всю
+/// иллюзию первыми же тремя ходами. Стоит дёшево, эффект огромный
+/// (src/games/chess/docs/BACKLOG.md D2).
+///
+/// Ключ — хеш позиции, а не номер хода: одна и та же позиция приходит разными
+/// порядками ходов, и по номеру её не найти.
+model ChessOpening {
+  level ChessBotLevel
+  /// Zobrist-хеш позиции, из которой делается ход.
+  position String
+  /// Ход в координатах: e2e4.
+  move String
+
+  @@id([level, position, move])
+  @@index([level, position])
+  @@map("openings")
+  @@schema("chess")
+}

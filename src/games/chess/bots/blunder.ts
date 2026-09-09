@@ -1,0 +1,71 @@
+import type { Candidate } from "./engine";
+import type { Level } from "./levels";
+
+/**
+ * Выбор хода из кандидатов: иногда — не лучший.
+ *
+ * Движок, ослабленный штатной ручкой, всё равно ошибается не по-человечески:
+ * он играет ровно и вдруг делает что-то бессмысленное. Поэтому ошибку выбираем
+ * сами — из списка кандидатов и в известных пределах, чтобы она читалась как
+ * слабый соперник, а не как баг (src/games/chess/docs/BACKLOG.md D2).
+ */
+
+/** Насколько уровень склонен ошибаться и как сильно. */
+export interface Sloppiness {
+  /** Доля ходов, в которых бот берёт не лучший вариант. */
+  chance: number;
+  /**
+   * Насколько худший ход допустим, в сотых долях пешки.
+   *
+   * Полторы пешки — это заметная ошибка, но не «ферзь под пешку»: такой ход
+   * читается как баг, а не как слабая игра.
+   */
+  maxLoss: number;
+}
+
+const SLOPPY: Record<Level["id"], Sloppiness> = {
+  easy: { chance: 0.35, maxLoss: 150 },
+  normal: { chance: 0.15, maxLoss: 90 },
+  hard: { chance: 0.05, maxLoss: 50 },
+  // Эксперт не ошибается нарочно: его сила и так честная.
+  expert: { chance: 0, maxLoss: 0 },
+};
+
+/** Сколько вариантов просить у движка для этого уровня. */
+export function variantsFor(level: Level): number {
+  return SLOPPY[level.id].chance > 0 ? 4 : 1;
+}
+
+/**
+ * Выбрать ход.
+ *
+ * `random` приходит параметром, чтобы выбор можно было проверить тестами: без
+ * него «иногда ошибается» проверяется только на глаз.
+ */
+export function chooseMove(
+  candidates: readonly Candidate[],
+  level: Level,
+  random: () => number = Math.random,
+): string | null {
+  const best = candidates[0];
+  if (!best) return null;
+
+  const { chance, maxLoss } = SLOPPY[level.id];
+  if (chance === 0 || candidates.length < 2 || random() >= chance) {
+    return best.move;
+  }
+
+  // Ошибаемся только тем, что не хуже порога: остальное — не ошибка, а подстава.
+  const sloppy = candidates
+    .slice(1)
+    .filter((candidate) => best.score - candidate.score <= maxLoss);
+  if (sloppy.length === 0) return best.move;
+
+  // Из подходящих берём худший: ошибка должна быть заметна, иначе она
+  // бессмысленна.
+  const worst = sloppy.reduce((left, right) =>
+    right.score < left.score ? right : left,
+  );
+
+  return worst.move;
+}

@@ -71,7 +71,12 @@ export type Persist = (draft: MatchDraft) => void;
  * Чем комната думает за бота. Сам движок живёт снаружи — комната знает только,
  * что кто-то умеет отвечать ходом на позицию.
  */
-export type Think = (fen: string, level: Level) => Promise<string | null>;
+export type Think = (
+  fen: string,
+  level: Level,
+  /** Хеш позиции: по нему ищется дебютная книга. */
+  position: string,
+) => Promise<string | null>;
 
 /** Бот за доской: кто он и чем думает. */
 export interface BotSeat {
@@ -410,7 +415,11 @@ export class ChessRoom implements GameRoomState {
 
     this.thinking = true;
     try {
-      const answer = await bot.think(this.game.fen(), bot.level);
+      const answer = await bot.think(
+        this.game.fen(),
+        bot.level,
+        this.game.position(),
+      );
       if (!answer || this.game.isOver()) return;
 
       const move = {

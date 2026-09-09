@@ -1,4 +1,4 @@
-import { UciEngine, type ThinkRequest } from "./engine";
+import { UciEngine, type Candidate, type ThinkRequest } from "./engine";
 
 /**
  * Пул движков: один-два долгоживущих процесса на все партии сразу.
@@ -46,13 +46,26 @@ export class EnginePool {
    * ходит, не должна висеть вечно.
    */
   async think(request: ThinkRequest): Promise<string | null> {
-    if (!this.available) return null;
+    const [best] = await this.candidates(request);
+
+    return best?.move ?? null;
+  }
+
+  /**
+   * Подумать и вернуть кандидатов, лучший первым.
+   *
+   * Пустой список — движка нет, он не справился или очередь оказалась слишком
+   * длинной. Комната на это отвечает по-своему: партия с ботом, который не
+   * ходит, не должна висеть вечно.
+   */
+  async candidates(request: ThinkRequest): Promise<Candidate[]> {
+    if (!this.available) return [];
 
     const engine = await this.take();
-    if (!engine) return null;
+    if (!engine) return [];
 
     try {
-      return await engine.bestMove(request, THINK_TIMEOUT_MS);
+      return await engine.candidates(request, THINK_TIMEOUT_MS);
     } finally {
       this.give(engine);
     }

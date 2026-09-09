@@ -4,6 +4,8 @@ import { env } from "@/lib/env";
 import { BOT_AVATAR_OFFSET } from "../bots/avatars";
 import { LEVELS, type LevelId } from "../bots/levels";
 import { EnginePool } from "../bots/pool";
+import { bookMove } from "../bots/book";
+import { chooseMove, variantsFor } from "../bots/blunder";
 import { defaultRoomSettings, type ChessRoomSettings } from "../rooms/settings";
 import { saveMatch } from "../rooms/matches";
 import { GLOBAL_ROOM } from "../protocol";
@@ -80,12 +82,22 @@ class ChessServer implements GameServer {
       nickname: level.title,
       avatarId: BOT_AVATAR_OFFSET,
       level,
-      think: (fen, chosen) =>
-        this.engines.think({
+      think: async (fen, chosen, position) => {
+        // Сначала книга: без неё бот на слабых уровнях ходит крайними пешками
+        // и перестаёт быть похожим на человека с третьего хода
+        // (src/games/chess/docs/BACKLOG.md D2).
+        const known = await bookMove(settings.botLevel, position);
+        if (known) return known;
+
+        const candidates = await this.engines.candidates({
           fen,
           elo: chosen.elo,
           nodes: chosen.nodes,
-        }),
+          variants: variantsFor(chosen),
+        });
+
+        return chooseMove(candidates, chosen);
+      },
     };
   }
 
