@@ -33,6 +33,24 @@ export interface MoveRecord {
   fen: string;
   /** Ход поставил шах. */
   check: boolean;
+  /** Что забрали этим ходом; `undefined` — ничего. */
+  captured?: string;
+}
+
+/**
+ * Каков ход по виду, ещё не сделанный.
+ *
+ * Нужен ботам: манера характера — это выбор между ходами, которые движок
+ * оценивает почти одинаково, а «взятие» и «шах» знают правила, а не движок
+ * (src/games/chess/docs/BACKLOG.md D4).
+ */
+export interface MoveShape {
+  san: string;
+  /** Кого забирает; `null` — никого. */
+  captured: string | null;
+  check: boolean;
+  promotion: boolean;
+  castle: boolean;
 }
 
 /** Почему ход не принят. */
@@ -159,8 +177,38 @@ export class ChessGame {
         ply: this.ply(),
         fen: this.chess.fen(),
         check: this.chess.inCheck(),
+        captured: made.captured,
       },
       outcome: this.detect(),
+    };
+  }
+
+  /**
+   * Каков этот ход по виду, если его сделать. `null` — такого хода тут нет.
+   *
+   * Ход приходит координатами, как его отдаёт движок ботов: `e2e4`, `a7a8q`.
+   */
+  shapeOf(uci: string): MoveShape | null {
+    const from = uci.slice(0, 2);
+    const to = uci.slice(2, 4);
+    const promotion = uci.slice(4, 5);
+
+    const found = this.chess
+      .moves({ verbose: true })
+      .find(
+        (move) =>
+          move.from === from &&
+          move.to === to &&
+          (promotion === "" || move.promotion === promotion),
+      );
+    if (!found) return null;
+
+    return {
+      san: found.san,
+      captured: found.captured ?? null,
+      check: found.san.includes("+") || found.san.includes("#"),
+      promotion: found.promotion !== undefined,
+      castle: found.san.startsWith("O-O"),
     };
   }
 

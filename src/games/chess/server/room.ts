@@ -6,12 +6,13 @@ import type {
 } from "@/lib/games/engine";
 import { randomUUID } from "node:crypto";
 import { MoveClock, type Ticker } from "../engine/clock";
-import type { Outcome } from "../engine/outcome";
-import { ChessGame, type MoveInput } from "../engine/rules";
+import type { EndReason, Outcome } from "../engine/outcome";
+import { ChessGame, type MoveInput, type MoveRecord } from "../engine/rules";
 import { START_RATING } from "../rooms/matches";
 import { GAME_EVENT, type ChessColor, type ChessPhase } from "../protocol";
 import { MOVE_LIMIT_MS, type ChessRoomSettings } from "../rooms/settings";
 import type { Level } from "../bots/levels";
+import type { Moment } from "../bots/moments";
 
 /**
  * Партия в одной комнате: стык правил с платформой.
@@ -45,6 +46,19 @@ const ABANDON_MS = 90_000;
 const MAX_PLIES = 600;
 const MAX_GAME_MS = 3 * 60 * 60 * 1000;
 
+/**
+ * Доли лимита на ход, на которых бот подаёт голос: сперва замечает, что
+ * соперник задумался, потом — что у того горит флаг.
+ *
+ * Отдельного таймера ради этого не заводим: комната и так говорит платформе,
+ * когда её будить, и голос бота — просто ещё одна причина проснуться
+ * (src/lib/games/engine.ts, `deadline`).
+ */
+const NUDGES: { share: number; moment: Moment }[] = [
+  { share: 0.5, moment: "playerThinksLong" },
+  { share: 0.85, moment: "playerLowTime" },
+];
+
 /** Кто ушёл и когда — момент по монотонным часам. */
 interface Absence {
   id: string;
@@ -67,24 +81,38 @@ export interface MatchDraft {
 /** Куда комната отдаёт партию. База — снаружи: движок про неё не знает. */
 export type Persist = (draft: MatchDraft) => void;
 
+/** Позиция, из которой боту предстоит ходить. */
+export interface Turn {
+  fen: string;
+  /** Хеш позиции: по нему ищется дебютная книга. */
+  position: string;
+  /** Сколько полуходов уже сделано. */
+  ply: number;
+  /** Бот играет белыми. */
+  white: boolean;
+}
+
 /**
  * Чем комната думает за бота. Сам движок живёт снаружи — комната знает только,
  * что кто-то умеет отвечать ходом на позицию.
  */
-export type Think = (
-  fen: string,
-  level: Level,
-  /** Хеш позиции: по нему ищется дебютная книга. */
-  position: string,
-) => Promise<string | null>;
+export type Think = (turn: Turn, level: Level) => Promise<string | null>;
 
-/** Бот за доской: кто он и чем думает. */
+/** Бот за доской: кто он, чем думает и как говорит. */
 export interface BotSeat {
   id: string;
   nickname: string;
   avatarId: number;
   level: Level;
   think: Think;
+  /**
+   * Комната рассказывает боту, что случилось по правилам; сказать ли что-то
+   * вслух, решает он сам — у него память на сказанное и своя пауза
+   * (src/games/chess/bots/talk.ts).
+   */
+  speak: (moment: Moment, ply: number) => void;
+  /** Реванш: боту забыть сказанное и увиденное за прошлую партию. */
+  restart: () => void;
 }
 
 export class ChessRoom implements GameRoomState {
@@ -130,10 +158,15 @@ export class ChessRoom implements GameRoomState {
   private moveStartedAt: number;
   /** Бот сейчас думает: второй ход начинать нельзя. */
   private thinking = false;
+  /** Сколько раз бот уже подал голос на этом ходу соперника. */
+  private nudged = 0;
 
   join(playerId: string): void {
     // Вернулся тот, кого ждали: место за ним и держали.
-    if (this.absence?.id === playerId) this.absence = null;
+    if (this.absence?.id === playerId) {
+      this.absence = null;
+      this.bot?.speak("playerReturned", this.game.ply());
+    }
 
     if (!this.seats.includes(playerId) && this.seats.length < SEATS) {
       this.seats.push(playerId);
@@ -141,7 +174,10 @@ export class ChessRoom implements GameRoomState {
       if (this.bot && this.seats.length === 1) this.seats.push(this.bot.id);
       // Мест два; третий и дальше остаются зрителями — за столом их нет, но
       // партию они видят целиком.
-      if (this.seats.length === SEATS) this.begin();
+      if (this.seats.length === SEATS) {
+        this.begin();
+        this.bot?.speak("greeting", 0);
+      }
     }
 
     this.context.changed();
@@ -158,6 +194,7 @@ export class ChessRoom implements GameRoomState {
     if (this.game.isOver()) return;
 
     this.absence = { id: playerId, since: this.now() };
+    this.bot?.speak("playerLeft", this.game.ply());
     this.context.changed();
   }
 
@@ -185,6 +222,9 @@ export class ChessRoom implements GameRoomState {
     const left = this.clock.left();
     if (left !== null) waits.push(left);
 
+    const nudge = this.nudgeIn(left);
+    if (nudge !== null) waits.push(nudge);
+
     if (this.absence) {
       waits.push(Math.max(0, ABANDON_MS - (this.now() - this.absence.since)));
     }
@@ -210,7 +250,11 @@ export class ChessRoom implements GameRoomState {
 
     if (this.clock.expired()) {
       this.finish(this.game.flag(this.game.turn()));
+      return;
     }
+
+    // Ни флаг, ни отсрочка не вышли — значит, разбудили ради бота.
+    this.nudge();
   }
 
   act(event: string, actorId: string, payload: unknown): ActionOutcome {
@@ -334,8 +378,10 @@ export class ChessRoom implements GameRoomState {
     // остальное время партии.
     this.times.push(Math.round(spentAt - this.moveStartedAt));
     this.moveStartedAt = spentAt;
+    this.nudged = 0;
     this.clock.restart();
     this.finish(result.outcome ?? this.capIfTooLong());
+    this.tell(result.move, false);
     void this.botTurn();
     // Без этого дедлайн сдвинулся бы, а будильник звонил бы по старому
     // времени. Предупреждение висит прямо в engine.ts, и платитутка на этих
@@ -376,7 +422,11 @@ export class ChessRoom implements GameRoomState {
     this.times = [];
     this.matchId = randomUUID();
     this.begin();
+    this.bot?.restart();
+    this.bot?.speak("rematch", 0);
     this.context.changed();
+    // Цвета поменялись: если бот теперь белый, ходить ему.
+    void this.botTurn();
 
     return { accepted: true };
   }
@@ -416,9 +466,13 @@ export class ChessRoom implements GameRoomState {
     this.thinking = true;
     try {
       const answer = await bot.think(
-        this.game.fen(),
+        {
+          fen: this.game.fen(),
+          position: this.game.position(),
+          ply: this.game.ply(),
+          white: this.colorOf(bot.id) === "white",
+        },
         bot.level,
-        this.game.position(),
       );
       if (!answer || this.game.isOver()) return;
 
@@ -438,12 +492,57 @@ export class ChessRoom implements GameRoomState {
       const spentAt = this.now();
       this.times.push(Math.round(spentAt - this.moveStartedAt));
       this.moveStartedAt = spentAt;
+      this.nudged = 0;
       this.clock.restart();
       this.finish(result.outcome ?? this.capIfTooLong());
+      this.tell(result.move, true);
       this.context.changed();
     } finally {
       this.thinking = false;
     }
+  }
+
+  /**
+   * Через сколько бот подаст голос на этом ходу; `null` — не подаст.
+   *
+   * Только на ходу человека и только там, где есть лимит: в безлимитной
+   * комнате «ты долго думаешь» — не наблюдение, а придирка.
+   */
+  private nudgeIn(left: number | null): number | null {
+    const limit = MOVE_LIMIT_MS[this.settings.timeControl];
+    const bot = this.bot;
+    if (!bot || limit === null || left === null) return null;
+    if (this.seats.length < SEATS) return null;
+    if (this.colorOf(bot.id) === this.turnColor()) return null;
+
+    const next = NUDGES[this.nudged];
+    if (!next) return null;
+
+    return Math.max(0, left - limit * (1 - next.share));
+  }
+
+  /** Подошёл срок — бот замечает вслух, что соперник тянет. */
+  private nudge(): void {
+    const due = this.nudgeIn(this.clock.left());
+    if (due === null || due > 0) return;
+
+    const next = NUDGES[this.nudged];
+    this.nudged += 1;
+    if (next) this.bot?.speak(next.moment, this.game.ply());
+  }
+
+  /**
+   * Рассказать боту про сделанный ход — свой или чужой.
+   *
+   * Про ход, которым партия кончилась, не рассказываем: на него у бота есть
+   * реплика поважнее, и две подряд звучали бы как заедание.
+   */
+  private tell(move: MoveRecord, mine: boolean): void {
+    const bot = this.bot;
+    if (!bot || this.game.isOver()) return;
+
+    const moment = mine ? momentOfMine(move) : momentOfTheirs(move);
+    if (moment) bot.speak(moment, move.ply);
   }
 
   /** Партия упёрлась в потолок — по числу ходов или по времени. */
@@ -473,8 +572,25 @@ export class ChessRoom implements GameRoomState {
     // (src/games/chess/docs/BACKLOG.md G).
     if (draft && draft.moves.length > 0) this.persist?.(draft);
 
+    this.speakEnd(outcome);
     this.context.emitted([{ type: "chess_finished", ...outcome }]);
     this.context.changed();
+  }
+
+  /**
+   * Бот про конец партии.
+   *
+   * Про брошенную и отменённую молчим: слушать некому, а бросать реплику в
+   * пустую комнату — то же, что говорить со стенкой.
+   */
+  private speakEnd(outcome: Outcome): void {
+    const bot = this.bot;
+    const mine = bot && this.colorOf(bot.id);
+    if (!bot || !mine) return;
+
+    const won = outcome.result === mine;
+    const moment = endMoment(outcome.reason, won);
+    if (moment) bot.speak(moment, this.game.ply());
   }
 
   private turnColor(): ChessColor {
@@ -486,6 +602,53 @@ export class ChessRoom implements GameRoomState {
     if (at < 0) return null;
 
     return at === 0 ? "white" : "black";
+  }
+}
+
+/** Что бот видит в собственном ходе. Порядок — от самого громкого. */
+function momentOfMine(move: MoveRecord): Moment | null {
+  if (move.captured === "q") return "botTakesQueen";
+  if (move.promotion) return "botPromotes";
+  if (move.san.startsWith("O-O")) return "botCastles";
+  if (move.check) return "botChecks";
+  if (move.captured) return "botCapture";
+
+  return null;
+}
+
+/** Что бот видит в ходе соперника. */
+function momentOfTheirs(move: MoveRecord): Moment | null {
+  if (move.captured === "q") return "botLosesQueen";
+  if (move.captured) return "botLosesPiece";
+  if (move.check) return "botInCheck";
+
+  return null;
+}
+
+/** Чем кончилась партия — глазами бота. */
+function endMoment(reason: EndReason, won: boolean): Moment | null {
+  switch (reason) {
+    case "checkmate":
+      return won ? "botWins" : "botLoses";
+    case "stalemate":
+      return "stalemate";
+    case "resign":
+      return won ? "playerResigned" : "botResigned";
+    case "flag":
+      return won ? "playerFlagged" : "botFlagged";
+    case "insufficient":
+    case "flagVsInsufficient":
+    case "threefold":
+    case "fivefold":
+    case "fiftyMoves":
+    case "seventyFiveMoves":
+    case "agreement":
+    case "tooLong":
+      return "draw";
+    // Ушёл и не вернулся или разошлись до первого хода: говорить некому.
+    case "abandoned":
+    case "aborted":
+      return null;
   }
 }
 

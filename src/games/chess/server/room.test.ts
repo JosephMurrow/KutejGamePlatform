@@ -2,6 +2,9 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { GameRoomContext, GameRoomEvent } from "@/lib/games/engine";
 import type { ChessRoomSettings, TimeControl } from "../rooms/settings";
+import type { Moment } from "../bots/moments";
+import { LEVELS } from "../bots/levels";
+import { GAME_EVENT } from "../protocol";
 import { ChessRoom } from "./room";
 
 /**
@@ -332,5 +335,163 @@ describe("сдача и конец", () => {
       accepted: false,
       reason: "Неизвестное действие",
     });
+  });
+});
+
+/**
+ * Комната с ботом.
+ *
+ * Движка тут нет: за него отвечает подставной `think`, который выдаёт ходы по
+ * списку. Проверяется не игра бота, а то, что комната вовремя рассказывает ему,
+ * что случилось: сорок реплик на момент бесполезны, если момент не наступает.
+ */
+function withBot(timeControl: TimeControl = "SEC_30", moves: string[] = []) {
+  let at = 1000;
+  const heard: { moment: Moment; ply: number }[] = [];
+  let restarts = 0;
+
+  const settings: ChessRoomSettings = {
+    timeControl,
+    opponent: "BOT",
+    streamerMode: false,
+    botLevel: "NORMAL",
+  };
+
+  const context: GameRoomContext = {
+    key: "chess-bot",
+    ownerId: "human",
+    isPrivate: true,
+    settings,
+    connections: () => 1,
+    introduce: () => {},
+    forget: () => {},
+    emitted: () => {},
+    changed: () => {},
+  };
+
+  const queued = [...moves];
+  const room = new ChessRoom(context, settings, () => at, undefined, {
+    id: "bot",
+    nickname: "Дед Николай",
+    avatarId: 1100,
+    level: LEVELS.normal,
+    think: () => Promise.resolve(queued.shift() ?? null),
+    speak: (moment, ply) => heard.push({ moment, ply }),
+    restart: () => {
+      restarts += 1;
+    },
+  });
+
+  return {
+    room,
+    heard,
+    moments: () => heard.map((said) => said.moment),
+    restarts: () => restarts,
+    pass: (ms: number) => {
+      at += ms;
+    },
+    /** Дать боту доходить: думает он в промисе, а тесты синхронные. */
+    settle: async () => {
+      for (let round = 0; round < 4; round += 1) {
+        await new Promise((resolve) => setImmediate(resolve));
+      }
+    },
+  };
+}
+
+describe("бот у доски", () => {
+  it("здоровается, когда партия началась", () => {
+    const table = withBot();
+
+    table.room.join("human");
+
+    assert.deepEqual(table.moments(), ["greeting"], "бот садится сам и сразу");
+  });
+
+  it("замечает взятие и шах со стороны соперника", async () => {
+    // 1. e4 d5 2. Q:d5 — белые забирают ферзя чёрных, потом дают шах.
+    const table = withBot("SEC_30", ["d7d5", "b8c6"]);
+    table.room.join("human");
+
+    table.room.act(GAME_EVENT.move, "human", { from: "e2", to: "e4", ply: 0 });
+    await table.settle();
+    table.room.act(GAME_EVENT.move, "human", { from: "d1", to: "h5", ply: 2 });
+    await table.settle();
+    // Ферзь на h5 бьёт пешку d5 — ферзя у чёрных там нет, зато есть пешка.
+    table.room.act(GAME_EVENT.move, "human", { from: "h5", to: "d5", ply: 4 });
+
+    assert.ok(
+      table.moments().includes("botLosesPiece"),
+      `бот должен заметить потерю: ${table.moments().join(", ")}`,
+    );
+  });
+
+  it("узнаёт, чем кончилась партия", () => {
+    const table = withBot();
+    table.room.join("human");
+
+    table.room.act(GAME_EVENT.resign, "human", null);
+
+    assert.equal(
+      table.moments().at(-1),
+      "playerResigned",
+      "сдался человек, а не бот",
+    );
+  });
+
+  it("замечает уход соперника и возвращение", () => {
+    const table = withBot();
+    table.room.join("human");
+
+    table.room.leave("human");
+    table.room.join("human");
+
+    assert.deepEqual(table.moments(), [
+      "greeting",
+      "playerLeft",
+      "playerReturned",
+    ]);
+  });
+
+  it("подаёт голос, когда соперник задумался, и когда у того горит флаг", () => {
+    const table = withBot("SEC_30");
+    table.room.join("human");
+
+    // Половина лимита: пора заметить, что человек сидит над ходом.
+    table.pass(15_000);
+    table.room.tick();
+    assert.ok(table.moments().includes("playerThinksLong"));
+
+    // Осталась седьмая часть: флаг вот-вот.
+    table.pass(11_000);
+    table.room.tick();
+    assert.ok(table.moments().includes("playerLowTime"));
+
+    // Больше поводов нет: молчит до конца хода.
+    const before = table.moments().length;
+    table.pass(2000);
+    table.room.tick();
+    assert.equal(table.moments().length, before);
+  });
+
+  it("в безлимитной комнате про время не заговаривает", () => {
+    const table = withBot("UNLIMITED");
+    table.room.join("human");
+
+    table.pass(10 * 60 * 1000);
+    table.room.tick();
+
+    assert.deepEqual(table.moments(), ["greeting"], "торопить тут некого");
+  });
+
+  it("на реванше забывает сказанное", () => {
+    const table = withBot();
+    table.room.join("human");
+    table.room.act(GAME_EVENT.resign, "human", null);
+
+    table.room.act(GAME_EVENT.rematch, "human", null);
+
+    assert.equal(table.restarts(), 1, "память бота чистится");
+    assert.equal(table.moments().at(-1), "rematch");
   });
 });

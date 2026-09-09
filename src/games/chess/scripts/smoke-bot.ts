@@ -7,6 +7,7 @@ import {
   SERVER_EVENT,
   SOCKET_PATH,
   type Ack,
+  type ChatMessagePayload,
   type RoomStatePayload,
 } from "@/shared/protocol";
 import { createPrivateRoom, deletePrivateRoom } from "@/lib/rooms/private";
@@ -17,8 +18,8 @@ import { saveRoomSettings } from "../rooms/store";
  * Смоук партии с ботом.
  *
  * Проверяет всю цепочку: комната с ботом заводится, бот садится сам, отвечает
- * ходом на ход и делает это в пределах лимита. Движок — внешняя программа, и
- * без него смоук честно говорит, что проверять нечего.
+ * ходом на ход, делает это в пределах лимита и подаёт голос в чат. Движок —
+ * внешняя программа, и без него смоук честно говорит, что проверять нечего.
  *
  * Нужен живой `npm run dev`, база и CHESS_ENGINE_PATH у сервера.
  */
@@ -74,6 +75,7 @@ async function main() {
   console.log(`\nКомната ${room.code}: играем с лёгким ботом\n`);
 
   const states: BotState[] = [];
+  const chat: ChatMessagePayload[] = [];
   const socket: Socket = io(URL, {
     transports: ["websocket"],
     path: SOCKET_PATH,
@@ -84,6 +86,14 @@ async function main() {
     forceNew: true,
   });
   socket.on(SERVER_EVENT.state, (state: BotState) => states.push(state));
+  // Приветствие бота звучит, пока сокет ещё садится в комнату, и приезжает
+  // историей, а не событием: слушаем оба канала.
+  socket.on(SERVER_EVENT.chatHistory, (history: ChatMessagePayload[]) =>
+    chat.push(...history),
+  );
+  socket.on(SERVER_EVENT.chatMessage, (message: ChatMessagePayload) =>
+    chat.push(message),
+  );
 
   await new Promise<void>((resolve, reject) => {
     socket.once("connect", () => resolve());
@@ -162,6 +172,18 @@ async function main() {
 
   const four = await waitFor((state) => state.moves.length >= 4, "четыре хода");
   check("бот ответил снова", four !== null, four ? four.moves.join(" ") : "");
+
+  console.log("\n[4] Бот подаёт голос");
+  const said = chat.filter((message) => message.playerId.startsWith("bot:"));
+  check(
+    "бот поздоровался и что-то сказал по ходу партии",
+    said.length >= 2,
+    said.map((message) => `${message.nickname}: ${message.text}`).join(" | "),
+  );
+  check(
+    "дважды одно и то же не повторял",
+    new Set(said.map((message) => message.text)).size === said.length,
+  );
 
   socket.disconnect();
   await sleep(300);

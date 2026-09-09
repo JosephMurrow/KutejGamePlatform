@@ -46,7 +46,7 @@ export interface ThinkRequest {
 }
 
 /** Мат в оценке: не бесконечность, но заведомо больше любого перевеса. */
-const MATE_SCORE = 100_000;
+export const MATE_SCORE = 100_000;
 
 export class UciEngine {
   private readonly process: ChildProcessWithoutNullStreams;

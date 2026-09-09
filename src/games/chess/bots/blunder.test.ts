@@ -2,6 +2,15 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { chooseMove, variantsFor } from "./blunder";
 import { LEVELS } from "./levels";
+import type { Level } from "./levels";
+import type { Candidate } from "./engine";
+
+/** Ход выбранного кандидата: сам выбор проверяется по нему. */
+const moveOf = (
+  candidates: readonly Candidate[],
+  level: Level,
+  random: () => number,
+): string | null => chooseMove(candidates, level, random)?.move ?? null;
 
 /** Кандидаты от лучшего к худшему. */
 const CANDIDATES = [
@@ -16,14 +25,14 @@ describe("выбор хода ботом", () => {
   it("без ошибки берёт лучший", () => {
     // random вернёт единицу — ошибаться не будем.
     assert.equal(
-      chooseMove(CANDIDATES, LEVELS.easy, () => 1),
+      moveOf(CANDIDATES, LEVELS.easy, () => 1),
       "e2e4",
     );
   });
 
   it("ошибаясь, не отдаёт ферзя", () => {
     // random вернёт ноль — ошибка обязательна.
-    const move = chooseMove(CANDIDATES, LEVELS.easy, () => 0);
+    const move = moveOf(CANDIDATES, LEVELS.easy, () => 0);
 
     assert.notEqual(move, "d1h5", "подстава ферзя — не ошибка, а баг");
     assert.equal(move, "g1f3", "берётся худший из допустимых");
@@ -33,7 +42,7 @@ describe("выбор хода ботом", () => {
     // Сложному позволено потерять полпешки. Ближайший кандидат хуже на семь
     // десятых — за порогом, значит ошибки не будет вовсе.
     assert.equal(
-      chooseMove(CANDIDATES, LEVELS.hard, () => 0),
+      moveOf(CANDIDATES, LEVELS.hard, () => 0),
       "e2e4",
     );
 
@@ -44,14 +53,14 @@ describe("выбор хода ботом", () => {
       { move: "b1c3", score: -400 },
     ];
     assert.equal(
-      chooseMove(close, LEVELS.hard, () => 0),
+      moveOf(close, LEVELS.hard, () => 0),
       "c2c4",
     );
   });
 
   it("эксперт не ошибается вовсе", () => {
     assert.equal(
-      chooseMove(CANDIDATES, LEVELS.expert, () => 0),
+      moveOf(CANDIDATES, LEVELS.expert, () => 0),
       "e2e4",
     );
     assert.equal(variantsFor(LEVELS.expert), 1, "и вариантов ему не надо");
@@ -61,11 +70,11 @@ describe("выбор хода ботом", () => {
     const only = [{ move: "e2e4", score: 10 }];
 
     assert.equal(
-      chooseMove(only, LEVELS.easy, () => 0),
+      moveOf(only, LEVELS.easy, () => 0),
       "e2e4",
     );
     assert.equal(
-      chooseMove([], LEVELS.easy, () => 0),
+      moveOf([], LEVELS.easy, () => 0),
       null,
     );
   });
@@ -73,5 +82,12 @@ describe("выбор хода ботом", () => {
   it("просит у движка несколько вариантов только там, где ошибается", () => {
     assert.ok(variantsFor(LEVELS.easy) > 1);
     assert.equal(variantsFor(LEVELS.expert), 1);
+  });
+
+  it("характеру с прихотями варианты нужны и на самом сильном уровне", () => {
+    assert.ok(
+      variantsFor(LEVELS.expert, true) > 1,
+      "выбирать манеру не из чего, если движок прислал один ход",
+    );
   });
 });

@@ -31,13 +31,22 @@ const SLOPPY: Record<Level["id"], Sloppiness> = {
   expert: { chance: 0, maxLoss: 0 },
 };
 
-/** Сколько вариантов просить у движка для этого уровня. */
-export function variantsFor(level: Level): number {
-  return SLOPPY[level.id].chance > 0 ? 4 : 1;
+/**
+ * Сколько вариантов просить у движка.
+ *
+ * Больше одного нужно и для зевков уровня, и для манеры характера: и то и
+ * другое — выбор из списка, а список надо сначала получить.
+ */
+export function variantsFor(level: Level, picky = false): number {
+  return SLOPPY[level.id].chance > 0 || picky ? 4 : 1;
 }
 
 /**
  * Выбрать ход.
+ *
+ * Возвращается кандидат целиком, а не ход: оценка нужна дальше — по ней бот
+ * замечает зевок соперника и решает, сколько думать (см. `watch.ts`,
+ * `tempo.ts`).
  *
  * `random` приходит параметром, чтобы выбор можно было проверить тестами: без
  * него «иногда ошибается» проверяется только на глаз.
@@ -46,26 +55,24 @@ export function chooseMove(
   candidates: readonly Candidate[],
   level: Level,
   random: () => number = Math.random,
-): string | null {
+): Candidate | null {
   const best = candidates[0];
   if (!best) return null;
 
   const { chance, maxLoss } = SLOPPY[level.id];
   if (chance === 0 || candidates.length < 2 || random() >= chance) {
-    return best.move;
+    return best;
   }
 
   // Ошибаемся только тем, что не хуже порога: остальное — не ошибка, а подстава.
   const sloppy = candidates
     .slice(1)
     .filter((candidate) => best.score - candidate.score <= maxLoss);
-  if (sloppy.length === 0) return best.move;
+  if (sloppy.length === 0) return best;
 
   // Из подходящих берём худший: ошибка должна быть заметна, иначе она
   // бессмысленна.
-  const worst = sloppy.reduce((left, right) =>
+  return sloppy.reduce((left, right) =>
     right.score < left.score ? right : left,
   );
-
-  return worst.move;
 }

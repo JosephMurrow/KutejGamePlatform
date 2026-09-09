@@ -350,3 +350,48 @@ describe("генерация ходов", () => {
     assert.equal(chess.perft(3), 8902);
   });
 });
+
+describe("вид хода", () => {
+  it("узнаёт взятие, шах, рокировку и превращение", () => {
+    // 1. e4 d5 2. Nf3 — белые могут взять на d5 и рокироваться после Bc4.
+    const game = new ChessGame(
+      "rnbqkbnr/ppp1pppp/8/3p4/4P3/5N2/PPPP1PPP/RNBQKB1R w KQkq - 0 2",
+    );
+
+    assert.deepEqual(game.shapeOf("e4d5"), {
+      san: "exd5",
+      captured: "p",
+      check: false,
+      promotion: false,
+      castle: false,
+    });
+
+    const quiet = game.shapeOf("d2d4");
+    assert.equal(quiet?.captured, null);
+    assert.equal(quiet?.check, false);
+  });
+
+  it("видит рокировку", () => {
+    const game = new ChessGame(
+      "rnbqk2r/pppp1ppp/5n2/2b1p3/2B1P3/5N2/PPPP1PPP/RNBQK2R w KQkq - 4 4",
+    );
+
+    assert.equal(game.shapeOf("e1g1")?.castle, true);
+    assert.equal(game.shapeOf("e1g1")?.san, "O-O");
+  });
+
+  it("видит превращение и шах", () => {
+    const game = new ChessGame("6k1/5P2/8/8/8/8/8/6K1 w - - 0 1");
+    const shape = game.shapeOf("f7f8q");
+
+    assert.equal(shape?.promotion, true);
+    assert.equal(shape?.check, true, "новый ферзь сразу шахует");
+  });
+
+  it("на несуществующий ход отвечает пустотой, а не исключением", () => {
+    const game = new ChessGame();
+
+    assert.equal(game.shapeOf("e2e5"), null);
+    assert.equal(game.shapeOf("zzzz"), null);
+  });
+});
