@@ -109,21 +109,33 @@ export async function markBusy(roomId: string): Promise<void> {
   });
 }
 
-/** Убрать комнату вместе с её очередью вопросов и счётом. */
-export async function deletePrivateRoom(roomId: string): Promise<void> {
-  // Свои таблицы убирает сама игра: платформа их не знает.
-  await dropRoomData(defaultGameServer().id, roomId);
+/** Убрать комнату вместе со всем, что игра успела про неё запомнить. */
+export async function deletePrivateRoom(
+  roomId: string,
+  gameId: string,
+): Promise<void> {
+  // Свои таблицы убирает сама игра: платформа их не знает. Чья это игра,
+  // спрашиваем у комнаты, а не у реестра: со второй игрой «первая в реестре»
+  // означала бы уборку не в той схеме — свои строки остались бы сиротами, а
+  // чужая игра получила бы чужой ключ (src/games/chess/docs/BACKLOG.md A4).
+  await dropRoomData(gameId, roomId);
   await prisma.privateRoom.deleteMany({ where: { id: roomId } });
 }
 
-/** Комнаты, которые пустуют дольше положенного. */
-export async function staleRoomIds(now: Date): Promise<string[]> {
-  const rooms = await prisma.privateRoom.findMany({
-    where: { emptySince: { lt: new Date(now.getTime() - EMPTY_LIFETIME_MS) } },
-    select: { id: true },
-  });
+/** Комната на снос: что удалять и чьё это. */
+export interface StaleRoom {
+  id: string;
+  gameId: string;
+}
 
-  return rooms.map((room) => room.id);
+/** Комнаты, которые пустуют дольше положенного. */
+export async function staleRooms(now: Date): Promise<StaleRoom[]> {
+  // `gameId` идёт вместе с `id` не для отчётности: без него уборщик знает,
+  // что удалять, но не знает чьё (src/games/chess/docs/BACKLOG.md A4).
+  return prisma.privateRoom.findMany({
+    where: { emptySince: { lt: new Date(now.getTime() - EMPTY_LIFETIME_MS) } },
+    select: { id: true, gameId: true },
+  });
 }
 
 export function generateCode(): string {

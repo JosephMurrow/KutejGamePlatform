@@ -11,20 +11,29 @@ import { readSessionClaims, SESSION_COOKIE } from "@/lib/auth/token";
 /**
  * За стол и в рейтинг — только со своим аккаунтом.
  *
+ * Игры здесь не перечисляются поимённо: их адреса ловит `insideGame`. Список
+ * из трёх страниц платитутки означал бы, что каждая новая игра дописывает сюда
+ * свои три — и однажды забудет (src/games/chess/docs/BACKLOG.md A4).
+ *
  * Старые адреса перечислены наравне с новыми, хотя редиректы из next.config
  * срабатывают раньше proxy и досюда их не доводят. Это подстраховка: уберут
  * редирект — защита останется на месте, а не исчезнет молча.
  */
-const PROTECTED = [
-  "/profile",
-  "/games/pricetitute/play",
-  "/games/pricetitute/rooms",
-  "/games/pricetitute/leaderboard",
-  "/play",
-  "/rooms",
-  "/leaderboard",
-];
+const PROTECTED = ["/profile", "/play", "/rooms", "/leaderboard"];
 const ANONYMOUS_ONLY = ["/login", "/register"];
+
+/**
+ * Внутренности игры: общий зал, своя комната, рейтинг — всё, что глубже её
+ * первой страницы.
+ *
+ * Витрина `/games` и страница самой игры `/games/<игра>` остаются открытыми:
+ * посторонний должен увидеть, во что тут играют, до всякой регистрации, а
+ * войти просят на пороге игры, а не на пороге полки (docs/BACKLOG.md C1).
+ */
+function insideGame(pathname: string): boolean {
+  const parts = pathname.split("/").filter(Boolean);
+  return parts[0] === "games" && parts.length > 2;
+}
 
 /**
  * Куда гостю нельзя. Он заведён ради одной стримерской комнаты: ни общего
@@ -58,7 +67,10 @@ export async function proxy(request: NextRequest) {
   const claims = await readSessionClaims(token);
   const userId = claims?.userId ?? null;
 
-  if (!userId && PROTECTED.some((path) => pathname.startsWith(path))) {
+  const closed =
+    PROTECTED.some((path) => pathname.startsWith(path)) || insideGame(pathname);
+
+  if (!userId && closed) {
     const url = request.nextUrl.clone();
     url.pathname = "/login";
     return NextResponse.redirect(url);

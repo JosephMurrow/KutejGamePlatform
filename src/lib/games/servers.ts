@@ -12,8 +12,14 @@ export function gameServerById(id: string): GameServerManifest | null {
 }
 
 /**
- * Игра по умолчанию. Пока игра одна, и комната не знает своей: колонка
- * `gameId` появится на следующем этапе (docs/BACKLOG.md A4).
+ * Игра по умолчанию — первая в реестре.
+ *
+ * Нужна там, где игру не назвали: вкладка, открытая до выкладки,
+ * переподключается запросом без параметра `game`, и его отсутствие означает
+ * платитутку (docs/BACKLOG.md A4). Отсюда правило: **новые игры дописываются в
+ * конец `GAME_SERVERS`**. Поставь игру первой — и старые вкладки платитутки
+ * уедут за чужой стол, а комнаты, заведённые без явной игры, окажутся её
+ * (src/games/chess/docs/BACKLOG.md A4).
  */
 export function defaultGameServer(): GameServerManifest {
   const first = GAME_SERVERS[0];

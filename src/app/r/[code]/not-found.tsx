@@ -14,20 +14,17 @@ export default function RoomNotFound() {
         </p>
       </div>
 
-      <div className="flex flex-col gap-2 sm:flex-row">
-        <Link
-          href="/games/pricetitute/rooms/new"
-          className="rounded-lg bg-accent px-5 py-2.5 text-sm font-semibold text-paper transition hover:bg-deep"
-        >
-          Создать свою
-        </Link>
-        <Link
-          href="/games/pricetitute/play"
-          className="rounded-lg border border-line bg-paper px-5 py-2.5 text-sm font-semibold transition hover:border-accent hover:text-accent"
-        >
-          В общую комнату
-        </Link>
-      </div>
+      {/*
+        Кнопка одна и ведёт на витрину: куда именно звать — в общий зал или
+        заводить свою комнату — знает игра, а страница «комнаты нет» не знает,
+        какая это была игра (src/games/chess/docs/BACKLOG.md A4).
+      */}
+      <Link
+        href="/games"
+        className="rounded-lg bg-accent px-5 py-2.5 text-sm font-semibold text-paper transition hover:bg-deep"
+      >
+        К играм
+      </Link>
     </main>
   );
 }

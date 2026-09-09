@@ -11,7 +11,7 @@ import {
   deletePrivateRoom,
   markBusy,
   markEmpty,
-  staleRoomIds,
+  staleRooms,
 } from "../lib/rooms/private";
 import type { SocketUser } from "./auth";
 
@@ -442,10 +442,10 @@ export class RoomManager {
 
 /** Подмести опустевшие приватные комнаты: получасовой срок вышел. */
 export async function sweepStaleRooms(manager: RoomManager): Promise<void> {
-  for (const roomId of await staleRoomIds(new Date())) {
-    manager.close(roomId);
-    await deletePrivateRoom(roomId);
-    console.log(`[room ${roomId}] удалена: пустовала полчаса`);
+  for (const room of await staleRooms(new Date())) {
+    manager.close(room.id);
+    await deletePrivateRoom(room.id, room.gameId);
+    console.log(`[room ${room.id}] удалена: пустовала полчаса`);
   }
 }
 
