@@ -3,30 +3,23 @@ import type {
   GameRoomViewProps,
   GameScreenViewProps,
 } from "@/lib/games/pages";
-import { loadRoomSettings } from "@/games/chess/rooms/store";
-import { WaitingRoom } from "@/games/chess/components/WaitingRoom";
+import { GameRoom } from "@/games/chess/components/GameRoom";
+import { ScreenView } from "@/games/chess/components/ScreenView";
 
 /**
  * Что шахматы рисуют в комнате и на экране. Платформа зовёт это через
  * страничный реестр и внутрь не смотрит (docs/BACKLOG.md E1).
  *
- * Пока обе страницы показывают, что комната поднялась и чем она играет:
- * доска и ходы приходят вместе с правилами и клиентом
- * (src/games/chess/docs/PLAN.md, этапы 2–4).
+ * Обе страницы — тонкие обёртки: всё состояние приходит снимком по сокету, и
+ * серверу тут считать нечего.
  */
 
-async function Room({ room }: GameRoomViewProps) {
-  const settings = await loadRoomSettings(room.id);
-
-  return <WaitingRoom code={room.code} timeControl={settings.timeControl} />;
+function Room({ room, user }: GameRoomViewProps) {
+  return <GameRoom roomCode={room.code} userId={user.id} />;
 }
 
-async function Screen({ room }: GameScreenViewProps) {
-  const settings = await loadRoomSettings(room.id);
-
-  return (
-    <WaitingRoom code={room.code} timeControl={settings.timeControl} screen />
-  );
+function Screen({ room }: GameScreenViewProps) {
+  return <ScreenView roomCode={room.code} screenKey={room.screenKey} />;
 }
 
 export const CHESS_PAGES: GamePages = { Room, Screen };

@@ -20,16 +20,22 @@ export const GLOBAL_ROOM = "chess-lobby";
 /**
  * Действия, которые понимает движок шахмат.
  *
- * Пока их два: остальное — предложение ничьей, реванш, премув — появится
- * вместе с правилами и доской (src/games/chess/docs/PLAN.md, этапы 2–5).
- * Заводить имена под нереализованное незачем: платформа регистрирует их в
- * сокете как есть, и мёртвое действие выглядело бы рабочим.
+ * Предложение ничьей сопернику и реванш появятся со своими экранами; премув —
+ * в этапе 12 (src/games/chess/docs/PLAN.md). Заводить имена под нереализованное
+ * незачем: платформа регистрирует их в сокете как есть, и мёртвое действие
+ * выглядело бы рабочим.
  */
 export const GAME_EVENT = {
   /** Ход: координаты и фигура превращения. Запись партии считает сервер. */
   move: "game:move",
   /** Сдача. */
   resign: "game:resign",
+  /**
+   * Требование ничьей: по троекратному повторению или пятидесяти ходам. По
+   * правилам это право игрока, а не автоматический конец партии
+   * (src/games/chess/docs/SPEC.md).
+   */
+  claimDraw: "game:draw",
 } as const;
 
 /** Цвет за доской. У зрителя цвета нет. */
@@ -47,6 +53,8 @@ export type ChessPhase =
 export interface ChessPlayerPayload extends PlayerPayload {
   /** За какой цвет играет. */
   color: ChessColor;
+  /** Ушёл, и его ждут: соперник должен это видеть. */
+  away: boolean;
 }
 
 export interface ChessStatePayload extends RoomStatePayload<ChessPlayerPayload> {
@@ -59,4 +67,21 @@ export interface ChessStatePayload extends RoomStatePayload<ChessPlayerPayload> 
   fen: string | null;
   /** Чей ход. Вне партии — null. */
   turn: ChessColor | null;
+  /** Записи ходов по порядку: из них собирается список партии. */
+  moves: string[];
+  /** Откуда и куда пошли последний раз: доска это подсвечивает. */
+  lastMove: { from: string; to: string } | null;
+  /** Есть ли прямо сейчас основание требовать ничью. */
+  claimable: "threefold" | "fiftyMoves" | null;
+  /** Кто выиграл. Заполнено только после конца партии. */
+  result: "white" | "black" | "draw" | null;
+  /** Почему партия кончилась. */
+  reason: string | null;
+  /** Сколько даётся на ход, как это записано в настройках комнаты. */
+  timeControl: string;
+  /**
+   * Режим стримера: подсказки гасит клиент. Прятать на сервере тут нечего —
+   * позиция и так видна обоим (src/games/chess/docs/BACKLOG.md F1).
+   */
+  streamerMode: boolean;
 }

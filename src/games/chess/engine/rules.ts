@@ -71,6 +71,8 @@ export class ChessGame {
    */
   private readonly seen = new Map<string, number>();
   private ended: Outcome | null = null;
+  /** Последний ход координатами: по нему доска подсвечивает, откуда и куда. */
+  private last: { from: string; to: string } | null = null;
 
   constructor(fen?: string) {
     this.chess = new Chess(fen);
@@ -94,6 +96,11 @@ export class ChessGame {
   /** Записи ходов по порядку. */
   history(): string[] {
     return this.chess.history();
+  }
+
+  /** Откуда и куда пошли последний раз; `null` — ходов ещё не было. */
+  lastMove(): { from: string; to: string } | null {
+    return this.last;
   }
 
   outcome(): Outcome | null {
@@ -131,6 +138,7 @@ export class ChessGame {
     }
 
     this.remember();
+    this.last = { from: made.from, to: made.to };
 
     return {
       ok: true,

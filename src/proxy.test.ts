@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { insideGame } from "./proxy";
+import { insideGame, isGamePage } from "./proxy";
 
 /**
  * Правило доступа к разделам игры.
@@ -47,6 +47,44 @@ describe("что закрыто внутри игры", () => {
   it("не считает своим то, что лежит не под играми", () => {
     for (const path of ["/", "/profile", "/r/ABC123", "/login"]) {
       assert.equal(insideGame(path), false, path);
+    }
+  });
+});
+
+/**
+ * Что закрыто гостю.
+ *
+ * Гость заведён под одну стримерскую комнату: полка и чужие игры ему ни к
+ * чему. Но картинки той игры, в которой он сидит, лежат под тем же адресом, и
+ * закрывать их нельзя — на первой же шахматной доске гость получил вместо
+ * фигур бесконечный редирект (src/games/chess/docs/BACKLOG.md A4).
+ */
+describe("полка и картинки для гостя", () => {
+  it("закрывает полку и страницы игр", () => {
+    for (const path of [
+      "/games",
+      "/games/chess",
+      "/games/chess/play",
+      "/games/pricetitute/leaderboard",
+    ]) {
+      assert.equal(isGamePage(path), true, path);
+    }
+  });
+
+  it("оставляет открытыми файлы игры", () => {
+    for (const path of [
+      "/games/chess/pieces/br.png",
+      "/games/chess/logo.png",
+      "/games/pricetitute/bots/00.svg",
+      "/games/pricetitute/apple-icon.png",
+    ]) {
+      assert.equal(isGamePage(path), false, path);
+    }
+  });
+
+  it("чужого не трогает", () => {
+    for (const path of ["/", "/r/ABC123", "/profile", "/brand/icon.png"]) {
+      assert.equal(isGamePage(path), false, path);
     }
   });
 });

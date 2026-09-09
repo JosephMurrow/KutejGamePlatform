@@ -55,15 +55,31 @@ export function insideGame(pathname: string): boolean {
  */
 const CLOSED_TO_GUESTS = [
   "/profile",
-  // Вся полка целиком: гостю не во что играть, кроме своей комнаты, и
-  // объяснять ему про другие игры незачем (docs/BACKLOG.md C1).
-  "/games",
   "/play",
   "/leaderboard",
   "/rooms",
   "/login",
   "/register",
 ];
+
+/**
+ * Страница под `/games` — в отличие от файла, который там же лежит.
+ *
+ * Гостю закрыта вся полка: играть ему не во что, кроме своей комнаты, и
+ * объяснять про другие игры незачем (docs/BACKLOG.md C1). Но под тем же
+ * адресом лежат картинки игры — фигуры, аватары ботов, знаки, — и закрывать их
+ * нельзя: гость сидит в комнате той самой игры и должен её видеть. Раньше это
+ * не всплывало, потому что у платитутки гость обходился без картинок из
+ * `/games`; шахматы упёрлись в это на первой же доске
+ * (src/games/chess/docs/BACKLOG.md A4).
+ */
+export function isGamePage(pathname: string): boolean {
+  const parts = pathname.split("/").filter(Boolean);
+  if (parts[0] !== "games") return false;
+
+  // Файл узнаётся по расширению: `pieces/br.png`, `bots/00.svg`, `logo.png`.
+  return !(parts.at(-1) ?? "").includes(".");
+}
 
 /**
  * Куда можно вести по параметру `next`: только внутрь сайта. Протокольно
@@ -91,10 +107,11 @@ export async function proxy(request: NextRequest) {
 
   // Гостя разворачиваем на главную: объяснять ему про рейтинг и профиль
   // бессмысленно, у него их нет и не будет.
-  if (
-    claims?.guest &&
-    CLOSED_TO_GUESTS.some((path) => pathname.startsWith(path))
-  ) {
+  const closedToGuest =
+    CLOSED_TO_GUESTS.some((path) => pathname.startsWith(path)) ||
+    isGamePage(pathname);
+
+  if (claims?.guest && closedToGuest) {
     const url = request.nextUrl.clone();
     url.pathname = "/";
     url.search = "";

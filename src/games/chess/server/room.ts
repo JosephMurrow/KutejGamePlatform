@@ -143,6 +143,7 @@ export class ChessRoom implements GameRoomState {
   act(event: string, actorId: string, payload: unknown): ActionOutcome {
     if (event === GAME_EVENT.resign) return this.resign(actorId);
     if (event === GAME_EVENT.move) return this.makeMove(actorId, payload);
+    if (event === GAME_EVENT.claimDraw) return this.claimDraw(actorId);
 
     return { accepted: false, reason: "Неизвестное действие" };
   }
@@ -187,6 +188,7 @@ export class ChessRoom implements GameRoomState {
         fen: phase === "waiting" ? null : this.game.fen(),
         turn: outcome ? null : this.turnColor(),
         moves: this.game.history(),
+        lastMove: this.game.lastMove(),
         /** Есть ли основание требовать ничью прямо сейчас. */
         claimable: this.game.claimableDraw(),
         result: outcome?.result ?? null,
@@ -251,6 +253,26 @@ export class ChessRoom implements GameRoomState {
 
     this.finish(this.game.resign(color === "white" ? "w" : "b"));
 
+    return { accepted: true };
+  }
+
+  /**
+   * Игрок требует ничью по повторению или пятидесяти ходам.
+   *
+   * Требовать может любой из двоих, а не только тот, чья очередь хода: так это
+   * работает на площадках (src/games/chess/docs/SPEC.md).
+   */
+  private claimDraw(actorId: string): ActionOutcome {
+    if (!this.colorOf(actorId)) {
+      return { accepted: false, reason: "Ты не за доской" };
+    }
+
+    const outcome = this.game.claimDraw();
+    if (!outcome) {
+      return { accepted: false, reason: "Требовать ничью пока не на чем" };
+    }
+
+    this.finish(outcome);
     return { accepted: true };
   }
 
