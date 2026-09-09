@@ -2,11 +2,13 @@ import type { GameServerManifest } from "@/lib/games/engine";
 import type { PrivateRoomInfo } from "@/lib/rooms/private";
 import { GAME_EVENT, GAME_ID, GLOBAL_ROOM } from "../protocol";
 import {
+  normalizeRoomSettings,
+  type ChessRoomSettings,
+} from "../rooms/settings";
+import {
   dropRoomSettings,
   loadRoomSettings,
-  normalizeRoomSettings,
   saveRoomSettings,
-  type ChessRoomSettings,
 } from "../rooms/store";
 import { createChessServer } from ".";
 

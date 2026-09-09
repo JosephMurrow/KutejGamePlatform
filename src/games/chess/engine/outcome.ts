@@ -44,7 +44,15 @@ export type EndReason =
   /** Ушёл и не вернулся. */
   | "abandoned"
   /** Разошлись до первого хода: партии как будто и не было. */
-  | "aborted";
+  | "aborted"
+  /**
+   * Партия упёрлась в потолок: слишком много ходов или слишком долго.
+   *
+   * Это не правило шахмат, а предохранитель: лимит на ход ограничивает ход, но
+   * не партию, и двое упрямых заняли бы комнату на полдня — а в безлимитной
+   * приватной навсегда (src/games/chess/docs/BACKLOG.md A2).
+   */
+  | "tooLong";
 
 export interface Outcome {
   result: ChessResult;
@@ -66,4 +74,5 @@ export const REASON_TEXT: Record<EndReason, string> = {
   agreement: "ничья по соглашению",
   abandoned: "партия брошена",
   aborted: "партия отменена",
+  tooLong: "партия затянулась",
 };

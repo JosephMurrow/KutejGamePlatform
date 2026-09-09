@@ -1,4 +1,4 @@
-import { TIME_CONTROL_LABEL, type TimeControl } from "../rooms/store";
+import { TIME_CONTROL_LABEL, type TimeControl } from "../rooms/settings";
 
 /**
  * Комната до доски: показывает, что стол поднялся и чем тут играют.

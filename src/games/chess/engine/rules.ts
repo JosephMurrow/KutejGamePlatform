@@ -169,6 +169,14 @@ export class ChessGame {
     return this.finish(color === "w" ? "black" : "white", "flag");
   }
 
+  /**
+   * Партия упёрлась в потолок — ничья. Не правило шахмат, а предохранитель:
+   * лимит на ход ограничивает ход, но не длину партии.
+   */
+  capOut(): Outcome | null {
+    return this.finish("draw", "tooLong");
+  }
+
   /** Согласились на ничью. */
   agreeDraw(): Outcome | null {
     return this.finish("draw", "agreement");

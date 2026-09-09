@@ -1,5 +1,5 @@
 import type { GameRoomContext, GameServer } from "@/lib/games/engine";
-import { defaultRoomSettings, type ChessRoomSettings } from "../rooms/store";
+import { defaultRoomSettings, type ChessRoomSettings } from "../rooms/settings";
 import { ChessRoom } from "./room";
 
 /**
