@@ -50,6 +50,8 @@ export interface ChessRoomHandle {
   claimDraw: () => Promise<void>;
   /** Ещё партия в той же комнате: цвета меняются местами. */
   rematch: () => Promise<void>;
+  /** Уйти из очереди зала. */
+  leaveQueue: () => Promise<void>;
 }
 
 function connectionQuery(
@@ -158,6 +160,10 @@ export function useChessRoom(
     await act(GAME_EVENT.rematch);
   }, [act]);
 
+  const leaveQueue = useCallback(async () => {
+    await act(GAME_EVENT.leaveQueue);
+  }, [act]);
+
   return {
     state,
     connected,
@@ -168,5 +174,6 @@ export function useChessRoom(
     resign,
     claimDraw,
     rematch,
+    leaveQueue,
   };
 }

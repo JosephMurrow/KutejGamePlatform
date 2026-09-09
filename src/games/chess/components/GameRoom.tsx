@@ -60,6 +60,19 @@ export function GameRoom({
     );
   }
 
+  // В общем зале до посадки доски нет вовсе: человек стоит в очереди.
+  if (state.phase === "queue") {
+    return (
+      <Queue
+        queued={state.queued === true}
+        lobby={state.lobby}
+        onEnter={room.rematch}
+        onLeave={room.leaveQueue}
+        error={room.error}
+      />
+    );
+  }
+
   // Зритель смотрит с белой стороны, игрок — со своей.
   const orientation = flipped ?? myColor === "black";
   const over = state.phase === "over";
@@ -150,6 +163,82 @@ export function GameRoom({
 }
 
 const START = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
+
+/**
+ * Общий зал до посадки: очередь и сводка.
+ *
+ * Бота молча не подсовываем: не нашлось соперника — так и говорим, а что
+ * делать дальше, человек решает сам (src/games/chess/docs/BACKLOG.md A1).
+ */
+function Queue({
+  queued,
+  lobby,
+  onEnter,
+  onLeave,
+  error,
+}: {
+  queued: boolean;
+  lobby?: { waiting: number; boards: number; present: number };
+  onEnter: () => void;
+  onLeave: () => void;
+  error: string | null;
+}) {
+  return (
+    <main className="mx-auto flex w-full max-w-md flex-1 flex-col items-center justify-center gap-6 px-4 py-12 text-center">
+      <div className="flex flex-col gap-2">
+        <h1 className="text-2xl font-semibold tracking-tight">Общий зал</h1>
+        <p className="text-balance text-sm text-muted">
+          {queued
+            ? "Ищем соперника. Полминуты на ход, партия идёт в рейтинг."
+            : "Тут играют с незнакомцами: полминуты на ход, без приглашений."}
+        </p>
+      </div>
+
+      {lobby ? (
+        <dl className="flex gap-6 text-sm">
+          <Stat label="ждут" value={lobby.waiting} />
+          <Stat label="партий" value={lobby.boards} />
+          <Stat label="в зале" value={lobby.present} />
+        </dl>
+      ) : null}
+
+      {queued ? (
+        <div className="flex flex-col items-center gap-3">
+          <span className="text-sm text-muted">
+            Пока никого. Можно подождать здесь, позвать друга по ссылке или
+            сыграть с ботом, когда он появится.
+          </span>
+          <button
+            type="button"
+            onClick={onLeave}
+            className="rounded-lg border border-line px-4 py-2 text-sm font-semibold text-muted transition hover:border-accent hover:text-accent"
+          >
+            Не ждать
+          </button>
+        </div>
+      ) : (
+        <button
+          type="button"
+          onClick={onEnter}
+          className="rounded-lg bg-accent px-5 py-2.5 text-sm font-semibold text-paper transition hover:bg-deep"
+        >
+          Играть
+        </button>
+      )}
+
+      {error ? <p className="text-xs text-accent">{error}</p> : null}
+    </main>
+  );
+}
+
+function Stat({ label, value }: { label: string; value: number }) {
+  return (
+    <div className="flex flex-col">
+      <dd className="tabular text-xl font-semibold">{value}</dd>
+      <dt className="text-xs text-muted">{label}</dt>
+    </div>
+  );
+}
 
 function Seat({
   player,

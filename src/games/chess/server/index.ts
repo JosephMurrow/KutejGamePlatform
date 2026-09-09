@@ -1,27 +1,37 @@
 import type { GameRoomContext, GameServer } from "@/lib/games/engine";
 import { defaultRoomSettings, type ChessRoomSettings } from "../rooms/settings";
 import { saveMatch } from "../rooms/matches";
+import { GLOBAL_ROOM } from "../protocol";
+import { ChessLobby } from "./lobby";
 import { ChessRoom, type MatchDraft } from "./room";
 
 /**
  * Серверная часть шахмат: живые партии и всё, что игра держит у себя на весь
- * срок жизни процесса. Пока держать нечего — движок ботов и пул процессов
- * появятся на своём этапе (src/games/chess/docs/PLAN.md, этап 7).
+ * срок жизни процесса.
+ *
+ * Комнат два сорта. Приватная — это одна доска и двое за ней; общий зал — одна
+ * платформенная комната, внутри которой досок столько, сколько пар нашлось
+ * (src/games/chess/docs/BACKLOG.md A1). Движок ботов появится своим этапом.
  */
 class ChessServer implements GameServer {
-  private readonly rooms = new Map<string, ChessRoom>();
+  private readonly rooms = new Map<string, ChessRoom | ChessLobby>();
   /** Записи, которые ещё не доехали до базы. */
   private readonly writing = new Set<Promise<void>>();
 
-  createRoom(context: GameRoomContext): Promise<ChessRoom> {
+  createRoom(context: GameRoomContext): Promise<ChessRoom | ChessLobby> {
     // Настройки приносит платформа — той формы, какой их отдал наш серверный
     // манифест. Если комната старее настроек, играем умолчанием.
     const settings = (context.settings ??
       defaultRoomSettings()) as ChessRoomSettings;
 
-    const room = new ChessRoom(context, settings, undefined, (draft) =>
-      this.record(draft, settings),
-    );
+    // Общий зал устроен иначе: одна комната, а досок в ней много сразу
+    // (src/games/chess/docs/BACKLOG.md A1).
+    const record = (draft: MatchDraft) => this.record(draft, settings);
+    const room =
+      context.key === GLOBAL_ROOM
+        ? new ChessLobby(context, undefined, record)
+        : new ChessRoom(context, settings, undefined, record);
+
     this.rooms.set(context.key, room);
 
     return Promise.resolve(room);

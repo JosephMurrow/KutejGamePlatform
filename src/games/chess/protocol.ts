@@ -36,21 +36,35 @@ export const GAME_EVENT = {
    * (src/games/chess/docs/SPEC.md).
    */
   claimDraw: "game:draw",
-  /** Ещё партия в той же комнате — цвета меняются местами. */
+  /**
+   * Ещё партия. В своей комнате — новая партия с теми же двумя и сменой
+   * цветов; в общем зале — встать в очередь заново.
+   */
   rematch: "game:rematch",
+  /** Уйти из очереди зала, не выходя из него самого. */
+  leaveQueue: "game:unqueue",
 } as const;
 
 /** Цвет за доской. У зрителя цвета нет. */
 export type ChessColor = "white" | "black";
 
 /** Что сейчас происходит в комнате. */
+/** Сводка зала: сколько ждёт, сколько партий, сколько народу. */
+export interface LobbySummary {
+  waiting: number;
+  boards: number;
+  present: number;
+}
+
 export type ChessPhase =
   /** Ждём второго: за доской меньше двоих. */
   | "waiting"
   /** Партия идёт. */
   | "playing"
   /** Партия кончилась — на доске финальная позиция. */
-  | "over";
+  | "over"
+  /** Общий зал: соперник ещё не нашёлся, доски нет. */
+  | "queue";
 
 export interface ChessPlayerPayload extends PlayerPayload {
   /** За какой цвет играет. */
@@ -88,4 +102,8 @@ export interface ChessStatePayload extends RoomStatePayload<ChessPlayerPayload> 
    * позиция и так видна обоим (src/games/chess/docs/BACKLOG.md F1).
    */
   streamerMode: boolean;
+  /** Только в общем зале: стоит ли этот человек в очереди. */
+  queued?: boolean;
+  /** Только в общем зале: сводка по залу. */
+  lobby?: LobbySummary;
 }

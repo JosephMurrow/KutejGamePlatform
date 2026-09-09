@@ -127,6 +127,11 @@ export class ChessRoom implements GameRoomState {
     return this.seats;
   }
 
+  /** Партия кончилась: зал по этому убирает доску. */
+  isOver(): boolean {
+    return this.game.isOver();
+  }
+
   /**
    * Ближайшее, чего ждёт партия: конец хода или конец ожидания ушедшего.
    *
