@@ -20,6 +20,13 @@ ENV NODE_ENV=production
 ENV HOST=0.0.0.0
 ENV PORT=3000
 
+# Движок шахмат ставится пакетом и живёт отдельным процессом: в наш бандл он не
+# попадает, и лицензия его на нас не распространяется
+# (src/games/chess/docs/BACKLOG.md D1). Без него игра работает, просто без
+# ботов — переменная тогда остаётся пустой.
+RUN apk add --no-cache stockfish
+ENV CHESS_ENGINE_PATH=/usr/bin/stockfish
+
 COPY --from=build /app/node_modules ./node_modules
 COPY --from=build /app/.next ./.next
 COPY --from=build /app/public ./public

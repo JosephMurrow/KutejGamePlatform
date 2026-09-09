@@ -19,6 +19,7 @@ function setup(timeControl: TimeControl = "SEC_30") {
     timeControl,
     opponent: "HUMAN",
     streamerMode: false,
+    botLevel: "NORMAL",
   };
 
   const context: GameRoomContext = {

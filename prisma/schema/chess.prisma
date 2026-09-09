@@ -39,6 +39,16 @@ enum ChessOpponentKind {
   @@schema("chess")
 }
 
+/// Уровень бота. Четыре видимых; пятый, скрытый, придёт своим этапом.
+enum ChessBotLevel {
+  EASY
+  NORMAL
+  HARD
+  EXPERT
+
+  @@schema("chess")
+}
+
 /// Настройки партии шахмат в конкретной комнате.
 ///
 /// Внешнего ключа на комнату нет намеренно — как и у платитутки, тут обычная
@@ -56,6 +66,8 @@ model ChessRoomSettings {
   /// Режим стримера: подсказки гасит клиент, поэтому флаг лежит на комнате, а
   /// не на человеке (src/games/chess/docs/BACKLOG.md F1).
   streamerMode Boolean     @default(false)
+  /// Уровень бота. Значим только когда соперник — бот.
+  botLevel     ChessBotLevel @default(NORMAL)
 
   @@map("room_settings")
   @@schema("chess")

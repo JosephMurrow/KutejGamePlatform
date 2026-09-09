@@ -11,6 +11,7 @@ import {
   defaultRoomSettings,
   type TimeControl,
 } from "../rooms/settings";
+import { LEVELS, LEVEL_IDS } from "../bots/levels";
 
 /**
  * Форма своей партии.
@@ -37,6 +38,7 @@ const TIME_HINT: Record<TimeControl, string> = {
 export function CreateRoomForm() {
   const [state, formAction] = useActionState(createRoomAction, {});
   const [kind, setKind] = useState<RoomKind>("private");
+  const [opponent, setOpponent] = useState<"HUMAN" | "BOT">("HUMAN");
   const defaults = defaultRoomSettings();
 
   return (
@@ -80,7 +82,8 @@ export function CreateRoomForm() {
               type="radio"
               name="opponent"
               value="HUMAN"
-              defaultChecked
+              checked={opponent === "HUMAN"}
+              onChange={() => setOpponent("HUMAN")}
               className="mt-0.5 size-4 shrink-0 accent-accent"
             />
             <span className="text-sm">
@@ -91,23 +94,54 @@ export function CreateRoomForm() {
             </span>
           </label>
 
-          <label className="flex cursor-not-allowed items-start gap-2.5 opacity-55">
+          <label className="flex cursor-pointer items-start gap-2.5">
             <input
               type="radio"
               name="opponent"
               value="BOT"
-              disabled
+              checked={opponent === "BOT"}
+              onChange={() => setOpponent("BOT")}
               className="mt-0.5 size-4 shrink-0 accent-accent"
             />
             <span className="text-sm">
               С ботом
               <span className="block text-xs text-muted">
-                скоро: движок и уровни делаются отдельно
+                садится сразу и ждать никого не надо
               </span>
             </span>
           </label>
         </div>
       </fieldset>
+
+      {opponent === "BOT" ? (
+        <fieldset>
+          <legend className="mb-2 text-sm font-medium">
+            Насколько сильный
+          </legend>
+          <div className="flex flex-col gap-2">
+            {LEVEL_IDS.map((id) => (
+              <label
+                key={id}
+                className="flex cursor-pointer items-start gap-2.5"
+              >
+                <input
+                  type="radio"
+                  name="botLevel"
+                  value={id.toUpperCase()}
+                  defaultChecked={id === "normal"}
+                  className="mt-0.5 size-4 shrink-0 accent-accent"
+                />
+                <span className="text-sm">
+                  {LEVELS[id].title}
+                  <span className="block text-xs text-muted">
+                    {LEVELS[id].hint}
+                  </span>
+                </span>
+              </label>
+            ))}
+          </div>
+        </fieldset>
+      ) : null}
 
       <label className="flex cursor-pointer items-start gap-2.5">
         <input

@@ -49,6 +49,15 @@ const envSchema = z.object({
   MAIL_USER: z.string().default(""),
   MAIL_PASSWORD: z.string().default(""),
   MAIL_FROM: optional(z.string().min(1).default("Кутёж <no-reply@localhost>")),
+
+  /**
+   * Путь к движку шахмат. Движок живёт отдельным процессом и в наш бандл не
+   * попадает: этого требует его лицензия, и это же не пускает подсказку в
+   * браузер игрока (src/games/chess/docs/BACKLOG.md D1).
+   *
+   * Пусто — значит ботов в шахматах нет; всё остальное работает как обычно.
+   */
+  CHESS_ENGINE_PATH: z.string().default(""),
 });
 
 type Env = z.infer<typeof envSchema>;

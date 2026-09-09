@@ -28,6 +28,7 @@ export const LOBBY_SETTINGS: ChessRoomSettings = {
   timeControl: "SEC_30",
   opponent: "HUMAN",
   streamerMode: false,
+  botLevel: "NORMAL",
 };
 
 /** Сколько партий показывать в сводке зала. */

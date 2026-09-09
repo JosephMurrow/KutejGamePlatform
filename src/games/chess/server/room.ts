@@ -11,6 +11,7 @@ import { ChessGame, type MoveInput } from "../engine/rules";
 import { START_RATING } from "../rooms/matches";
 import { GAME_EVENT, type ChessColor, type ChessPhase } from "../protocol";
 import { MOVE_LIMIT_MS, type ChessRoomSettings } from "../rooms/settings";
+import type { Level } from "../bots/levels";
 
 /**
  * Партия в одной комнате: стык правил с платформой.
@@ -66,6 +67,21 @@ export interface MatchDraft {
 /** Куда комната отдаёт партию. База — снаружи: движок про неё не знает. */
 export type Persist = (draft: MatchDraft) => void;
 
+/**
+ * Чем комната думает за бота. Сам движок живёт снаружи — комната знает только,
+ * что кто-то умеет отвечать ходом на позицию.
+ */
+export type Think = (fen: string, level: Level) => Promise<string | null>;
+
+/** Бот за доской: кто он и чем думает. */
+export interface BotSeat {
+  id: string;
+  nickname: string;
+  avatarId: number;
+  level: Level;
+  think: Think;
+}
+
 export class ChessRoom implements GameRoomState {
   private game = new ChessGame();
   private readonly clock: MoveClock;
@@ -87,13 +103,28 @@ export class ChessRoom implements GameRoomState {
     private readonly now: Ticker = () => performance.now(),
     /** Запись партии в базу. Без неё комната работает — просто без истории. */
     private readonly persist?: Persist,
+    /** Бот, если играют с ним. Садится сразу и ждёт хода человека. */
+    private readonly bot?: BotSeat,
   ) {
     this.clock = new MoveClock(MOVE_LIMIT_MS[settings.timeControl], now);
     this.moveStartedAt = now();
+
+    if (this.bot) {
+      // Бот — такой же игрок платформы: она запоминает, как его звать, и
+      // дописывает ник с аватаром в снимок сама (docs/BACKLOG.md A3).
+      this.context.introduce({
+        id: this.bot.id,
+        nickname: this.bot.nickname,
+        avatarId: this.bot.avatarId,
+        isGuest: false,
+      });
+    }
   }
 
   /** Начало текущего хода по монотонным часам: из него считается время хода. */
   private moveStartedAt: number;
+  /** Бот сейчас думает: второй ход начинать нельзя. */
+  private thinking = false;
 
   join(playerId: string): void {
     // Вернулся тот, кого ждали: место за ним и держали.
@@ -101,6 +132,8 @@ export class ChessRoom implements GameRoomState {
 
     if (!this.seats.includes(playerId) && this.seats.length < SEATS) {
       this.seats.push(playerId);
+      // Бот садится напротив первого пришедшего: ждать ему некого.
+      if (this.bot && this.seats.length === 1) this.seats.push(this.bot.id);
       // Мест два; третий и дальше остаются зрителями — за столом их нет, но
       // партию они видят целиком.
       if (this.seats.length === SEATS) this.begin();
@@ -298,6 +331,7 @@ export class ChessRoom implements GameRoomState {
     this.moveStartedAt = spentAt;
     this.clock.restart();
     this.finish(result.outcome ?? this.capIfTooLong());
+    void this.botTurn();
     // Без этого дедлайн сдвинулся бы, а будильник звонил бы по старому
     // времени. Предупреждение висит прямо в engine.ts, и платитутка на этих
     // граблях уже стояла.
@@ -360,6 +394,47 @@ export class ChessRoom implements GameRoomState {
 
     this.finish(outcome);
     return { accepted: true };
+  }
+
+  /**
+   * Ход бота.
+   *
+   * Думает он снаружи и не мгновенно, поэтому ход применяется, когда придёт, —
+   * а не блокирует комнату. Пока думает, второй ход не начинается: иначе бот
+   * успеет сходить дважды за один свой ход.
+   */
+  private async botTurn(): Promise<void> {
+    const bot = this.bot;
+    if (!bot || this.thinking || this.game.isOver()) return;
+    if (this.colorOf(bot.id) !== this.turnColor()) return;
+
+    this.thinking = true;
+    try {
+      const answer = await bot.think(this.game.fen(), bot.level);
+      if (!answer || this.game.isOver()) return;
+
+      const move = {
+        from: answer.slice(0, 2),
+        to: answer.slice(2, 4),
+        promotion: answer.slice(4, 5) as "q" | "r" | "b" | "n" | "",
+      };
+      const result = this.game.move(
+        move.promotion
+          ? { from: move.from, to: move.to, promotion: move.promotion }
+          : { from: move.from, to: move.to },
+        this.game.ply(),
+      );
+      if (!result.ok) return;
+
+      const spentAt = this.now();
+      this.times.push(Math.round(spentAt - this.moveStartedAt));
+      this.moveStartedAt = spentAt;
+      this.clock.restart();
+      this.finish(result.outcome ?? this.capIfTooLong());
+      this.context.changed();
+    } finally {
+      this.thinking = false;
+    }
   }
 
   /** Партия упёрлась в потолок — по числу ходов или по времени. */

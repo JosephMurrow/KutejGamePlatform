@@ -15,10 +15,15 @@ export type TimeControl = "SEC_10" | "SEC_30" | "MIN_1" | "MIN_3" | "UNLIMITED";
 /** Кто по ту сторону доски. */
 export type OpponentKind = "HUMAN" | "BOT";
 
+/** Уровень бота, как он лежит в базе. */
+export type BotLevelDb = "EASY" | "NORMAL" | "HARD" | "EXPERT";
+
 export interface ChessRoomSettings {
   timeControl: TimeControl;
   opponent: OpponentKind;
   streamerMode: boolean;
+  /** Значим, только когда соперник — бот. */
+  botLevel: BotLevelDb;
 }
 
 /**
@@ -45,11 +50,17 @@ export const TIME_CONTROL_LABEL: Record<TimeControl, string> = {
 
 /** Полминуты на ход и живой соперник — то же, чем играет общий зал. */
 export function defaultRoomSettings(): ChessRoomSettings {
-  return { timeControl: "SEC_30", opponent: "HUMAN", streamerMode: false };
+  return {
+    timeControl: "SEC_30",
+    opponent: "HUMAN",
+    streamerMode: false,
+    botLevel: "NORMAL",
+  };
 }
 
 const TIME_CONTROLS = Object.keys(MOVE_LIMIT_MS) as TimeControl[];
 const OPPONENTS: OpponentKind[] = ["HUMAN", "BOT"];
+const BOT_LEVELS: BotLevelDb[] = ["EASY", "NORMAL", "HARD", "EXPERT"];
 
 /**
  * Разобрать то, что пришло из формы. Значения приходят от клиента, поэтому
@@ -59,6 +70,7 @@ export function normalizeRoomSettings(raw: {
   timeControl: unknown;
   opponent: unknown;
   streamerMode: unknown;
+  botLevel: unknown;
 }): ChessRoomSettings {
   const fallback = defaultRoomSettings();
 
@@ -66,6 +78,7 @@ export function normalizeRoomSettings(raw: {
     timeControl: pick(raw.timeControl, TIME_CONTROLS, fallback.timeControl),
     opponent: pick(raw.opponent, OPPONENTS, fallback.opponent),
     streamerMode: raw.streamerMode === true || raw.streamerMode === "on",
+    botLevel: pick(raw.botLevel, BOT_LEVELS, fallback.botLevel),
   };
 }
 

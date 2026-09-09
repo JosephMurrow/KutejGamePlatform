@@ -21,6 +21,7 @@ const COMMON_SETTINGS: ChessRoomSettings = {
   timeControl: "SEC_30",
   opponent: "HUMAN",
   streamerMode: false,
+  botLevel: "NORMAL",
 };
 
 /** Серверная половина договора шахмат с платформой. */
@@ -40,6 +41,7 @@ export const CHESS_SERVER: GameServerManifest = {
         timeControl: form.get("timeControl"),
         opponent: form.get("opponent"),
         streamerMode: form.get("streamerMode"),
+        botLevel: form.get("botLevel"),
       }),
     );
   },

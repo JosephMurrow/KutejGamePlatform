@@ -141,6 +141,7 @@ async function main() {
     timeControl: "MIN_3",
     opponent: "HUMAN",
     streamerMode: false,
+    botLevel: "NORMAL",
   });
 
   console.log(`\nКомната ${room.code}, три минуты на ход\n`);
