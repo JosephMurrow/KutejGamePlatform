@@ -251,6 +251,51 @@ async function main() {
     afterEnd.error ?? "",
   );
 
+  console.log("\n[6] Партия в базе");
+  await sleep(600);
+  const saved = await prisma.chessMatch.findFirst({
+    where: { roomKey: room.id },
+    orderBy: { endedAt: "desc" },
+  });
+  check("партия записана", saved !== null);
+  check(
+    "ходы сохранены",
+    saved?.moves.join(" ") === "e4 e5",
+    saved?.moves.join(" ") ?? "",
+  );
+  check(
+    "время на каждый ход записано",
+    saved?.times.length === saved?.moves.length,
+    `${saved?.times.length} против ${saved?.moves.length}`,
+  );
+  check(
+    "результат и причина на месте",
+    saved?.result === "BLACK" && saved?.reason === "resign",
+    `${saved?.result} / ${saved?.reason}`,
+  );
+  check(
+    "ники записаны на момент партии",
+    saved?.whiteName === white.nickname && saved?.blackName === black.nickname,
+    `${saved?.whiteName} · ${saved?.blackName}`,
+  );
+
+  console.log("\n[7] Реванш");
+  const again = await back.emit(GAME_EVENT.rematch);
+  check("реванш принят", again.ok === true, again.error ?? "");
+
+  const restarted = await back.waitState(
+    (state) => state.phase === "playing" && state.moves.length === 0,
+    "новая партия",
+  );
+  check("доска чистая", restarted.moves.length === 0);
+  check(
+    "цвета поменялись местами",
+    restarted.players[0]?.id === black.id,
+    restarted.players[0]?.id === black.id
+      ? "белыми теперь бывшие чёрные"
+      : "цвета те же",
+  );
+
   a.disconnect();
   back.disconnect();
   viewer.disconnect();
@@ -260,7 +305,11 @@ async function main() {
   const leftovers = await prisma.chessRoomSettings.count({
     where: { roomId: room.id },
   });
+  const orphans = await prisma.chessMatch.count({
+    where: { roomKey: room.id },
+  });
   check("настройки ушли вместе с комнатой", leftovers === 0);
+  check("партии ушли вместе с комнатой", orphans === 0);
 
   console.log(
     failures === 0

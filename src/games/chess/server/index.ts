@@ -1,6 +1,7 @@
 import type { GameRoomContext, GameServer } from "@/lib/games/engine";
 import { defaultRoomSettings, type ChessRoomSettings } from "../rooms/settings";
-import { ChessRoom } from "./room";
+import { saveMatch } from "../rooms/matches";
+import { ChessRoom, type MatchDraft } from "./room";
 
 /**
  * Серверная часть шахмат: живые партии и всё, что игра держит у себя на весь
@@ -9,6 +10,8 @@ import { ChessRoom } from "./room";
  */
 class ChessServer implements GameServer {
   private readonly rooms = new Map<string, ChessRoom>();
+  /** Записи, которые ещё не доехали до базы. */
+  private readonly writing = new Set<Promise<void>>();
 
   createRoom(context: GameRoomContext): Promise<ChessRoom> {
     // Настройки приносит платформа — той формы, какой их отдал наш серверный
@@ -16,7 +19,9 @@ class ChessServer implements GameServer {
     const settings = (context.settings ??
       defaultRoomSettings()) as ChessRoomSettings;
 
-    const room = new ChessRoom(context, settings);
+    const room = new ChessRoom(context, settings, undefined, (draft) =>
+      this.record(draft, settings),
+    );
     this.rooms.set(context.key, room);
 
     return Promise.resolve(room);
@@ -28,6 +33,24 @@ class ChessServer implements GameServer {
 
   stop(): void {
     this.rooms.clear();
+  }
+
+  /**
+   * Записать партию.
+   *
+   * Ошибка записи гасится: история важна, но уронить из-за неё живую комнату
+   * важнее не дать. Незаписанная партия видна в логе.
+   */
+  private record(draft: MatchDraft, settings: ChessRoomSettings): void {
+    const writing = saveMatch({
+      ...draft,
+      timeControl: settings.timeControl,
+    }).catch((error: unknown) => {
+      console.error(`[chess ${draft.roomKey}] партия не записана:`, error);
+    });
+
+    this.writing.add(writing);
+    void writing.finally(() => this.writing.delete(writing));
   }
 }
 

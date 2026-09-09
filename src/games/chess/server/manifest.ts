@@ -10,6 +10,7 @@ import {
   loadRoomSettings,
   saveRoomSettings,
 } from "../rooms/store";
+import { dropRoomMatches } from "../rooms/matches";
 import { createChessServer } from ".";
 
 /**
@@ -45,7 +46,11 @@ export const CHESS_SERVER: GameServerManifest = {
 
   actions: Object.values(GAME_EVENT),
 
-  dropRoomData: dropRoomSettings,
+  async dropRoomData(key: string): Promise<void> {
+    // Комнату удалили — уходят и настройки, и сыгранные в ней партии.
+    await dropRoomSettings(key);
+    await dropRoomMatches(key);
+  },
 
   createServer: createChessServer,
 };

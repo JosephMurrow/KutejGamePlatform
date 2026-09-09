@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { Avatar } from "@/components/Avatar";
+import { InviteModal } from "@/components/rooms/InviteModal";
 import { Countdown } from "@/components/ui/Countdown";
 import { useExitWarning } from "@/components/games/ExitToShelf";
 import { REASON_TEXT } from "../engine/outcome";
@@ -25,6 +26,14 @@ export function GameRoom({
 }) {
   const room = useChessRoom(roomCode);
   const [flipped, setFlipped] = useState<boolean | null>(null);
+  const [inviteOpen, setInviteOpen] = useState(false);
+
+  // Ссылка берётся из адресной строки: снаружи и изнутри сети адрес разный, и
+  // правильный тот, по которому человек сюда пришёл.
+  const link =
+    typeof window === "undefined" || !roomCode
+      ? ""
+      : `${window.location.origin}/r/${roomCode}`;
 
   const state = room.state;
   const me = state?.players.find((player) => player.id === userId) ?? null;
@@ -92,8 +101,18 @@ export function GameRoom({
           placeholder="Ты смотришь"
         />
 
+        {waiting && roomCode ? (
+          <button
+            type="button"
+            onClick={() => setInviteOpen(true)}
+            className="rounded-lg bg-accent px-3 py-2 text-sm font-semibold text-paper transition hover:bg-deep"
+          >
+            Позвать соперника
+          </button>
+        ) : null}
+
         {over ? (
-          <Result state={state} myColor={myColor} />
+          <Result state={state} myColor={myColor} onRematch={room.rematch} />
         ) : myColor ? (
           <Controls
             claimable={state.claimable !== null}
@@ -119,6 +138,13 @@ export function GameRoom({
           <p className="text-xs text-muted">Связь потеряна, восстанавливаем…</p>
         ) : null}
       </aside>
+
+      <InviteModal
+        open={inviteOpen}
+        onClose={() => setInviteOpen(false)}
+        link={link}
+        hint="Наведи камеру телефона — и сядешь за эту же доску."
+      />
     </main>
   );
 }
@@ -156,7 +182,7 @@ function Seat({
         <div className="flex-1">
           <div className="text-sm font-semibold">{player.nickname}</div>
           <div className="text-xs text-muted">
-            {color === "white" ? "белые" : "чёрные"}
+            {color === "white" ? "белые" : "чёрные"} · {player.rating}
             {player.away ? " · вышел" : ""}
           </div>
         </div>
@@ -259,9 +285,11 @@ function Controls({
 function Result({
   state,
   myColor,
+  onRematch,
 }: {
   state: { result: string | null; reason: string | null };
   myColor: ChessColor | null;
+  onRematch: () => void;
 }) {
   const { result, reason } = state;
   const title =
@@ -276,11 +304,23 @@ function Result({
             : "Победили чёрные";
 
   return (
-    <div className="rounded-xl border border-accent bg-tint px-4 py-3">
-      <div className="text-sm font-semibold text-accent">{title}</div>
-      <div className="text-xs text-muted">
-        {reason ? REASON_TEXT[reason as keyof typeof REASON_TEXT] : ""}
+    <div className="flex flex-col gap-3 rounded-xl border border-accent bg-tint px-4 py-3">
+      <div>
+        <div className="text-sm font-semibold text-accent">{title}</div>
+        <div className="text-xs text-muted">
+          {reason ? REASON_TEXT[reason as keyof typeof REASON_TEXT] : ""}
+        </div>
       </div>
+
+      {myColor ? (
+        <button
+          type="button"
+          onClick={onRematch}
+          className="rounded-lg bg-accent px-3 py-2 text-sm font-semibold text-paper transition hover:bg-deep"
+        >
+          Ещё партия, цветами меняемся
+        </button>
+      ) : null}
     </div>
   );
 }

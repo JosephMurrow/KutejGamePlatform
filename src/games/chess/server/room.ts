@@ -4,9 +4,11 @@ import type {
   GameRoomSnapshot,
   GameRoomState,
 } from "@/lib/games/engine";
+import { randomUUID } from "node:crypto";
 import { MoveClock, type Ticker } from "../engine/clock";
 import type { Outcome } from "../engine/outcome";
 import { ChessGame, type MoveInput } from "../engine/rules";
+import { START_RATING } from "../rooms/matches";
 import { GAME_EVENT, type ChessColor, type ChessPhase } from "../protocol";
 import { MOVE_LIMIT_MS, type ChessRoomSettings } from "../rooms/settings";
 
@@ -48,22 +50,50 @@ interface Absence {
   since: number;
 }
 
+/** Партия для записи: всё, что о ней нужно знать базе. */
+export interface MatchDraft {
+  id: string;
+  roomKey: string;
+  whiteId: string;
+  blackId: string;
+  moves: string[];
+  times: number[];
+  result: "white" | "black" | "draw";
+  reason: string;
+  startedAt: Date;
+}
+
+/** Куда комната отдаёт партию. База — снаружи: движок про неё не знает. */
+export type Persist = (draft: MatchDraft) => void;
+
 export class ChessRoom implements GameRoomState {
-  private readonly game = new ChessGame();
+  private game = new ChessGame();
   private readonly clock: MoveClock;
   /** Сидящие в порядке посадки: первый играет белыми. */
   private readonly seats: string[] = [];
   private absence: Absence | null = null;
   /** Момент начала партии по монотонным часам. */
   private startedAt: number | null = null;
+  /** Он же настенным временем: в базу уезжает именно оно. */
+  private startedWall: Date | null = null;
+  /** Сколько думали над каждым ходом, мс. */
+  private times: number[] = [];
+  /** Идентификатор партии: постоянный, чтобы запись обновлялась, а не плодилась. */
+  private matchId = randomUUID();
 
   constructor(
     private readonly context: GameRoomContext,
     private readonly settings: ChessRoomSettings,
     private readonly now: Ticker = () => performance.now(),
+    /** Запись партии в базу. Без неё комната работает — просто без истории. */
+    private readonly persist?: Persist,
   ) {
     this.clock = new MoveClock(MOVE_LIMIT_MS[settings.timeControl], now);
+    this.moveStartedAt = now();
   }
+
+  /** Начало текущего хода по монотонным часам: из него считается время хода. */
+  private moveStartedAt: number;
 
   join(playerId: string): void {
     // Вернулся тот, кого ждали: место за ним и держали.
@@ -144,6 +174,7 @@ export class ChessRoom implements GameRoomState {
     if (event === GAME_EVENT.resign) return this.resign(actorId);
     if (event === GAME_EVENT.move) return this.makeMove(actorId, payload);
     if (event === GAME_EVENT.claimDraw) return this.claimDraw(actorId);
+    if (event === GAME_EVENT.rematch) return this.rematch(actorId);
 
     return { accepted: false, reason: "Неизвестное действие" };
   }
@@ -179,6 +210,7 @@ export class ChessRoom implements GameRoomState {
         id,
         extra: {
           color: at === 0 ? "white" : "black",
+          rating: START_RATING,
           /** Ушёл, и его ждут: соперник должен это видеть. */
           away: this.absence?.id === id,
         },
@@ -210,7 +242,27 @@ export class ChessRoom implements GameRoomState {
   /** За стол сели двое — партия пошла, часы пущены. */
   private begin(): void {
     this.startedAt = this.now();
+    this.startedWall = new Date();
     this.clock.restart();
+  }
+
+  /** Партия для записи; `null` — записывать ещё нечего. */
+  private draft(): MatchDraft | null {
+    const [white, black] = this.seats;
+    const outcome = this.game.outcome();
+    if (!white || !black || !outcome || !this.startedWall) return null;
+
+    return {
+      id: this.matchId,
+      roomKey: this.context.key,
+      whiteId: white,
+      blackId: black,
+      moves: this.game.history(),
+      times: this.times,
+      result: outcome.result,
+      reason: outcome.reason,
+      startedAt: this.startedWall,
+    };
   }
 
   private makeMove(actorId: string, payload: unknown): ActionOutcome {
@@ -229,11 +281,16 @@ export class ChessRoom implements GameRoomState {
     const input = parseMove(payload);
     if (!input) return { accepted: false, reason: "Непонятный ход" };
 
+    const spentAt = this.now();
     const result = this.game.move(input.move, input.ply);
     if (!result.ok) {
       return { accepted: false, reason: REJECTION_TEXT[result.reason] };
     }
 
+    // Сколько думали над этим ходом. Считается по монотонным часам, как и всё
+    // остальное время партии.
+    this.times.push(Math.round(spentAt - this.moveStartedAt));
+    this.moveStartedAt = spentAt;
     this.clock.restart();
     this.finish(result.outcome ?? this.capIfTooLong());
     // Без этого дедлайн сдвинулся бы, а будильник звонил бы по старому
@@ -252,6 +309,30 @@ export class ChessRoom implements GameRoomState {
     }
 
     this.finish(this.game.resign(color === "white" ? "w" : "b"));
+
+    return { accepted: true };
+  }
+
+  /**
+   * Ещё партия в той же комнате.
+   *
+   * Цвета меняются местами: играть подряд одним цветом нечестно, а менять их —
+   * то, чего от реванша и ждут (src/games/chess/docs/BACKLOG.md G).
+   */
+  private rematch(actorId: string): ActionOutcome {
+    if (!this.colorOf(actorId)) {
+      return { accepted: false, reason: "Ты не за доской" };
+    }
+    if (!this.game.isOver()) {
+      return { accepted: false, reason: "Партия ещё идёт" };
+    }
+
+    this.seats.reverse();
+    this.game = new ChessGame();
+    this.times = [];
+    this.matchId = randomUUID();
+    this.begin();
+    this.context.changed();
 
     return { accepted: true };
   }
@@ -285,12 +366,24 @@ export class ChessRoom implements GameRoomState {
     return long ? this.game.capOut() : null;
   }
 
-  /** Партия кончилась: погасить часы и рассказать платформе. */
+  /**
+   * Партия кончилась: погасить часы, записать её и рассказать платформе.
+   *
+   * Запись именно здесь, а не по таймеру: конец партии — единственный момент,
+   * когда история обязана оказаться в базе (src/games/chess/docs/PLAN.md,
+   * этап 5).
+   */
   private finish(outcome: Outcome | null): void {
     if (!outcome) return;
 
     this.clock.stop();
     this.absence = null;
+
+    const draft = this.draft();
+    // Партия без единого хода не сохраняется: её как будто и не было
+    // (src/games/chess/docs/BACKLOG.md G).
+    if (draft && draft.moves.length > 0) this.persist?.(draft);
+
     this.context.emitted([{ type: "chess_finished", ...outcome }]);
     this.context.changed();
   }

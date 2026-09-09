@@ -158,6 +158,9 @@ model User {
   hostedRooms  PrivateRoom[] @relation("HostedRooms")
   bets         RoundBet[]
   scores       Score[]
+  /// Партии в шахматы. Колонок это в `users` не добавляет — только связь.
+  chessWhite   ChessMatch[]  @relation("ChessWhite")
+  chessBlack   ChessMatch[]  @relation("ChessBlack")
 
   @@index([guestRoomId])
   @@map("users")

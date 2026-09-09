@@ -36,6 +36,8 @@ export const GAME_EVENT = {
    * (src/games/chess/docs/SPEC.md).
    */
   claimDraw: "game:draw",
+  /** Ещё партия в той же комнате — цвета меняются местами. */
+  rematch: "game:rematch",
 } as const;
 
 /** Цвет за доской. У зрителя цвета нет. */
@@ -55,6 +57,8 @@ export interface ChessPlayerPayload extends PlayerPayload {
   color: ChessColor;
   /** Ушёл, и его ждут: соперник должен это видеть. */
   away: boolean;
+  /** Рейтинг рядом с ником. Настоящий счёт придёт своим этапом. */
+  rating: number;
 }
 
 export interface ChessStatePayload extends RoomStatePayload<ChessPlayerPayload> {
