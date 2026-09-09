@@ -220,32 +220,48 @@ describe("повторения и правило ходов", () => {
     }
   }
 
-  it("троекратное повторение кончает партию", () => {
+  it("троекратное повторение даёт право требовать, но партию не кончает", () => {
     const game = new ChessGame();
     shuffle(game, 2);
 
-    assert.deepEqual(game.outcome(), { result: "draw", reason: "threefold" });
+    assert.equal(game.isOver(), false, "по правилам партия идёт дальше");
+    assert.equal(game.claimableDraw(), "threefold");
   });
 
-  it("троекратное срабатывает раньше пятикратного, и это не случайность", () => {
+  it("заявленная ничья по повторению кончает партию", () => {
     const game = new ChessGame();
-    // Пятикратное повторение и семьдесят пять ходов — автоматическая ничья без
-    // заявки. Но троекратное и пятьдесят мы применяем автоматически, как это
-    // делают площадки, и партия кончается на них — до пяти и семидесяти пяти
-    // дело не доходит никогда. Проверка тут не ради поведения, а ради памяти:
-    // сделаем троекратное заявительным — этот тест сломается первым
-    // (src/games/chess/docs/BACKLOG.md B4, src/games/chess/docs/SPEC.md).
-    for (let round = 0; round < 4; round++) {
-      if (game.isOver()) break;
-      play(game, [
-        ["g1", "f3"],
-        ["g8", "f6"],
-        ["f3", "g1"],
-        ["f6", "g8"],
-      ]);
-    }
+    shuffle(game, 2);
 
-    assert.equal(game.outcome()?.reason, "threefold");
+    assert.deepEqual(game.claimDraw(), {
+      result: "draw",
+      reason: "threefold",
+    });
+  });
+
+  it("без основания заявление ничего не делает", () => {
+    const game = new ChessGame();
+    game.move({ from: "e2", to: "e4" }, 0);
+
+    assert.equal(game.claimableDraw(), null);
+    assert.equal(game.claimDraw(), null);
+    assert.equal(game.isOver(), false);
+  });
+
+  it("право пропадает, как только позиция изменилась", () => {
+    const game = new ChessGame();
+    shuffle(game, 2);
+    assert.equal(game.claimableDraw(), "threefold");
+
+    // Ход пешкой расплетает повторение: этой позиции ещё не было.
+    game.move({ from: "e2", to: "e4" }, game.ply());
+    assert.equal(game.claimableDraw(), null);
+  });
+
+  it("пятикратное повторение кончает партию само, без всякой заявки", () => {
+    const game = new ChessGame();
+    shuffle(game, 4);
+
+    assert.deepEqual(game.outcome(), { result: "draw", reason: "fivefold" });
   });
 
   it("считает повторения так же, как библиотека", () => {
@@ -281,11 +297,13 @@ describe("повторения и правило ходов", () => {
     assert.equal(game.isOver(), false);
   });
 
-  it("пятидесяти ходов хватает на ничью", () => {
+  it("пятьдесят ходов дают право требовать, но не кончают партию", () => {
     const game = new ChessGame("4k3/8/8/8/8/8/8/4K2R w - - 99 60");
     game.move({ from: "h1", to: "h2" }, 0);
 
-    assert.deepEqual(game.outcome(), {
+    assert.equal(game.isOver(), false);
+    assert.equal(game.claimableDraw(), "fiftyMoves");
+    assert.deepEqual(game.claimDraw(), {
       result: "draw",
       reason: "fiftyMoves",
     });
@@ -295,6 +313,19 @@ describe("повторения и правило ходов", () => {
     const game = new ChessGame("4k3/8/8/8/8/8/8/4K2R w - - 149 90");
     game.move({ from: "h1", to: "h2" }, 0);
 
+    assert.deepEqual(game.outcome(), {
+      result: "draw",
+      reason: "seventyFiveMoves",
+    });
+  });
+
+  it("семьдесят пять ходов сильнее незаявленного права на пятьдесят", () => {
+    // Право на ничью по пятидесяти ходам к этому моменту давно есть, но никто
+    // им не воспользовался — партию кончает автоматическое правило.
+    const game = new ChessGame("4k3/8/8/8/8/8/8/4K2R w - - 149 90");
+    assert.equal(game.claimableDraw(), "fiftyMoves");
+
+    game.move({ from: "h1", to: "h2" }, 0);
     assert.deepEqual(game.outcome(), {
       result: "draw",
       reason: "seventyFiveMoves",

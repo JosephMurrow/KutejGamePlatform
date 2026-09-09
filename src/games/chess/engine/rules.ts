@@ -174,6 +174,39 @@ export class ChessGame {
     return this.finish("draw", "agreement");
   }
 
+  /**
+   * Есть ли прямо сейчас основание требовать ничью.
+   *
+   * По правилам троекратное повторение и пятьдесят ходов — это **право
+   * заявить**, а не автоматический конец: партия идёт, пока никто не заявил.
+   * Автоматом кончаются только пятикратное и семьдесят пять
+   * (src/games/chess/docs/SPEC.md).
+   *
+   * Основание считается от текущей позиции и пропадает, как только она
+   * изменилась: повторение расплетается ходом пешки или взятием.
+   */
+  claimableDraw(): "threefold" | "fiftyMoves" | null {
+    if (this.ended) return null;
+    if ((this.seen.get(this.chess.hash()) ?? 0) >= 3) return "threefold";
+    if (this.halfmoveClock() >= 100) return "fiftyMoves";
+
+    return null;
+  }
+
+  /**
+   * Игрок требует ничью. Без основания заявление ничего не делает.
+   *
+   * Заявить может любой из двоих, а не только тот, чья очередь хода: так это
+   * работает на площадках, и спорить с привычкой дороже, чем следовать букве
+   * правила про очередь.
+   */
+  claimDraw(): Outcome | null {
+    const ground = this.claimableDraw();
+    if (!ground) return null;
+
+    return this.finish("draw", ground);
+  }
+
   /** Ушёл и не вернулся: партия достаётся сопернику. */
   abandon(color: Color): Outcome | null {
     return this.finish(color === "w" ? "black" : "white", "abandoned");
@@ -237,14 +270,15 @@ export class ChessGame {
       return this.finish("draw", "insufficient");
     }
 
-    const repeats = this.seen.get(this.chess.hash()) ?? 0;
-    if (repeats >= 5) return this.finish("draw", "fivefold");
-
-    const halfmoves = this.halfmoveClock();
-    if (halfmoves >= 150) return this.finish("draw", "seventyFiveMoves");
-
-    if (repeats >= 3) return this.finish("draw", "threefold");
-    if (halfmoves >= 100) return this.finish("draw", "fiftyMoves");
+    // Дальше — только то, что кончает партию само, без всякой заявки.
+    // Троекратное и пятьдесят ходов дают право требовать ничью, и его
+    // реализует `claimDraw`.
+    if ((this.seen.get(this.chess.hash()) ?? 0) >= 5) {
+      return this.finish("draw", "fivefold");
+    }
+    if (this.halfmoveClock() >= 150) {
+      return this.finish("draw", "seventyFiveMoves");
+    }
 
     return null;
   }
