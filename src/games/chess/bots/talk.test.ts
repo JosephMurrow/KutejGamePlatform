@@ -8,7 +8,7 @@ const first = () => 0;
 
 describe("голос бота", () => {
   it("молчит три полухода после реплики", () => {
-    const talker = new Talker("pedant", first);
+    const talker = new Talker(LINES.pedant, first);
 
     assert.ok(talker.say("botCapture", 10), "первая реплика проходит");
     assert.equal(talker.say("botChecks", 11), null, "следом — молчание");
@@ -20,18 +20,18 @@ describe("голос бота", () => {
   });
 
   it("на мате говорит в обход паузы", () => {
-    const talker = new Talker("brute", first);
+    const talker = new Talker(LINES.brute, first);
 
     assert.ok(talker.say("botCapture", 10));
     assert.ok(
       talker.say("botWins", 11),
       "молчать на мате нельзя ни при какой паузе",
     );
-    assert.ok(new Talker("brute", first).say("botLoses", 0));
+    assert.ok(new Talker(LINES.brute, first).say("botLoses", 0));
   });
 
   it("не повторяет реплику дважды за партию", () => {
-    const talker = new Talker("granddad", first);
+    const talker = new Talker(LINES.granddad, first);
     const said = new Set<string>();
 
     // Столько раз, сколько реплик в наборе: на каждый раз должна найтись своя.
@@ -44,7 +44,7 @@ describe("голос бота", () => {
   });
 
   it("когда набор кончился, повторяется, а не немеет", () => {
-    const talker = new Talker("champion", first);
+    const talker = new Talker(LINES.champion, first);
     const pool = LINES.champion.stalemate.length;
 
     for (let at = 0; at <= pool; at += 1) {
@@ -56,7 +56,7 @@ describe("голос бота", () => {
   });
 
   it("реванш стирает память и снимает паузу", () => {
-    const talker = new Talker("pedant", first);
+    const talker = new Talker(LINES.pedant, first);
     const before = talker.say("greeting", 0);
 
     talker.reset();
@@ -71,7 +71,7 @@ describe("голос бота", () => {
       "granddad",
       "champion",
     ] as const) {
-      const line = new Talker(character, first).say("greeting", 0);
+      const line = new Talker(LINES[character], first).say("greeting", 0);
       assert.ok(
         line && LINES[character].greeting.includes(line),
         `${character}: реплика не из своего набора`,

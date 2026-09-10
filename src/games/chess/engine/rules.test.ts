@@ -395,3 +395,65 @@ describe("вид хода", () => {
     assert.equal(game.shapeOf("zzzz"), null);
   });
 });
+
+describe("ход назад", () => {
+  it("возвращает позицию и очередь", () => {
+    const game = new ChessGame();
+    game.move({ from: "e2", to: "e4" }, 0);
+    game.move({ from: "e7", to: "e5" }, 1);
+
+    assert.equal(game.undo(), true);
+
+    assert.equal(game.ply(), 1);
+    assert.equal(game.turn(), "b", "ходить снова чёрным");
+    assert.deepEqual(game.lastMove(), { from: "e2", to: "e4" });
+    assert.deepEqual(game.history(), ["e4"]);
+  });
+
+  it("забывает позицию, которой больше нет", () => {
+    // Кони туда-сюда: после третьего повторения появляется право на ничью.
+    const game = new ChessGame();
+    for (const [from, to] of [
+      ["g1", "f3"],
+      ["g8", "f6"],
+      ["f3", "g1"],
+      ["f6", "g8"],
+      ["g1", "f3"],
+      ["g8", "f6"],
+      ["f3", "g1"],
+      ["f6", "g8"],
+    ] as const) {
+      game.move({ from, to }, game.ply());
+    }
+    assert.equal(game.claimableDraw(), "threefold");
+
+    game.undo();
+
+    assert.equal(
+      game.claimableDraw(),
+      null,
+      "снятая позиция не должна считаться повторённой",
+    );
+  });
+
+  it("до первого хода отматывать нечего", () => {
+    assert.equal(new ChessGame().undo(), false);
+  });
+
+  it("кончившуюся партию не воскрешает", () => {
+    // Дурацкий мат: 1. f3 e5 2. g4 Qh4#
+    const game = new ChessGame();
+    for (const [from, to] of [
+      ["f2", "f3"],
+      ["e7", "e5"],
+      ["g2", "g4"],
+      ["d8", "h4"],
+    ] as const) {
+      game.move({ from, to }, game.ply());
+    }
+    assert.equal(game.isOver(), true);
+
+    assert.equal(game.undo(), false, "из партии выход только один");
+    assert.equal(game.isOver(), true);
+  });
+});

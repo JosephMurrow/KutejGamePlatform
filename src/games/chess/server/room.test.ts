@@ -5,7 +5,7 @@ import type { ChessRoomSettings, TimeControl } from "../rooms/settings";
 import type { Moment } from "../bots/moments";
 import { LEVELS } from "../bots/levels";
 import { GAME_EVENT } from "../protocol";
-import { ChessRoom } from "./room";
+import { ChessRoom, type Cheats } from "./room";
 
 /**
  * Комната шахмат без сети: платформу изображает поддельный контекст, время —
@@ -370,7 +370,11 @@ describe("сдача и конец", () => {
  * списку. Проверяется не игра бота, а то, что комната вовремя рассказывает ему,
  * что случилось: сорок реплик на момент бесполезны, если момент не наступает.
  */
-function withBot(timeControl: TimeControl = "SEC_30", moves: string[] = []) {
+function withBot(
+  timeControl: TimeControl = "SEC_30",
+  moves: string[] = [],
+  cheats?: Partial<Cheats>,
+) {
   let at = 1000;
   const heard: { moment: Moment; ply: number }[] = [];
   let restarts = 0;
@@ -407,6 +411,17 @@ function withBot(timeControl: TimeControl = "SEC_30", moves: string[] = []) {
     restart: () => {
       restarts += 1;
     },
+    cheats: cheats
+      ? {
+          keepClock: () => false,
+          refuseDraw: () => false,
+          takeback: () => false,
+          redo: () => false,
+          holding: () => {},
+          restart: () => {},
+          ...cheats,
+        }
+      : undefined,
   });
 
   return {
@@ -681,5 +696,130 @@ describe("что показывают часы", () => {
     // Бот подаёт голос на половине лимита. Если бы это попадало в снимок,
     // игрок увидел бы пятнадцать секунд вместо тридцати.
     assert.ok(shown > 20_000, `на часах ${Math.round(shown / 1000)} с`);
+  });
+});
+
+/**
+ * Скрытый пятый уровень жульничает, и комната ему это позволяет.
+ *
+ * Проверяется не сам приём — он в `bots/magnus.test.ts`, — а то, что комната
+ * спрашивает разрешения и слушается ответа (src/games/chess/docs/BACKLOG.md D3).
+ */
+describe("комната и жульничество", () => {
+  it("флаг Магнуса не падает: часы просто заводятся заново", () => {
+    const held: number[] = [];
+    const table = withBot("SEC_30", [], {
+      keepClock: (ply) => {
+        held.push(ply);
+        return true;
+      },
+    });
+    table.room.join("human");
+
+    // Человек сходил — очередь бота, и вот у бота время вышло.
+    table.room.act(GAME_EVENT.move, "human", { from: "e2", to: "e4", ply: 0 });
+    table.pass(31_000);
+    table.room.tick();
+
+    assert.deepEqual(held, [1], "комната спросила именно у него");
+    assert.equal(
+      (
+        table.room.snapshot({ kind: "player", id: "human" }).extra as {
+          phase: string;
+        }
+      ).phase,
+      "playing",
+      "партия продолжается, флага нет",
+    );
+  });
+
+  it("а у человека флаг падает как у всех", () => {
+    const table = withBot("SEC_30", [], { keepClock: () => true });
+    table.room.join("human");
+
+    // Ход человека, и время вышло у него.
+    table.pass(31_000);
+    table.room.tick();
+
+    const extra = table.room.snapshot({ kind: "player", id: "human" })
+      .extra as {
+      phase: string;
+      reason: string | null;
+    };
+    assert.equal(extra.phase, "over");
+    assert.equal(extra.reason, "flag");
+  });
+
+  it("ничью по повторению он не признаёт", () => {
+    const table = withBot("SEC_30", [], { refuseDraw: () => true });
+    table.room.join("human");
+
+    const answer = table.room.act(GAME_EVENT.claimDraw, "human", null);
+
+    assert.equal(answer.accepted, false);
+    assert.match(answer.reason ?? "", /не признаёт/);
+  });
+
+  it("ход человека откатывается, и ходить снова ему", () => {
+    const table = withBot("SEC_30", [], { takeback: () => true });
+    table.room.join("human");
+
+    table.room.act(GAME_EVENT.move, "human", { from: "e2", to: "e4", ply: 0 });
+
+    const extra = table.room.snapshot({ kind: "player", id: "human" })
+      .extra as {
+      moves: string[];
+      turn: string;
+    };
+    assert.deepEqual(extra.moves, [], "хода как не бывало");
+    assert.equal(extra.turn, "white", "и ходить опять человеку");
+  });
+
+  it("«взялся за фигуру» доходит до него — и никуда больше", () => {
+    const held: string[] = [];
+    const table = withBot("SEC_30", [], {
+      holding: (piece) => held.push(piece),
+    });
+    table.room.join("human");
+
+    const before = table.changes.length;
+    const answer = table.room.act(GAME_EVENT.holding, "human", {
+      square: "g1",
+    });
+
+    assert.equal(answer.accepted, true);
+    assert.deepEqual(held, ["n"], "конь на g1");
+    assert.equal(
+      table.changes.length,
+      before,
+      "ни снимка, ни рассылки: секрет уехал бы всему миру",
+    );
+  });
+
+  it("чужую фигуру в руке не держат", () => {
+    const held: string[] = [];
+    const table = withBot("SEC_30", [], {
+      holding: (piece) => held.push(piece),
+    });
+    table.room.join("human");
+
+    // Человек играет белыми; g8 — чёрный конь.
+    table.room.act(GAME_EVENT.holding, "human", { square: "g8" });
+    table.room.act(GAME_EVENT.holding, "human", { square: "e5" });
+
+    assert.deepEqual(held, [], "подсказывать тут нечего");
+  });
+
+  it("без Магнуса событие о фигуре просто пропадает", () => {
+    const table = withBot("SEC_30");
+    table.room.join("human");
+
+    const before = table.changes.length;
+    const answer = table.room.act(GAME_EVENT.holding, "human", {
+      square: "g1",
+    });
+
+    assert.equal(answer.accepted, true, "клиент не должен получать отказ");
+    assert.equal(table.changes.length, before);
   });
 });

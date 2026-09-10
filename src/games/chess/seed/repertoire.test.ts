@@ -56,6 +56,10 @@ describe("репертуар ботов", () => {
         .map((row) => row.level),
     );
 
-    assert.equal(levels.size, 4, "кто-то из уровней не знает первого хода");
+    assert.equal(
+      levels.size,
+      Object.keys(REPERTOIRE).length,
+      "кто-то из уровней не знает первого хода",
+    );
   });
 });

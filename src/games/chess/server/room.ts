@@ -139,6 +139,36 @@ export interface Shown {
  */
 export type Ratings = (userId: string) => Promise<Shown | null>;
 
+/**
+ * Что бот позволяет себе сверх правил.
+ *
+ * Есть только у Магнуса и только в этом качестве: приёмы отобраны по одному
+ * признаку — каждый обязан быть заметен игроку, иначе это просто сильный бот
+ * (src/games/chess/docs/BACKLOG.md D3).
+ *
+ * Решает и объясняется бот сам: комната лишь спрашивает, будет ли он тут
+ * жульничать. `true` означает «да, и я уже сказал об этом вслух».
+ */
+export interface Cheats {
+  /** Флаг у него не падает: часы просто заводятся заново. */
+  keepClock(ply: number): boolean;
+  /** Ничью по повторению и пятидесяти ходам не признаёт. */
+  refuseDraw(ply: number): boolean;
+  /** Откатить ход соперника; `false` — этот приём за партию уже был. */
+  takeback(ply: number): boolean;
+  /** Переиграть собственный ход. */
+  redo(ply: number): boolean;
+  /**
+   * Игрок взялся за фигуру.
+   *
+   * ⚠️ Дальше бота это не уходит: ни в снимок, ни в событие, ни в чужой чат.
+   * Ровно то, что режим стримера прячет от всего мира (F1).
+   */
+  holding(piece: string, ply: number): void;
+  /** Новая партия: приёмы снова доступны. */
+  restart(): void;
+}
+
 /** Бот за доской: кто он, чем думает и как говорит. */
 export interface BotSeat {
   id: string;
@@ -154,6 +184,8 @@ export interface BotSeat {
   speak: (moment: Moment, ply: number) => void;
   /** Реванш: боту забыть сказанное и увиденное за прошлую партию. */
   restart: () => void;
+  /** Чем он жульничает. Есть только у скрытого пятого уровня. */
+  cheats?: Cheats;
 }
 
 export class ChessRoom implements GameRoomState {
@@ -320,6 +352,15 @@ export class ChessRoom implements GameRoomState {
     }
 
     if (this.clock.expired()) {
+      // У скрытого пятого уровня флаг не падает. Приём заметный и нарочный:
+      // часы просто заводятся заново, а он объясняется вслух.
+      const his = this.bot && this.colorOf(this.bot.id) === this.turnColor();
+      if (his && this.bot?.cheats?.keepClock(this.game.ply())) {
+        this.clock.restart();
+        this.context.changed();
+        return;
+      }
+
       this.finish(this.game.flag(this.game.turn()));
       return;
     }
@@ -339,6 +380,7 @@ export class ChessRoom implements GameRoomState {
     if (event === GAME_EVENT.move) return this.makeMove(actorId, payload);
     if (event === GAME_EVENT.claimDraw) return this.claimDraw(actorId);
     if (event === GAME_EVENT.rematch) return this.rematch(actorId);
+    if (event === GAME_EVENT.holding) return this.holding(actorId, payload);
 
     return { accepted: false, reason: "Неизвестное действие" };
   }
@@ -419,6 +461,8 @@ export class ChessRoom implements GameRoomState {
       timeControl: this.settings.timeControl,
       streamerMode: this.settings.streamerMode,
       viewerDelay: this.settings.viewerDelay,
+      /** Соперник жульничает — и клиенту это надо знать, чтобы ему подыграть. */
+      magnus: this.bot?.cheats !== undefined,
     };
   }
 
@@ -538,6 +582,18 @@ export class ChessRoom implements GameRoomState {
     this.nudged = 0;
     this.clock.restart();
     this.finish(result.outcome ?? this.capIfTooLong());
+
+    // Один раз за партию скрытый уровень откатывает чужой ход. Отвечать на
+    // него после этого нечего: ходить снова человеку.
+    if (!this.game.isOver() && this.bot?.cheats?.takeback(this.game.ply())) {
+      this.game.undo();
+      this.clock.restart();
+      this.remember();
+      this.context.changed();
+
+      return { accepted: true };
+    }
+
     this.remember();
     this.tell(result.move, false);
     void this.botTurn();
@@ -545,6 +601,40 @@ export class ChessRoom implements GameRoomState {
     // времени. Предупреждение висит прямо в engine.ts, и платитутка на этих
     // граблях уже стояла.
     this.context.changed();
+
+    return { accepted: true };
+  }
+
+  /**
+   * Игрок взялся за фигуру.
+   *
+   * ⚠️ **Никуда не рассылается.** Ни снимка, ни события, ни `changed` — только
+   * шёпот в ухо тому, кто сидит напротив, и только если это Магнус. Стоит
+   * здесь появиться `changed`, и секрет станет общим
+   * (src/games/chess/docs/BACKLOG.md D3, F1).
+   */
+  private holding(actorId: string, payload: unknown): ActionOutcome {
+    const cheats = this.bot?.cheats;
+    if (!cheats || !this.colorOf(actorId) || this.game.isOver()) {
+      return { accepted: true };
+    }
+
+    const square =
+      typeof payload === "object" && payload !== null
+        ? (payload as { square?: unknown }).square
+        : null;
+    if (typeof square !== "string") return { accepted: true };
+
+    const piece = this.game.pieceAt(square);
+    // Чужую фигуру в руке не держат: подсказывать тут нечего.
+    if (
+      !piece ||
+      piece.color !== (this.colorOf(actorId) === "white" ? "w" : "b")
+    ) {
+      return { accepted: true };
+    }
+
+    cheats.holding(piece.type, this.game.ply());
 
     return { accepted: true };
   }
@@ -581,6 +671,7 @@ export class ChessRoom implements GameRoomState {
     this.matchId = randomUUID();
     this.begin();
     this.bot?.restart();
+    this.bot?.cheats?.restart();
     this.bot?.speak("rematch", 0);
     this.context.changed();
     // Цвета поменялись: если бот теперь белый, ходить ему.
@@ -598,6 +689,9 @@ export class ChessRoom implements GameRoomState {
   private claimDraw(actorId: string): ActionOutcome {
     if (!this.colorOf(actorId)) {
       return { accepted: false, reason: "Ты не за доской" };
+    }
+    if (this.bot?.cheats?.refuseDraw(this.game.ply())) {
+      return { accepted: false, reason: "Соперник ничью не признаёт" };
     }
 
     const outcome = this.game.claimDraw();
@@ -623,39 +717,57 @@ export class ChessRoom implements GameRoomState {
 
     this.thinking = true;
     try {
-      const answer = await bot.think(
-        {
-          fen: this.game.fen(),
-          position: this.game.position(),
-          ply: this.game.ply(),
-          white: this.colorOf(bot.id) === "white",
-        },
-        bot.level,
-      );
-      if (!answer || this.game.isOver()) return;
+      // Больше одного раза передумывать не даём: иначе бот способен ходить
+      // взад-вперёд, пока человеку не надоест.
+      for (let attempt = 0; attempt < 2; attempt += 1) {
+        const answer = await bot.think(
+          {
+            fen: this.game.fen(),
+            position: this.game.position(),
+            ply: this.game.ply(),
+            white: this.colorOf(bot.id) === "white",
+          },
+          bot.level,
+        );
+        if (!answer || this.game.isOver()) return;
 
-      const move = {
-        from: answer.slice(0, 2),
-        to: answer.slice(2, 4),
-        promotion: answer.slice(4, 5) as "q" | "r" | "b" | "n" | "",
-      };
-      const result = this.game.move(
-        move.promotion
-          ? { from: move.from, to: move.to, promotion: move.promotion }
-          : { from: move.from, to: move.to },
-        this.game.ply(),
-      );
-      if (!result.ok) return;
+        const move = {
+          from: answer.slice(0, 2),
+          to: answer.slice(2, 4),
+          promotion: answer.slice(4, 5) as "q" | "r" | "b" | "n" | "",
+        };
+        const result = this.game.move(
+          move.promotion
+            ? { from: move.from, to: move.to, promotion: move.promotion }
+            : { from: move.from, to: move.to },
+          this.game.ply(),
+        );
+        if (!result.ok) return;
 
-      const spentAt = this.now();
-      this.times.push(Math.round(spentAt - this.moveStartedAt));
-      this.moveStartedAt = spentAt;
-      this.nudged = 0;
-      this.clock.restart();
-      this.finish(result.outcome ?? this.capIfTooLong());
-      this.remember();
-      this.tell(result.move, true);
-      this.context.changed();
+        // Скрытый уровень иногда передумывает и переигрывает собственный ход.
+        // Приём наглый и оттого заметный.
+        if (
+          attempt === 0 &&
+          !this.game.isOver() &&
+          bot.cheats?.redo(this.game.ply())
+        ) {
+          this.game.undo();
+          this.context.changed();
+          continue;
+        }
+
+        const spentAt = this.now();
+        this.times.push(Math.round(spentAt - this.moveStartedAt));
+        this.moveStartedAt = spentAt;
+        this.nudged = 0;
+        this.clock.restart();
+        this.finish(result.outcome ?? this.capIfTooLong());
+        this.remember();
+        this.tell(result.move, true);
+        this.context.changed();
+
+        return;
+      }
     } finally {
       this.thinking = false;
     }

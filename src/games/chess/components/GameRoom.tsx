@@ -92,6 +92,7 @@ export function GameRoom({
           ply={state.moves.length}
           flipped={orientation}
           streamer={state.streamerMode}
+          onHold={state.magnus ? room.hold : undefined}
           onMove={room.move}
         />
       </div>
@@ -158,6 +159,7 @@ export function GameRoom({
         <Notes
           streamer={state.streamerMode}
           delay={state.viewerDelay}
+          magnus={state.magnus && myColor !== null}
           watching={myColor === null}
         />
 
@@ -196,14 +198,20 @@ export function GameRoom({
 function Notes({
   streamer,
   delay,
+  magnus,
   watching,
 }: {
   streamer: boolean;
   delay: keyof typeof VIEWER_DELAY_LABEL;
+  /** Соперник видит, за что ты берёшься. Умалчивать об этом было бы нечестно. */
+  magnus: boolean;
   watching: boolean;
 }) {
   const lines: string[] = [];
 
+  if (magnus) {
+    lines.push("Соперник видит, за какую фигуру ты берёшься. Он предупреждён.");
+  }
   if (streamer) lines.push("Режим стримера: подсказки и подсветка выключены.");
   if (delay !== "NONE") {
     lines.push(

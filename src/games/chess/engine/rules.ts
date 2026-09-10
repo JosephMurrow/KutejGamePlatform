@@ -125,6 +125,13 @@ export class ChessGame {
     return this.chess.hash();
   }
 
+  /** Какая фигура стоит на клетке; `null` — пусто или клетки такой нет. */
+  pieceAt(square: string): { type: string; color: Color } | null {
+    const piece = this.chess.get(square as Square);
+
+    return piece ? { type: piece.type, color: piece.color } : null;
+  }
+
   /** Откуда и куда пошли последний раз; `null` — ходов ещё не было. */
   lastMove(): { from: string; to: string } | null {
     return this.last;
@@ -210,6 +217,30 @@ export class ChessGame {
       promotion: found.promotion !== undefined,
       castle: found.san.startsWith("O-O"),
     };
+  }
+
+  /**
+   * Взять последний ход назад.
+   *
+   * Правилами такого нет: это жульничество, и в игре им пользуется ровно один
+   * — скрытый пятый уровень (src/games/chess/docs/BACKLOG.md D3). Кончившуюся
+   * партию не воскрешает: из неё выход только один, и он в `finish`.
+   */
+  undo(): boolean {
+    if (this.ended) return false;
+
+    const forget = this.chess.hash();
+    if (!this.chess.undo()) return false;
+
+    // Позиция, которой больше нет, не должна считаться повторённой.
+    const seen = (this.seen.get(forget) ?? 1) - 1;
+    if (seen <= 0) this.seen.delete(forget);
+    else this.seen.set(forget, seen);
+
+    const before = this.chess.history({ verbose: true }).at(-1);
+    this.last = before ? { from: before.from, to: before.to } : null;
+
+    return true;
   }
 
   /** Сдался. */

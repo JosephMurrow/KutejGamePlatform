@@ -15,8 +15,13 @@ export type TimeControl = "SEC_10" | "SEC_30" | "MIN_1" | "MIN_3" | "UNLIMITED";
 /** Кто по ту сторону доски. */
 export type OpponentKind = "HUMAN" | "BOT";
 
-/** Уровень бота, как он лежит в базе. */
-export type BotLevelDb = "EASY" | "NORMAL" | "HARD" | "EXPERT";
+/**
+ * Уровень бота, как он лежит в базе.
+ *
+ * `MAGNUS` скрытый: в форме он появляется только у того, кто его открыл
+ * (src/games/chess/docs/BACKLOG.md D3).
+ */
+export type BotLevelDb = "EASY" | "NORMAL" | "HARD" | "EXPERT" | "MAGNUS";
 
 /**
  * На сколько зрителям показывают партию позже игроков.
@@ -88,7 +93,7 @@ export function defaultRoomSettings(): ChessRoomSettings {
 
 const TIME_CONTROLS = Object.keys(MOVE_LIMIT_MS) as TimeControl[];
 const OPPONENTS: OpponentKind[] = ["HUMAN", "BOT"];
-const BOT_LEVELS: BotLevelDb[] = ["EASY", "NORMAL", "HARD", "EXPERT"];
+const BOT_LEVELS: BotLevelDb[] = ["EASY", "NORMAL", "HARD", "EXPERT", "MAGNUS"];
 const VIEWER_DELAYS = Object.keys(VIEWER_DELAY_MS) as ViewerDelay[];
 
 /**

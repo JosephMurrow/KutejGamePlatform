@@ -11,6 +11,8 @@ import {
   saveRoomSettings,
 } from "../rooms/store";
 import { dropRoomMatches } from "../rooms/matches";
+import { magnusUnlocked } from "../rating/read";
+import { prisma } from "@/lib/prisma";
 import { createChessServer } from ".";
 
 /**
@@ -36,16 +38,18 @@ export const CHESS_SERVER: GameServerManifest = {
   },
 
   async saveRoomSettings(roomId: string, form: FormData): Promise<void> {
-    await saveRoomSettings(
-      roomId,
-      normalizeRoomSettings({
-        timeControl: form.get("timeControl"),
-        opponent: form.get("opponent"),
-        streamerMode: form.get("streamerMode"),
-        botLevel: form.get("botLevel"),
-        viewerDelay: form.get("viewerDelay"),
-      }),
-    );
+    const settings = normalizeRoomSettings({
+      timeControl: form.get("timeControl"),
+      opponent: form.get("opponent"),
+      streamerMode: form.get("streamerMode"),
+      botLevel: form.get("botLevel"),
+      viewerDelay: form.get("viewerDelay"),
+    });
+
+    await saveRoomSettings(roomId, {
+      ...settings,
+      botLevel: await allowedLevel(roomId, settings.botLevel),
+    });
   },
 
   actions: Object.values(GAME_EVENT),
@@ -58,3 +62,26 @@ export const CHESS_SERVER: GameServerManifest = {
 
   createServer: createChessServer,
 };
+
+/**
+ * Уровень, который этому хозяину действительно можно.
+ *
+ * Форма скрывает Магнуса от тех, кто его не открыл, но форма приходит от
+ * клиента, а ему верить нельзя ни в одном поле. Неоткрытый Магнус тихо
+ * превращается в эксперта — того, кого и надо было обыграть
+ * (src/games/chess/docs/BACKLOG.md D3).
+ */
+async function allowedLevel(
+  roomId: string,
+  wanted: ChessRoomSettings["botLevel"],
+): Promise<ChessRoomSettings["botLevel"]> {
+  if (wanted !== "MAGNUS") return wanted;
+
+  const room = await prisma.privateRoom.findUnique({
+    where: { id: roomId },
+    select: { hostId: true },
+  });
+  if (!room) return "EXPERT";
+
+  return (await magnusUnlocked(room.hostId)) ? "MAGNUS" : "EXPERT";
+}

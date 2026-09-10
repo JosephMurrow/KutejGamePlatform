@@ -160,6 +160,7 @@ export class ChessLobby implements GameRoomState {
         reason: null,
         timeControl: LOBBY_SETTINGS.timeControl,
         streamerMode: false,
+        magnus: false,
         rating: START_RATING,
         /** Стоит ли этот человек в очереди — от этого зависит, что ему рисовать. */
         queued: viewer.kind === "player" && this.queue.waits(viewer.id),

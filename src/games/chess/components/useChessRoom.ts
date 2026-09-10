@@ -46,6 +46,14 @@ export interface ChessRoomHandle {
   kicked: string | null;
   /** Сделать ход. `false` — сервер отказал, доску надо вернуть как было. */
   move: (request: MoveRequest) => Promise<boolean>;
+  /**
+   * Сказать серверу, за какую фигуру игрок взялся.
+   *
+   * ⚠️ Отправляется **только** в партии с Магнусом. Никому, кроме него, это не
+   * уходит: ровно то, что режим стримера прячет от всего мира
+   * (src/games/chess/docs/BACKLOG.md D3, F1).
+   */
+  hold: (square: string) => void;
   resign: () => Promise<void>;
   claimDraw: () => Promise<void>;
   /** Ещё партия в той же комнате: цвета меняются местами. */
@@ -148,6 +156,13 @@ export function useChessRoom(
     [act],
   );
 
+  const hold = useCallback(
+    (square: string) => {
+      void act(GAME_EVENT.holding, { square });
+    },
+    [act],
+  );
+
   const resign = useCallback(async () => {
     await act(GAME_EVENT.resign);
   }, [act]);
@@ -171,6 +186,7 @@ export function useChessRoom(
     error,
     kicked,
     move,
+    hold,
     resign,
     claimDraw,
     rematch,

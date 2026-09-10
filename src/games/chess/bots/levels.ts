@@ -10,7 +10,7 @@
  * скрытый, и путь к нему должен существовать (D3).
  */
 
-export type LevelId = "easy" | "normal" | "hard" | "expert";
+export type LevelId = "easy" | "normal" | "hard" | "expert" | "magnus";
 
 export interface Level {
   id: LevelId;
@@ -24,6 +24,11 @@ export interface Level {
   nodes: number;
   /** Как уровень объясняется человеку в форме. */
   hint: string;
+  /**
+   * Уровня нет в списке, пока его не открыли. Скрытый — ровно один, и это
+   * шутка, ради которой всё затевалось (src/games/chess/docs/BACKLOG.md D3).
+   */
+  hidden?: true;
 }
 
 export const LEVELS: Record<LevelId, Level> = {
@@ -55,9 +60,35 @@ export const LEVELS: Record<LevelId, Level> = {
     nodes: 600_000,
     hint: "выиграть трудно; десять побед открывают кое-что ещё",
   },
+
+  /**
+   * Магнус. Рекорд живого Магнуса Карлсена — 2882; бот играет чуть выше, ровно
+   * настолько, чтобы это читалось как шутка, а не как ошибка в числе.
+   *
+   * Остальные триста пунктов до потолка — не про силу, а про жульничество: оно
+   * даёт куда больше (src/games/chess/docs/BACKLOG.md D3).
+   */
+  magnus: {
+    id: "magnus",
+    title: "Магнус",
+    elo: 2900,
+    nodes: 2_000_000,
+    hint: "играет как Магнус и жульничает как Магнус",
+    hidden: true,
+  },
 };
 
+/** Сколько побед над «экспертом» открывают Магнуса. */
+export const MAGNUS_WINS = 10;
+
 export const LEVEL_IDS = Object.keys(LEVELS) as LevelId[];
+
+/** Уровни, которые видно в форме этому человеку. */
+export function levelsFor(expertWins: number): LevelId[] {
+  const unlocked = expertWins >= MAGNUS_WINS;
+
+  return LEVEL_IDS.filter((id) => !LEVELS[id].hidden || unlocked);
+}
 
 /** Уровень по коду. Незнакомый код — «нормальный»: играть всё равно надо. */
 export function levelOf(id: unknown): Level {

@@ -7,7 +7,10 @@ import { EnginePool } from "../bots/pool";
 import { bookMove } from "../bots/book";
 import { chooseMove, variantsFor } from "../bots/blunder";
 import { CHARACTER_TRAITS, hasStyle, nicknameOf } from "../bots/characters";
-import { CHARACTERS, type Character, type Moment } from "../bots/moments";
+import { LINES } from "../bots/lines";
+import { MAGNUS } from "../bots/lines/magnus";
+import { cheatsOf, ODDS, perfect, type Say } from "../bots/magnus";
+import { CHARACTERS, type Character } from "../bots/moments";
 import { preferStyle } from "../bots/style";
 import { Talker } from "../bots/talk";
 import { pauseAfter } from "../bots/tempo";
@@ -97,16 +100,22 @@ class ChessServer implements GameServer {
       return undefined;
 
     const level = LEVELS[settings.botLevel.toLowerCase() as LevelId];
+    // Скрытый пятый уровень — не характер, а отдельная шутка: свой набор
+    // реплик, свои приёмы и никакой манеры, кроме лучшего хода
+    // (src/games/chess/docs/BACKLOG.md D3).
+    const magnus = level.id === "magnus";
     // Характер от уровня не зависит: слабый педант и сильное быдло одинаково
     // возможны (src/games/chess/docs/BACKLOG.md D4).
     const character = someone();
     const traits = CHARACTER_TRAITS[character];
     const id = `bot:${randomUUID()}`;
-    const nickname = nicknameOf(character);
+    const nickname = magnus ? level.title : nicknameOf(character);
     const avatarId = BOT_AVATAR_OFFSET;
     const limitMs = MOVE_LIMIT_MS[settings.timeControl];
 
-    const talker = new Talker(character);
+    const talker = new Talker<string>(
+      magnus ? MAGNUS : (LINES[character] as Record<string, string[]>),
+    );
     const watcher = new Watcher();
     /**
      * Оценка позиции после прошлого хода бота. По тому, насколько она
@@ -116,16 +125,16 @@ class ChessServer implements GameServer {
     let before: number | null = null;
 
     /** Сказать вслух; `false` — реплику проглотила пауза. */
-    const speak = (moment: Moment, ply: number): boolean => {
-      const text = talker.say(moment, ply);
-      if (!text) return false;
+    const speak: Say = (moment, ply, fill) => {
+      const line = talker.say(moment, ply);
+      if (!line) return false;
 
       this.host.sendChat(roomKey, {
         id: randomUUID(),
         playerId: id,
         nickname,
         avatarId,
-        text,
+        text: fill ? patch(line, fill) : line,
         at: Date.now(),
       });
 
@@ -144,6 +153,7 @@ class ChessServer implements GameServer {
       avatarId,
       level,
       speak,
+      cheats: magnus ? cheatsOf(speak) : undefined,
       restart: () => {
         talker.reset();
         watcher.reset();
@@ -155,6 +165,20 @@ class ChessServer implements GameServer {
         // Сначала книга: без неё бот на слабых уровнях ходит крайними пешками
         // и перестаёт быть похожим на человека с третьего хода
         // (src/games/chess/docs/BACKLOG.md D2).
+        // Безошибочный эндшпиль: в позиции на семь фигур и меньше он не
+        // считает, а смотрит в готовые таблицы — и объявляет мат в N.
+        if (magnus) {
+          const table = await perfect(turn.fen);
+          if (table) {
+            if (table.mateIn !== null) {
+              speak("tablebase", turn.ply, { ходов: String(table.mateIn) });
+            }
+            await rest(started, [], 1, limitMs);
+
+            return table.move;
+          }
+        }
+
         const known = await bookMove(settings.botLevel, turn.position);
         if (known) {
           notice({ ...turn, inBook: true, drift: null }, turn.ply);
@@ -181,6 +205,14 @@ class ChessServer implements GameServer {
         // без всякой паузы.
         const slow = limitMs !== null && Date.now() - started > limitMs * 0.7;
         if (slow) speak("botLowTime", turn.ply);
+
+        // «Тайм-аут»: думает дольше своего лимита и не скрывает этого. Часы у
+        // него всё равно не тикают, так что и терять нечего.
+        const stalling =
+          magnus && turn.ply >= 8 && Math.random() < ODDS.stall
+            ? speak("stalling", turn.ply)
+            : false;
+        if (stalling) await sleep(STALL_MS);
 
         const game = new ChessGame(turn.fen);
         const shaped = hasStyle(character)
@@ -221,6 +253,7 @@ class ChessServer implements GameServer {
           reason: draft.reason,
           plies: draft.moves.length,
           botId: draft.botId,
+          botLevel: settings.botLevel,
         }),
       )
       .catch((error: unknown) => {
@@ -230,6 +263,20 @@ class ChessServer implements GameServer {
     this.writing.add(writing);
     void writing.finally(() => this.writing.delete(writing));
   }
+}
+
+/** Сколько длится «тайм-аут» Магнуса: заметно дольше любого лимита. */
+const STALL_MS = 6000;
+
+const sleep = (ms: number) =>
+  new Promise<void>((resolve) => setTimeout(resolve, ms));
+
+/** Подставить в реплику то, что известно только сейчас: фигуру, число ходов. */
+function patch(line: string, fill: Record<string, string>): string {
+  return Object.entries(fill).reduce(
+    (text, [key, value]) => text.replaceAll(`{${key}}`, value),
+    line,
+  );
 }
 
 /** Кто сядет за доску на этот раз. Характеры равноправны. */

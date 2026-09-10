@@ -42,6 +42,15 @@ export interface BoardProps {
    * (src/games/chess/docs/BACKLOG.md F1).
    */
   streamer: boolean;
+  /**
+   * Сказать сопернику, за какую фигуру игрок взялся.
+   *
+   * ⚠️ Передаётся **только** в партии с Магнусом и больше никуда: ни зрителям,
+   * ни на экран. Ровно то, что режим стримера прячет от всего мира
+   * (src/games/chess/docs/BACKLOG.md D3, F1). Без Магнуса сюда не приходит
+   * ничего — обработчика просто нет.
+   */
+  onHold?: (square: string) => void;
   /** Отправить ход. `false` — сервер отказал, доска возвращается как была. */
   onMove: (move: {
     from: string;
@@ -59,6 +68,7 @@ export function Board({
   ply,
   flipped,
   streamer,
+  onHold,
   onMove,
 }: BoardProps) {
   /** Позиция, показанная прямо сейчас: своя, пока сервер не ответил. */
@@ -182,6 +192,7 @@ export function Board({
     const piece = rules.get(square as never);
     const mine = piece && piece.color === (myColor === "white" ? "w" : "b");
     setPicked(mine ? square : null);
+    if (mine) onHold?.(square);
   }
 
   return (
@@ -209,6 +220,10 @@ export function Board({
           darkSquareNotationStyle: { color: LIGHT, opacity: 0.55 },
           lightSquareNotationStyle: { color: DARK, opacity: 0.75 },
           onSquareClick: ({ square }) => clickSquare(square),
+          // Взялся за фигуру — соперник об этом узнает. Только один соперник.
+          onPieceDrag: ({ square }) => {
+            if (myTurn && square) onHold?.(square);
+          },
           onPieceDrop: ({ sourceSquare, targetSquare }) =>
             targetSquare !== null && attempt(sourceSquare, targetSquare),
           canDragPiece: ({ piece }) =>

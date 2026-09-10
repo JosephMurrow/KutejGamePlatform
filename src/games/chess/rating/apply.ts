@@ -1,7 +1,8 @@
 import { prisma } from "@/lib/prisma";
 import type { ChessResult, EndReason } from "../engine/outcome";
 import { inLobby } from "../protocol";
-import { bonusFor, counts, RATED_PLIES } from "./bonus";
+import type { BotLevelDb } from "../rooms/settings";
+import { bonusFor, counts, RATED_PLIES, REAL_GAME_PLIES } from "./bonus";
 import { fresh, rate, type Opponent, type Rating, type Score } from "./glicko";
 
 /**
@@ -30,6 +31,8 @@ export interface Finished {
   plies: number;
   /** Идентификатор бота, если играли с ним. Его в базе нет. */
   botId: string | null;
+  /** Уровень бота: по нему считаются победы над «экспертом». */
+  botLevel?: BotLevelDb;
   endedAt?: Date;
 }
 
@@ -101,7 +104,8 @@ export async function applyMatch(match: Finished): Promise<void> {
 /**
  * Партия с ботом: рейтинг не трогает.
  *
- * Считаются только победы — по ним однажды откроется пятый уровень
+ * Считаются только победы. Отдельно — победы над «экспертом»: на десятой
+ * открывается Магнус, и открывается он этому аккаунту, а не всем
  * (src/games/chess/docs/BACKLOG.md D3).
  */
 async function botGame(match: Finished): Promise<void> {
@@ -111,10 +115,21 @@ async function botGame(match: Finished): Promise<void> {
     (match.result === "black" && humanId === match.blackId);
   if (!won) return;
 
+  // Победа над экспертом — мат или упавший у него флаг в состоявшейся партии.
+  // Победы над другими уровнями и ничьи не считаются вовсе: на десятой такой
+  // открывается Магнус (src/games/chess/docs/BACKLOG.md D3).
+  const expert =
+    match.botLevel === "EXPERT" &&
+    match.plies >= REAL_GAME_PLIES &&
+    (match.reason === "checkmate" || match.reason === "flag");
+
   await prisma.chessRating.upsert({
     where: { userId: humanId },
-    create: { userId: humanId, botWins: 1 },
-    update: { botWins: { increment: 1 } },
+    create: { userId: humanId, botWins: 1, expertWins: expert ? 1 : 0 },
+    update: {
+      botWins: { increment: 1 },
+      ...(expert ? { expertWins: { increment: 1 } } : {}),
+    },
   });
 }
 

@@ -13,7 +13,7 @@ import {
   type TimeControl,
   type ViewerDelay,
 } from "../rooms/settings";
-import { LEVELS, LEVEL_IDS } from "../bots/levels";
+import { LEVELS, levelsFor } from "../bots/levels";
 
 /**
  * Форма своей партии.
@@ -38,11 +38,19 @@ const TIME_HINT: Record<TimeControl, string> = {
   UNLIMITED: "часы не заводятся вовсе",
 };
 
-export function CreateRoomForm() {
+export function CreateRoomForm({
+  expertWins = 0,
+}: {
+  /** Побед над «экспертом»: от них зависит, есть ли в списке пятый уровень. */
+  expertWins?: number;
+}) {
   const [state, formAction] = useActionState(createRoomAction, {});
   const [kind, setKind] = useState<RoomKind>("private");
   const [opponent, setOpponent] = useState<"HUMAN" | "BOT">("HUMAN");
   const defaults = defaultRoomSettings();
+  // Скрытый уровень не значится в списке, пока его не открыли. Сервер проверяет
+  // это ещё раз: форме верить нельзя (src/games/chess/docs/BACKLOG.md D3).
+  const levels = levelsFor(expertWins);
 
   return (
     <form action={formAction} className="flex flex-col gap-6">
@@ -122,7 +130,7 @@ export function CreateRoomForm() {
             Насколько сильный
           </legend>
           <div className="flex flex-col gap-2">
-            {LEVEL_IDS.map((id) => (
+            {levels.map((id) => (
               <label
                 key={id}
                 className="flex cursor-pointer items-start gap-2.5"

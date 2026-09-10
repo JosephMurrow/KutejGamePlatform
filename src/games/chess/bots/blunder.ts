@@ -29,6 +29,8 @@ const SLOPPY: Record<Level["id"], Sloppiness> = {
   hard: { chance: 0.05, maxLoss: 50 },
   // Эксперт не ошибается нарочно: его сила и так честная.
   expert: { chance: 0, maxLoss: 0 },
+  // Магнус не ошибается тем более: он вместо этого жульничает.
+  magnus: { chance: 0, maxLoss: 0 },
 };
 
 /**

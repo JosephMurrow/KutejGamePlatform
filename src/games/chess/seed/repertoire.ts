@@ -13,6 +13,20 @@ import type { BotLevelDb } from "../rooms/settings";
  * начинающий партию крайней пешкой, перестаёт быть похожим на человека.
  */
 
+/** Главные линии: ими играют и эксперт, и Магнус. */
+const MAIN_LINES: string[] = [
+  "e4 c5 Nf3 d6 d4 cxd4 Nxd4 Nf6 Nc3 a6 Bg5 e6 f4 Be7",
+  "e4 e5 Nf3 Nc6 Bb5 a6 Ba4 Nf6 O-O Be7 Re1 b5 Bb3 d6 c3 O-O h3",
+  "d4 Nf6 c4 e6 Nc3 Bb4 e3 O-O Bd3 d5 Nf3 c5",
+  "d4 Nf6 c4 g6 Nc3 Bg7 e4 d6 Nf3 O-O Be2 e5 O-O",
+  "d4 d5 c4 c6 Nc3 Nf6 Nf3 dxc4 a4 Bf5 Ne5 e6",
+  "e4 e6 d4 d5 Nc3 Nf6 e5 Nfd7 f4 c5 Nf3 Nc6",
+  "c4 Nf6 Nc3 e6 Nf3 d5 d4 Be7 Bf4 O-O e3 c5",
+  "e4 c5 Nf3 Nc6 d4 cxd4 Nxd4 e5 Nb5 d6 c4 Be7",
+  "Nf3 Nf6 c4 e6 Nc3 d5 d4 Be7 Bg5 h6 Bh4 O-O",
+  "d4 d5 c4 e6 Nc3 Be7 Nf3 Nf6 Bf4 O-O e3 c5",
+];
+
 export const REPERTOIRE: Record<BotLevelDb, string[]> = {
   // Простое и прямое: центр, слон на c4, быстрая рокировка.
   EASY: [
@@ -56,17 +70,8 @@ export const REPERTOIRE: Record<BotLevelDb, string[]> = {
     "e4 e6 d4 d5 Nc3 Bb4 e5 c5 a3 Bxc3+ bxc3",
   ],
 
-  // Гроссмейстерское: те же схемы, но в главных линиях.
-  EXPERT: [
-    "e4 c5 Nf3 d6 d4 cxd4 Nxd4 Nf6 Nc3 a6 Bg5 e6 f4 Be7",
-    "e4 e5 Nf3 Nc6 Bb5 a6 Ba4 Nf6 O-O Be7 Re1 b5 Bb3 d6 c3 O-O h3",
-    "d4 Nf6 c4 e6 Nc3 Bb4 e3 O-O Bd3 d5 Nf3 c5",
-    "d4 Nf6 c4 g6 Nc3 Bg7 e4 d6 Nf3 O-O Be2 e5 O-O",
-    "d4 d5 c4 c6 Nc3 Nf6 Nf3 dxc4 a4 Bf5 Ne5 e6",
-    "e4 e6 d4 d5 Nc3 Nf6 e5 Nfd7 f4 c5 Nf3 Nc6",
-    "c4 Nf6 Nc3 e6 Nf3 d5 d4 Be7 Bf4 O-O e3 c5",
-    "e4 c5 Nf3 Nc6 d4 cxd4 Nxd4 e5 Nb5 d6 c4 Be7",
-    "Nf3 Nf6 c4 e6 Nc3 d5 d4 Be7 Bg5 h6 Bh4 O-O",
-    "d4 d5 c4 e6 Nc3 Be7 Nf3 Nf6 Bf4 O-O e3 c5",
-  ],
+  EXPERT: MAIN_LINES,
+  // Магнус играет то же, что эксперт: репертуар у него не шуточный.
+  // Шутка — в том, что будет дальше (src/games/chess/docs/BACKLOG.md D3).
+  MAGNUS: MAIN_LINES,
 };

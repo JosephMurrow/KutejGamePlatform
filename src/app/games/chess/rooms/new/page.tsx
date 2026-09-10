@@ -6,6 +6,7 @@ import { getCurrentUser } from "@/lib/auth/session";
 import { CreateRoomForm } from "@/games/chess/components/CreateRoomForm";
 import { CHESS, ROUTES } from "@/games/chess/manifest";
 import { MENU_LINKS } from "@/games/chess/menu";
+import { expertWins } from "@/games/chess/rating/read";
 
 export const metadata: Metadata = {
   title: `Своя партия — ${CHESS.title}`,
@@ -14,6 +15,8 @@ export const metadata: Metadata = {
 export default async function ChessNewRoomPage() {
   const user = await getCurrentUser();
   if (!user) redirect(`/login?next=${ROUTES.newRoom}`);
+
+  const wins = await expertWins(user.id);
 
   return (
     <main className="mx-auto w-full max-w-lg flex-1 px-4 py-8">
@@ -35,7 +38,7 @@ export default async function ChessNewRoomPage() {
       </p>
 
       <div className="rounded-2xl border border-line bg-paper p-6">
-        <CreateRoomForm />
+        <CreateRoomForm expertWins={wins} />
       </div>
     </main>
   );
