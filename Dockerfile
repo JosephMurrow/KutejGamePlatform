@@ -1,7 +1,17 @@
 # Сборка и запуск в одном образе: сервер кастомный и стартует через tsx,
 # поэтому нужен исходник, а не только .next.
+
+# Сеть: сперва IPv4.
+#
+# На боевой машине у контейнеров IPv6 нет вовсе — ни адреса, ни маршрута, — а
+# домашний DNS исправно раздаёт AAAA-записи. Node ходит по ним первым и виснет
+# на оборванных рукопожатиях: `npm ci` падал с ETIMEDOUT, хотя тот же файл с
+# хоста качался за четверть секунды. Строчка нужна во всех трёх слоях: `deps`
+# качает пакеты, `build` — шрифты для next/font/google, `runner` в работе ходит
+# к почтовому релею и Твичу. На сетях со здоровым IPv6 она ничего не меняет.
 FROM node:22-alpine AS deps
 WORKDIR /app
+ENV NODE_OPTIONS=--dns-result-order=ipv4first
 COPY package.json package-lock.json ./
 COPY prisma ./prisma
 COPY prisma.config.ts ./
@@ -10,6 +20,7 @@ RUN npm ci
 
 FROM node:22-alpine AS build
 WORKDIR /app
+ENV NODE_OPTIONS=--dns-result-order=ipv4first
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 RUN npx prisma generate && npm run build
@@ -19,6 +30,7 @@ WORKDIR /app
 ENV NODE_ENV=production
 ENV HOST=0.0.0.0
 ENV PORT=3000
+ENV NODE_OPTIONS=--dns-result-order=ipv4first
 
 # Движок шахмат ставится пакетом и живёт отдельным процессом: в наш бандл он не
 # попадает, и лицензия его на нас не распространяется
