@@ -37,8 +37,9 @@ export interface BoardProps {
   flipped: boolean;
   /**
    * Режим стримера: гасим всё, что выдаёт замысел, — выбранную клетку,
-   * подсказки ходов и приёмник. Подсветку последнего сделанного хода не гасим:
-   * он уже случился и виден всем (src/games/chess/docs/BACKLOG.md F1).
+   * подсказки ходов, приёмник, фигуру под курсором и анимацию. Подсветку
+   * последнего сделанного хода не гасим: он уже случился и виден всем
+   * (src/games/chess/docs/BACKLOG.md F1).
    */
   streamer: boolean;
   /** Отправить ход. `false` — сервер отказал, доска возвращается как была. */
@@ -192,14 +193,19 @@ export function Board({
           boardOrientation: flipped ? "black" : "white",
           allowDragging: myTurn,
           showNotation: true,
-          animationDurationInMs: 180,
+          // Анимация показывает ход, который ещё не сделан: фигура едет,
+          // сервер ещё не ответил, а запись экрана это уже поймала.
+          animationDurationInMs: streamer ? 0 : 180,
           lightSquareStyle: { backgroundColor: LIGHT },
           darkSquareStyle: { backgroundColor: DARK },
           squareStyles: styles,
-          // Ни фигуры под курсором, ни её призрака, ни подсветки приёмника:
-          // в режиме стримера всё это выдавало бы замысел до хода.
+          // В режиме стримера доска обязана выглядеть нетронутой, пока ход не
+          // сделан: ни приёмника, ни фигуры под курсором. Фигура при этом
+          // **остаётся** на своей клетке в полную силу — гасить её было бы
+          // хуже всего: пустая клетка выдаёт выбор вернее любой подсветки.
           dropSquareStyle: streamer ? {} : undefined,
-          draggingPieceGhostStyle: streamer ? { opacity: 0 } : undefined,
+          draggingPieceStyle: streamer ? { opacity: 0 } : undefined,
+          draggingPieceGhostStyle: streamer ? { opacity: 1 } : undefined,
           darkSquareNotationStyle: { color: LIGHT, opacity: 0.55 },
           lightSquareNotationStyle: { color: DARK, opacity: 0.75 },
           onSquareClick: ({ square }) => clickSquare(square),

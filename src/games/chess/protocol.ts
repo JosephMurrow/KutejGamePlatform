@@ -1,4 +1,5 @@
 import type { PlayerPayload, RoomStatePayload } from "@/shared/protocol";
+import type { TimeControl, ViewerDelay } from "./rooms/settings";
 
 /**
  * Протокол шахмат: всё, что платформа про игру знать не обязана — сторона,
@@ -112,12 +113,17 @@ export interface ChessStatePayload extends RoomStatePayload<ChessPlayerPayload> 
   /** Почему партия кончилась. */
   reason: string | null;
   /** Сколько даётся на ход, как это записано в настройках комнаты. */
-  timeControl: string;
+  timeControl: TimeControl;
   /**
    * Режим стримера: подсказки гасит клиент. Прятать на сервере тут нечего —
    * позиция и так видна обоим (src/games/chess/docs/BACKLOG.md F1).
    */
   streamerMode: boolean;
+  /**
+   * На сколько зрители отстают от игроков. Само значение не секрет: секрет —
+   * ходы, и их зритель получает позже (src/games/chess/docs/BACKLOG.md F2).
+   */
+  viewerDelay: ViewerDelay;
   /** Только в общем зале: стоит ли этот человек в очереди. */
   queued?: boolean;
   /** Только в общем зале: сводка по залу. */

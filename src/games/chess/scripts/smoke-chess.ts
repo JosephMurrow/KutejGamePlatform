@@ -142,6 +142,7 @@ async function main() {
     opponent: "HUMAN",
     streamerMode: false,
     botLevel: "NORMAL",
+    viewerDelay: "NONE",
   });
 
   console.log(`\nКомната ${room.code}, три минуты на ход\n`);

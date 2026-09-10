@@ -29,6 +29,7 @@ export const LOBBY_SETTINGS: ChessRoomSettings = {
   opponent: "HUMAN",
   streamerMode: false,
   botLevel: "NORMAL",
+  viewerDelay: "NONE",
 };
 
 /** Сколько партий показывать в сводке зала. */
@@ -132,7 +133,7 @@ export class ChessLobby implements GameRoomState {
 
     const board = viewer.kind === "player" ? this.boardOf(viewer.id) : null;
     if (board) {
-      const own = board.snapshot();
+      const own = board.snapshot(viewer);
 
       // Своя партия плюс сводка зала — и ничего про чужие доски. Полный список
       // партий на большом зале весил бы больше самой партии

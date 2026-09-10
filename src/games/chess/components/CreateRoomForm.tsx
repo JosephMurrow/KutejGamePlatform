@@ -8,8 +8,10 @@ import { hasScreen, type RoomKind } from "@/shared/room-settings";
 import { GAME_ID } from "../protocol";
 import {
   TIME_CONTROL_LABEL,
+  VIEWER_DELAY_LABEL,
   defaultRoomSettings,
   type TimeControl,
+  type ViewerDelay,
 } from "../rooms/settings";
 import { LEVELS, LEVEL_IDS } from "../bots/levels";
 
@@ -25,6 +27,7 @@ import { LEVELS, LEVEL_IDS } from "../bots/levels";
  */
 
 const TIME_CONTROLS = Object.keys(TIME_CONTROL_LABEL) as TimeControl[];
+const VIEWER_DELAYS = Object.keys(VIEWER_DELAY_LABEL) as ViewerDelay[];
 
 /** Что даёт каждый контроль времени, кроме секунд. */
 const TIME_HINT: Record<TimeControl, string> = {
@@ -155,6 +158,25 @@ export function CreateRoomForm() {
             гасит подсказки и подсветку выбранной фигуры: в записи не видно, что
             ты задумал
           </span>
+        </span>
+      </label>
+
+      <label className="flex flex-col gap-1.5">
+        <span className="text-sm font-medium">Задержка для зрителей</span>
+        <select
+          name="viewerDelay"
+          defaultValue={defaults.viewerDelay}
+          className="rounded-lg border border-line bg-paper px-3 py-2 text-sm"
+        >
+          {VIEWER_DELAYS.map((delay) => (
+            <option key={delay} value={delay}>
+              {VIEWER_DELAY_LABEL[delay]}
+            </option>
+          ))}
+        </select>
+        <span className="text-xs text-muted">
+          зритель на сайте видит ход мгновенно, а зритель эфира — с опозданием;
+          задержка не даёт подсказать сопернику в чате трансляции
         </span>
       </label>
 

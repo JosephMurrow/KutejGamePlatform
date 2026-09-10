@@ -70,6 +70,7 @@ async function main() {
     opponent: "BOT",
     streamerMode: false,
     botLevel: "EASY",
+    viewerDelay: "NONE",
   });
 
   console.log(`\nКомната ${room.code}: играем с лёгким ботом\n`);

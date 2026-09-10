@@ -48,6 +48,21 @@ enum ChessBotLevel {
   @@schema("chess")
 }
 
+/// На сколько зрителям показывают партию позже игроков.
+///
+/// Нужна тем, кто играет в эфире: зритель на сайте видит ход мгновенно, а
+/// зритель трансляции — через полминуты, и первый опережает второго. Значит он
+/// может подсказать сопернику в чате (src/games/chess/docs/BACKLOG.md F2).
+enum ChessViewerDelay {
+  /// Зрители видят всё сразу.
+  NONE
+  SEC_15
+  SEC_30
+  SEC_60
+
+  @@schema("chess")
+}
+
 /// Настройки партии шахмат в конкретной комнате.
 ///
 /// Внешнего ключа на комнату нет намеренно — как и у платитутки, тут обычная
@@ -67,6 +82,8 @@ model ChessRoomSettings {
   streamerMode Boolean           @default(false)
   /// Уровень бота. Значим только когда соперник — бот.
   botLevel     ChessBotLevel     @default(NORMAL)
+  /// На сколько зрители отстают от игроков.
+  viewerDelay  ChessViewerDelay  @default(NONE)
 
   @@map("room_settings")
   @@schema("chess")

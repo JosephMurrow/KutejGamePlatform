@@ -35,6 +35,7 @@ export async function loadRoomSettings(
     opponent: row.opponent,
     streamerMode: row.streamerMode,
     botLevel: row.botLevel,
+    viewerDelay: row.viewerDelay,
   };
 }
 

@@ -13,7 +13,10 @@ import { ChessRoom } from "./room";
  * проверяется смоуком.
  */
 
-function setup(timeControl: TimeControl = "SEC_30") {
+function setup(
+  timeControl: TimeControl = "SEC_30",
+  extra: Partial<ChessRoomSettings> = {},
+) {
   let at = 1000;
   const changes: number[] = [];
   const events: GameRoomEvent[] = [];
@@ -23,6 +26,8 @@ function setup(timeControl: TimeControl = "SEC_30") {
     opponent: "HUMAN",
     streamerMode: false,
     botLevel: "NORMAL",
+    viewerDelay: "NONE",
+    ...extra,
   };
 
   const context: GameRoomContext = {
@@ -47,7 +52,11 @@ function setup(timeControl: TimeControl = "SEC_30") {
       at += ms;
     },
     /** Игровая часть снимка: платформа внутрь не смотрит, а мы смотрим. */
-    extra: () => room.snapshot().extra as Record<string, unknown>,
+    extra: (id = "white") =>
+      room.snapshot({ kind: "player", id }).extra as Record<string, unknown>,
+    /** Снимок целиком глазами конкретного зрителя. */
+    seen: (id: string) => room.snapshot({ kind: "player", id }),
+    screen: () => room.snapshot({ kind: "screen" }),
   };
 }
 
@@ -75,7 +84,7 @@ describe("посадка за доску", () => {
       ["white", "black"],
       "третий не садится",
     );
-    assert.equal(room.snapshot().playerCount, 2);
+    assert.equal(room.snapshot({ kind: "player", id: "white" }).playerCount, 2);
   });
 
   it("первый севший играет белыми", () => {
@@ -83,7 +92,9 @@ describe("посадка за доску", () => {
     seatBoth(room);
 
     assert.deepEqual(
-      room.snapshot().players.map((player) => player.extra.color),
+      room
+        .snapshot({ kind: "player", id: "white" })
+        .players.map((player) => player.extra.color),
       ["white", "black"],
     );
   });
@@ -174,7 +185,10 @@ describe("часы", () => {
     room.join("black");
     const deadline = room.deadline();
     assert.ok(deadline !== null && deadline > Date.now());
-    assert.equal(room.snapshot().phaseDurationMs, 10_000);
+    assert.equal(
+      room.snapshot({ kind: "player", id: "white" }).phaseDurationMs,
+      10_000,
+    );
   });
 
   it("безлимитная комната не заводит ни одного таймера", () => {
@@ -186,7 +200,14 @@ describe("часы", () => {
     room.tick();
 
     assert.equal(room.deadline(), null);
-    assert.equal((room.snapshot().extra as { phase: string }).phase, "playing");
+    assert.equal(
+      (
+        room.snapshot({ kind: "player", id: "white" }).extra as {
+          phase: string;
+        }
+      ).phase,
+      "playing",
+    );
   });
 
   it("после хода счёт начинается заново", () => {
@@ -237,7 +258,9 @@ describe("уход из-за доски", () => {
 
     assert.deepEqual([...room.seated()], ["white", "black"], "место держим");
     assert.equal(
-      room.snapshot().players.find((p) => p.id === "black")?.extra.away,
+      room
+        .snapshot({ kind: "player", id: "white" })
+        .players.find((p) => p.id === "black")?.extra.away,
       true,
     );
 
@@ -259,7 +282,9 @@ describe("уход из-за доски", () => {
     room.join("black");
 
     assert.equal(
-      room.snapshot().players.find((p) => p.id === "black")?.extra.away,
+      room
+        .snapshot({ kind: "player", id: "white" })
+        .players.find((p) => p.id === "black")?.extra.away,
       false,
     );
   });
@@ -355,8 +380,10 @@ function withBot(timeControl: TimeControl = "SEC_30", moves: string[] = []) {
     opponent: "BOT",
     streamerMode: false,
     botLevel: "NORMAL",
+    viewerDelay: "NONE",
   };
 
+  const changes: number[] = [];
   const context: GameRoomContext = {
     key: "chess-bot",
     ownerId: "human",
@@ -366,7 +393,7 @@ function withBot(timeControl: TimeControl = "SEC_30", moves: string[] = []) {
     introduce: () => {},
     forget: () => {},
     emitted: () => {},
-    changed: () => {},
+    changed: () => changes.push(at),
   };
 
   const queued = [...moves];
@@ -385,6 +412,7 @@ function withBot(timeControl: TimeControl = "SEC_30", moves: string[] = []) {
   return {
     room,
     heard,
+    changes,
     moments: () => heard.map((said) => said.moment),
     restarts: () => restarts,
     pass: (ms: number) => {
@@ -493,5 +521,165 @@ describe("бот у доски", () => {
 
     assert.equal(table.restarts(), 1, "память бота чистится");
     assert.equal(table.moments().at(-1), "rematch");
+  });
+});
+
+/**
+ * Задержка для зрителей.
+ *
+ * Зритель на сайте видит ход мгновенно, а зритель трансляции — через полминуты:
+ * значит первый опережает эфир и может подсказать сопернику в чате. Задержка
+ * это выравнивает (src/games/chess/docs/BACKLOG.md F2).
+ */
+describe("задержка для зрителей", () => {
+  const delayed = () => setup("SEC_30", { viewerDelay: "SEC_15" });
+
+  it("игроки видят ход сразу, зритель — нет", () => {
+    const { room, seen, pass } = delayed();
+    seatBoth(room);
+    room.join("watcher");
+
+    room.act(GAME_EVENT.move, "white", {
+      from: "e2",
+      to: "e4",
+      ply: 0,
+    });
+
+    const player = seen("white").extra as Record<string, unknown>;
+    const watcher = seen("watcher").extra as Record<string, unknown>;
+
+    assert.deepEqual(player.moves, ["e4"], "игрок видит свой ход");
+    assert.deepEqual(watcher.moves, [], "зритель — ещё нет");
+
+    pass(15_000);
+    assert.deepEqual(
+      (seen("watcher").extra as Record<string, unknown>).moves,
+      ["e4"],
+      "через пятнадцать секунд ход доехал",
+    );
+  });
+
+  it("экран не задерживаем: он и есть источник эфира", () => {
+    const { room, screen } = delayed();
+    seatBoth(room);
+
+    room.act(GAME_EVENT.move, "white", { from: "e2", to: "e4", ply: 0 });
+
+    assert.deepEqual(
+      (screen().extra as Record<string, unknown>).moves,
+      ["e4"],
+      "задержать экран значит задержать эфир дважды",
+    );
+  });
+
+  it("часы зрителя показывают столько же, сколько показывали игроку", () => {
+    const { room, seen, pass } = delayed();
+    seatBoth(room);
+    room.join("watcher");
+
+    room.act(GAME_EVENT.move, "white", { from: "e2", to: "e4", ply: 0 });
+    pass(15_000);
+
+    const left = (seen("watcher").deadline ?? 0) - Date.now();
+
+    // Ход был сделан пятнадцать секунд назад, и зритель видит его только
+    // сейчас: у него на часах должен быть полный лимит, а не остаток.
+    assert.ok(
+      left > 28_000 && left <= 30_000,
+      `на часах зрителя ${Math.round(left / 1000)} с`,
+    );
+  });
+
+  it("без задержки зритель видит то же, что игрок", () => {
+    const { room, seen } = setup();
+    seatBoth(room);
+    room.join("watcher");
+
+    room.act(GAME_EVENT.move, "white", { from: "e2", to: "e4", ply: 0 });
+
+    assert.deepEqual((seen("watcher").extra as Record<string, unknown>).moves, [
+      "e4",
+    ]);
+  });
+
+  it("до первого созревшего кадра зритель видит начальную расстановку", () => {
+    const { room, seen } = delayed();
+    seatBoth(room);
+    room.join("watcher");
+
+    room.act(GAME_EVENT.move, "white", { from: "e2", to: "e4", ply: 0 });
+
+    const watcher = seen("watcher").extra as Record<string, unknown>;
+    assert.equal(watcher.phase, "playing");
+    assert.equal(
+      watcher.fen,
+      "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
+      "пустая доска выглядела бы поломкой",
+    );
+  });
+
+  it("комната просыпается, чтобы показать зрителю очередной кадр", () => {
+    const { room, pass } = delayed();
+    seatBoth(room);
+    room.join("watcher");
+
+    room.act(GAME_EVENT.move, "white", { from: "e2", to: "e4", ply: 0 });
+
+    // Ближайший срок теперь не флаг через тридцать секунд, а показ через
+    // пятнадцать.
+    const until = (room.deadline() ?? 0) - Date.now();
+    assert.ok(until <= 15_100, `ближайший срок через ${until} мс`);
+
+    pass(15_000);
+    room.tick();
+  });
+});
+
+describe("будильник комнаты", () => {
+  it("тик не по флагу всё равно переводит будильник", () => {
+    // Платформа заводит таймер только на `changed`. Молчаливый тик — а он
+    // бывает: бот подаёт голос, зритель ждёт кадра — оставил бы комнату без
+    // часов, и флаг не упал бы никогда.
+    const table = withBot("SEC_30");
+    table.room.join("human");
+
+    const before = table.changes.length;
+    table.pass(15_000);
+    table.room.tick();
+
+    assert.ok(
+      table.changes.length > before,
+      "без changed платформа не заведёт таймер заново",
+    );
+    assert.notEqual(table.room.deadline(), null, "часы на месте");
+  });
+});
+
+describe("что показывают часы", () => {
+  it("внутренние поводы проснуться в отсчёт не попадают", () => {
+    // Комната без лимита: игроку считать нечего. Но задержка для зрителей даёт
+    // повод разбудить комнату, и он не должен превратиться в отсчёт на экране.
+    const { room, seen } = setup("UNLIMITED", { viewerDelay: "SEC_30" });
+    seatBoth(room);
+
+    assert.notEqual(room.deadline(), null, "разбудить комнату есть зачем");
+    assert.equal(
+      seen("white").deadline,
+      null,
+      "а часов у игрока в безлимитной комнате нет",
+    );
+  });
+
+  it("голос бота не дёргает полоску игрока", () => {
+    const table = withBot("SEC_30");
+    table.room.join("human");
+
+    const shown =
+      (table.room.snapshot({ kind: "player", id: "human" }).deadline ?? 0) -
+      Date.now();
+
+    // Бот подаёт голос на половине лимита. Если бы это попадало в снимок,
+    // игрок увидел бы пятнадцать секунд вместо тридцати.
+    assert.ok(shown > 20_000, `на часах ${Math.round(shown / 1000)} с`);
   });
 });

@@ -6,6 +6,7 @@ import { InviteModal } from "@/components/rooms/InviteModal";
 import { Countdown } from "@/components/ui/Countdown";
 import { useExitWarning } from "@/components/games/ExitToShelf";
 import { REASON_TEXT } from "../engine/outcome";
+import { VIEWER_DELAY_LABEL } from "../rooms/settings";
 import type { ChessColor, ChessPlayerPayload } from "../protocol";
 import { Board } from "./Board";
 import { LeaderboardModal } from "./leaderboard/Modal";
@@ -154,6 +155,12 @@ export function GameRoom({
           </button>
         </div>
 
+        <Notes
+          streamer={state.streamerMode}
+          delay={state.viewerDelay}
+          watching={myColor === null}
+        />
+
         {room.error ? (
           <p className="rounded-lg bg-tint px-3 py-2 text-xs text-accent">
             {room.error}
@@ -176,6 +183,42 @@ export function GameRoom({
         onClose={() => setRatingOpen(false)}
       />
     </main>
+  );
+}
+
+/**
+ * Что в этой комнате устроено не как обычно.
+ *
+ * Режим стримера и задержку видно всем: первый меняет то, как ведёт себя доска,
+ * вторая — то, насколько зритель отстал. Молчание тут выглядело бы поломкой —
+ * зритель решил бы, что комната зависла (src/games/chess/docs/BACKLOG.md F2).
+ */
+function Notes({
+  streamer,
+  delay,
+  watching,
+}: {
+  streamer: boolean;
+  delay: keyof typeof VIEWER_DELAY_LABEL;
+  watching: boolean;
+}) {
+  const lines: string[] = [];
+
+  if (streamer) lines.push("Режим стримера: подсказки и подсветка выключены.");
+  if (delay !== "NONE") {
+    lines.push(
+      watching
+        ? `Ты смотришь с задержкой: ${VIEWER_DELAY_LABEL[delay]} позади игроков.`
+        : `Зрители видят партию на ${VIEWER_DELAY_LABEL[delay]} позже тебя.`,
+    );
+  }
+
+  if (lines.length === 0) return null;
+
+  return (
+    <p className="rounded-lg border border-dashed border-line px-3 py-2 text-xs text-muted">
+      {lines.join(" ")}
+    </p>
   );
 }
 

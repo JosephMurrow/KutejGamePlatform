@@ -18,12 +18,23 @@ export type OpponentKind = "HUMAN" | "BOT";
 /** Уровень бота, как он лежит в базе. */
 export type BotLevelDb = "EASY" | "NORMAL" | "HARD" | "EXPERT";
 
+/**
+ * На сколько зрителям показывают партию позже игроков.
+ *
+ * Нужна тем, кто играет в эфире: зритель на нашем сайте видит ход мгновенно, а
+ * зритель трансляции — через полминуты, и наш зритель опережает эфир. Значит он
+ * может подсказать сопернику в чате Твича (src/games/chess/docs/BACKLOG.md F2).
+ */
+export type ViewerDelay = "NONE" | "SEC_15" | "SEC_30" | "SEC_60";
+
 export interface ChessRoomSettings {
   timeControl: TimeControl;
   opponent: OpponentKind;
   streamerMode: boolean;
   /** Значим, только когда соперник — бот. */
   botLevel: BotLevelDb;
+  /** На сколько зрители отстают от игроков. */
+  viewerDelay: ViewerDelay;
 }
 
 /**
@@ -37,6 +48,22 @@ export const MOVE_LIMIT_MS: Record<TimeControl, number | null> = {
   MIN_1: 60_000,
   MIN_3: 180_000,
   UNLIMITED: null,
+};
+
+/** Задержка зрителей в миллисекундах. Ноль — зрители видят всё сразу. */
+export const VIEWER_DELAY_MS: Record<ViewerDelay, number> = {
+  NONE: 0,
+  SEC_15: 15_000,
+  SEC_30: 30_000,
+  SEC_60: 60_000,
+};
+
+/** Как задержка называется в интерфейсе. */
+export const VIEWER_DELAY_LABEL: Record<ViewerDelay, string> = {
+  NONE: "без задержки",
+  SEC_15: "15 секунд",
+  SEC_30: "30 секунд",
+  SEC_60: "минута",
 };
 
 /** Как контроль времени называется в интерфейсе. */
@@ -55,12 +82,14 @@ export function defaultRoomSettings(): ChessRoomSettings {
     opponent: "HUMAN",
     streamerMode: false,
     botLevel: "NORMAL",
+    viewerDelay: "NONE",
   };
 }
 
 const TIME_CONTROLS = Object.keys(MOVE_LIMIT_MS) as TimeControl[];
 const OPPONENTS: OpponentKind[] = ["HUMAN", "BOT"];
 const BOT_LEVELS: BotLevelDb[] = ["EASY", "NORMAL", "HARD", "EXPERT"];
+const VIEWER_DELAYS = Object.keys(VIEWER_DELAY_MS) as ViewerDelay[];
 
 /**
  * Разобрать то, что пришло из формы. Значения приходят от клиента, поэтому
@@ -71,6 +100,7 @@ export function normalizeRoomSettings(raw: {
   opponent: unknown;
   streamerMode: unknown;
   botLevel: unknown;
+  viewerDelay: unknown;
 }): ChessRoomSettings {
   const fallback = defaultRoomSettings();
 
@@ -79,6 +109,7 @@ export function normalizeRoomSettings(raw: {
     opponent: pick(raw.opponent, OPPONENTS, fallback.opponent),
     streamerMode: raw.streamerMode === true || raw.streamerMode === "on",
     botLevel: pick(raw.botLevel, BOT_LEVELS, fallback.botLevel),
+    viewerDelay: pick(raw.viewerDelay, VIEWER_DELAYS, fallback.viewerDelay),
   };
 }
 

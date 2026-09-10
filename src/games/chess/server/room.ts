@@ -3,6 +3,7 @@ import type {
   GameRoomContext,
   GameRoomSnapshot,
   GameRoomState,
+  GameViewer,
 } from "@/lib/games/engine";
 import { randomUUID } from "node:crypto";
 import { MoveClock, type Ticker } from "../engine/clock";
@@ -10,7 +11,11 @@ import type { EndReason, Outcome } from "../engine/outcome";
 import { ChessGame, type MoveInput, type MoveRecord } from "../engine/rules";
 import { START_RATING } from "../rating/glicko";
 import { GAME_EVENT, type ChessColor, type ChessPhase } from "../protocol";
-import { MOVE_LIMIT_MS, type ChessRoomSettings } from "../rooms/settings";
+import {
+  MOVE_LIMIT_MS,
+  VIEWER_DELAY_MS,
+  type ChessRoomSettings,
+} from "../rooms/settings";
 import type { Level } from "../bots/levels";
 import type { Moment } from "../bots/moments";
 
@@ -64,6 +69,27 @@ interface Absence {
   id: string;
   since: number;
 }
+
+/**
+ * Кадр партии: то, что зритель увидит, когда придёт его время.
+ *
+ * Хранится остаток на часах, а не срок: срок — момент во времени, и через
+ * полминуты он уже прошёл бы. Остаток же переживает задержку и превращается в
+ * новый срок ровно тогда, когда зритель ход увидит.
+ */
+interface Frame {
+  /** Когда это случилось, по монотонным часам. */
+  at: number;
+  view: Record<string, unknown>;
+  /** Сколько оставалось на ход; `null` — часы не идут. */
+  left: number | null;
+}
+
+/**
+ * Сколько кадров держим. Тридцать ходов при минутной задержке — с запасом:
+ * дальше самые старые не нужны никому.
+ */
+const FRAMES_KEPT = 64;
 
 /** Партия для записи: всё, что о ней нужно знать базе. */
 export interface MatchDraft {
@@ -179,6 +205,8 @@ export class ChessRoom implements GameRoomState {
   private nudged = 0;
   /** Рейтинги сидящих: приезжают из базы после посадки. */
   private readonly shown = new Map<string, Shown>();
+  /** Что зрители ещё не видели: очередь кадров под задержку. */
+  private readonly frames: Frame[] = [];
 
   join(playerId: string): void {
     // Вернулся тот, кого ждали: место за ним и держали.
@@ -228,26 +256,29 @@ export class ChessRoom implements GameRoomState {
   }
 
   /**
-   * Ближайшее, чего ждёт партия: конец хода или конец ожидания ушедшего.
+   * Когда комнату надо разбудить.
    *
-   * `null` означает «часы стоят», и платформа тогда не заводит таймер вовсе.
-   * Так работает безлимитная комната: не особая ветка кода, а просто `null`
-   * (src/games/chess/docs/BACKLOG.md A2).
+   * Не только по часам: бот подаёт голос над задумавшимся соперником, зрителю
+   * приходит время увидеть очередной кадр. Всё это поводы проснуться, но не
+   * поводы что-то показывать человеку, — для показа есть `showing`.
+   *
+   * `null` означает «будить незачем», и платформа тогда не заводит таймер
+   * вовсе. Так работает безлимитная комната: не особая ветка кода, а просто
+   * `null` (src/games/chess/docs/BACKLOG.md A2).
    */
   deadline(): number | null {
     if (this.game.isOver()) return null;
 
     const waits: number[] = [];
 
-    const left = this.clock.left();
-    if (left !== null) waits.push(left);
+    const shown = this.showing();
+    if (shown !== null) waits.push(shown);
 
-    const nudge = this.nudgeIn(left);
+    const nudge = this.nudgeIn(this.clock.left());
     if (nudge !== null) waits.push(nudge);
 
-    if (this.absence) {
-      waits.push(Math.max(0, ABANDON_MS - (this.now() - this.absence.since)));
-    }
+    const reveal = this.revealIn();
+    if (reveal !== null) waits.push(reveal);
 
     if (waits.length === 0) return null;
 
@@ -256,6 +287,26 @@ export class ChessRoom implements GameRoomState {
     // прыгают при синхронизации, и партия проигралась бы по флагу на ровном
     // месте.
     return Date.now() + Math.min(...waits);
+  }
+
+  /**
+   * Сколько осталось человеку — по часам хода или по ожиданию ушедшего.
+   *
+   * Именно это уходит в снимок. Внутренние поводы проснуться сюда не попадают:
+   * иначе в безлимитной комнате у игрока откуда-то возникал бы отсчёт, а в
+   * партии с ботом полоска дёргалась бы на каждой реплике.
+   */
+  private showing(): number | null {
+    const waits: number[] = [];
+
+    const left = this.clock.left();
+    if (left !== null) waits.push(left);
+
+    if (this.absence) {
+      waits.push(Math.max(0, ABANDON_MS - (this.now() - this.absence.since)));
+    }
+
+    return waits.length === 0 ? null : Math.min(...waits);
   }
 
   /** Время вышло. Что именно вышло — разбираем здесь. */
@@ -273,8 +324,14 @@ export class ChessRoom implements GameRoomState {
       return;
     }
 
-    // Ни флаг, ни отсрочка не вышли — значит, разбудили ради бота.
+    // Ни флаг, ни отсрочка не вышли — значит, разбудили ради бота или ради
+    // зрителя, которому пора показать следующий кадр.
+    //
+    // `changed` тут обязателен, даже когда сказать было нечего: будильник
+    // платформа заводит только на него, и молчаливый тик оставил бы комнату
+    // вовсе без часов (src/server/rooms.ts, `changed`).
     this.nudge();
+    this.context.changed();
   }
 
   act(event: string, actorId: string, payload: unknown): ActionOutcome {
@@ -301,16 +358,28 @@ export class ChessRoom implements GameRoomState {
     return { accepted: true };
   }
 
-  snapshot(): GameRoomSnapshot {
-    const outcome = this.game.outcome();
-    const phase: ChessPhase = outcome
-      ? "over"
-      : this.seats.length < SEATS
-        ? "waiting"
-        : "playing";
+  /**
+   * Снимок партии.
+   *
+   * Игроки и экран видят всё мгновенно. Зритель на сайте — с задержкой, если
+   * хозяин комнаты её задал: иначе он опережает эфир и может подсказать
+   * сопернику в чате трансляции (src/games/chess/docs/BACKLOG.md F2). Экран не
+   * задерживаем: он и есть источник эфира, задержать его значит задержать
+   * дважды.
+   */
+  snapshot(viewer: GameViewer): GameRoomSnapshot {
+    const seen = this.delayed(viewer);
+
+    const showing = this.showing();
 
     return {
-      deadline: this.deadline(),
+      deadline: seen
+        ? seen.left === null
+          ? null
+          : Date.now() + seen.left
+        : showing === null || this.game.isOver()
+          ? null
+          : Date.now() + showing,
       phaseDurationMs: MOVE_LIMIT_MS[this.settings.timeControl],
       playerCount: this.seats.length,
       players: this.seats.map((id, at) => ({
@@ -324,19 +393,32 @@ export class ChessRoom implements GameRoomState {
           away: this.absence?.id === id,
         },
       })),
-      extra: {
-        phase,
-        fen: phase === "waiting" ? null : this.game.fen(),
-        turn: outcome ? null : this.turnColor(),
-        moves: this.game.history(),
-        lastMove: this.game.lastMove(),
-        /** Есть ли основание требовать ничью прямо сейчас. */
-        claimable: this.game.claimableDraw(),
-        result: outcome?.result ?? null,
-        reason: outcome?.reason ?? null,
-        timeControl: this.settings.timeControl,
-        streamerMode: this.settings.streamerMode,
-      },
+      extra: seen ? seen.view : this.view(),
+    };
+  }
+
+  /** Игровая часть снимка, как она есть прямо сейчас. */
+  private view(): Record<string, unknown> {
+    const outcome = this.game.outcome();
+    const phase: ChessPhase = outcome
+      ? "over"
+      : this.seats.length < SEATS
+        ? "waiting"
+        : "playing";
+
+    return {
+      phase,
+      fen: phase === "waiting" ? null : this.game.fen(),
+      turn: outcome ? null : this.turnColor(),
+      moves: this.game.history(),
+      lastMove: this.game.lastMove(),
+      /** Есть ли основание требовать ничью прямо сейчас. */
+      claimable: this.game.claimableDraw(),
+      result: outcome?.result ?? null,
+      reason: outcome?.reason ?? null,
+      timeControl: this.settings.timeControl,
+      streamerMode: this.settings.streamerMode,
+      viewerDelay: this.settings.viewerDelay,
     };
   }
 
@@ -348,11 +430,63 @@ export class ChessRoom implements GameRoomState {
     this.clock.stop();
   }
 
+  /**
+   * Снять кадр: с этого момента до зрителей он поедет с задержкой.
+   *
+   * Зовётся после каждой перемены на доске. Без задержки не копим вовсе —
+   * очередь пустая, и снимок собирается как раньше.
+   */
+  private remember(): void {
+    if (VIEWER_DELAY_MS[this.settings.viewerDelay] === 0) return;
+
+    const view = this.view();
+    // Ход, которым партия кончилась, приходит сюда дважды — от самого хода и
+    // от разбора конца. Кадр при этом один и тот же, и второй такой съел бы
+    // место в очереди.
+    if (same(this.frames.at(-1)?.view, view)) return;
+
+    this.frames.push({ at: this.now(), view, left: this.clock.left() });
+    if (this.frames.length > FRAMES_KEPT) this.frames.shift();
+  }
+
+  /**
+   * Что видит этот зритель; `null` — то же, что и все.
+   *
+   * Пока ни один кадр не «созрел», показывается самый первый: начальная
+   * расстановка ничего не выдаёт, а пустая доска выглядела бы поломкой.
+   */
+  private delayed(viewer: GameViewer): Frame | null {
+    const delay = VIEWER_DELAY_MS[this.settings.viewerDelay];
+    if (delay === 0 || this.frames.length === 0) return null;
+    // За доской и на экране задержки нет: первым она мешала бы играть, второй
+    // и есть источник эфира.
+    if (viewer.kind === "screen" || this.seats.includes(viewer.id)) return null;
+
+    const until = this.now() - delay;
+
+    return (
+      this.frames.findLast((frame) => frame.at <= until) ?? this.frames[0]!
+    );
+  }
+
+  /** Через сколько зрителю пора показать следующий кадр; `null` — нечего. */
+  private revealIn(): number | null {
+    const delay = VIEWER_DELAY_MS[this.settings.viewerDelay];
+    if (delay === 0) return null;
+
+    const until = this.now() - delay;
+    const next = this.frames.find((frame) => frame.at > until);
+
+    return next ? Math.max(0, next.at + delay - this.now()) : null;
+  }
+
   /** За стол сели двое — партия пошла, часы пущены. */
   private begin(): void {
     this.startedAt = this.now();
     this.startedWall = new Date();
     this.clock.restart();
+    this.frames.length = 0;
+    this.remember();
   }
 
   /** Партия для записи; `null` — записывать ещё нечего. */
@@ -404,6 +538,7 @@ export class ChessRoom implements GameRoomState {
     this.nudged = 0;
     this.clock.restart();
     this.finish(result.outcome ?? this.capIfTooLong());
+    this.remember();
     this.tell(result.move, false);
     void this.botTurn();
     // Без этого дедлайн сдвинулся бы, а будильник звонил бы по старому
@@ -518,6 +653,7 @@ export class ChessRoom implements GameRoomState {
       this.nudged = 0;
       this.clock.restart();
       this.finish(result.outcome ?? this.capIfTooLong());
+      this.remember();
       this.tell(result.move, true);
       this.context.changed();
     } finally {
@@ -612,6 +748,7 @@ export class ChessRoom implements GameRoomState {
     // (src/games/chess/docs/BACKLOG.md G).
     if (draft && draft.moves.length > 0) this.persist?.(draft);
 
+    this.remember();
     this.speakEnd(outcome);
     this.context.emitted([{ type: "chess_finished", ...outcome }]);
     this.context.changed();
@@ -643,6 +780,24 @@ export class ChessRoom implements GameRoomState {
 
     return at === 0 ? "white" : "black";
   }
+}
+
+/**
+ * Тот же ли это кадр. Сравниваются поля, которые только и меняются на доске:
+ * стадия, число сделанных ходов и итог.
+ */
+function same(
+  was: Record<string, unknown> | undefined,
+  now: Record<string, unknown>,
+): boolean {
+  if (!was) return false;
+
+  return (
+    was.phase === now.phase &&
+    (was.moves as string[]).length === (now.moves as string[]).length &&
+    was.result === now.result &&
+    was.reason === now.reason
+  );
 }
 
 /** Что бот видит в собственном ходе. Порядок — от самого громкого. */

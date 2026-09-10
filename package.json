@@ -17,6 +17,7 @@
     "smoke:lobby": "node --env-file-if-exists=.env --import tsx src/games/chess/scripts/smoke-lobby.ts",
     "smoke:bot": "node --env-file-if-exists=.env --import tsx src/games/chess/scripts/smoke-bot.ts",
     "smoke:rating": "node --env-file-if-exists=.env --import tsx src/games/chess/scripts/smoke-rating.ts",
+    "smoke:stream": "node --env-file-if-exists=.env --import tsx src/games/chess/scripts/smoke-stream.ts",
     "bot": "node --env-file-if-exists=.env --import tsx src/games/pricetitute/scripts/bot-player.ts",
     "db:up": "docker compose up -d",
     "db:down": "docker compose down",
