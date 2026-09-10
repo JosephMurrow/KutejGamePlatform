@@ -16,7 +16,197 @@ Railway, Render, Fly, обычный VPS. **Vercel не подойдёт** — �
 
 Секрет сессий менять нельзя без нужды: смена разлогинивает всех сразу.
 
-## Порядок выкладки
+## Раскатка новой версии: по шагам
+
+Боевая машина — LXC `platitutka`. Всё лежит в `/opt/platitutka`: там же
+`docker-compose.prod.yml`, `.env` с секретами и клон этого репозитория.
+Контейнеров три: `app`, `postgres`, `caddy`.
+
+Ниже — порядок, которым выкладывали 2.0 с шахматами. Команды даны целиком, с
+путями: их можно выполнять как есть.
+
+### 0. Проверки у себя
+
+```bash
+npm run lint && npm run typecheck && npm test && npm run format:check && npm run build
+```
+
+Тот же набор, что гоняет CI. Дальше идти только с зелёными.
+
+### 1. Осмотр машины
+
+Первым делом — откуда едем. Пропущенные версии копятся молча, и «довезти одну
+игру» легко оборачивается пятнадцатью миграциями разом.
+
+```bash
+git -C /opt/platitutka log --oneline -1 && git -C /opt/platitutka status -sb
+```
+
+```bash
+docker compose -f /opt/platitutka/docker-compose.prod.yml exec -T postgres sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "select migration_name from _prisma_migrations order by finished_at desc limit 5;"'
+```
+
+```bash
+df -h / && docker system df
+```
+
+Распухший сборочный кеш снести: сборке Next нужно место.
+
+```bash
+docker builder prune -af
+```
+
+### 2. Бэкап и счётчики «до»
+
+Дамп снимается внутрь контейнера и выносится наружу — так он переживёт
+пересоздание контейнера.
+
+```bash
+docker compose -f /opt/platitutka/docker-compose.prod.yml exec -T postgres sh -c 'pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" --format=custom -f /tmp/before.dump && ls -lh /tmp/before.dump'
+```
+
+```bash
+docker cp platitutka-postgres-1:/tmp/before.dump /root/platitutka-$(date +%F).dump
+```
+
+Счётчики снять до миграций — после будет с чем сверять.
+
+```bash
+docker compose -f /opt/platitutka/docker-compose.prod.yml exec -T postgres sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB"' <<'SQL'
+select 'users' as t, count(*) from platform.users
+union all select 'questions', count(*) from pricetitute.questions
+union all select 'rounds', count(*) from pricetitute.rounds
+union all select 'round_bets', count(*) from pricetitute.round_bets
+union all select 'scores', count(*) from pricetitute.scores;
+SQL
+```
+
+Схемы `platform` и `pricetitute` появились в 2.0; до неё всё лежало в `public`.
+
+### 3. Исходники и образ
+
+```bash
+git -C /opt/platitutka pull --ff-only
+```
+
+```bash
+docker compose -f /opt/platitutka/docker-compose.prod.yml build app
+```
+
+Сборка работающего приложения **не касается**: старый контейнер обслуживает
+людей, пока рядом собирается новый образ. Простоя здесь ещё нет, и это хорошее
+место, чтобы упереться в ошибку без последствий.
+
+### 4. Репетиция на копии базы
+
+Нужна, когда среди новых миграций есть трогающие живые данные: переезд таблиц,
+перелив колонок, удаление столбцов. Стоит десять минут и ловит ошибку до того,
+как она стоит данных.
+
+```bash
+docker compose -f /opt/platitutka/docker-compose.prod.yml exec -T postgres sh -c 'createdb -U "$POSTGRES_USER" platitutka_copy && pg_restore -U "$POSTGRES_USER" -d platitutka_copy /tmp/before.dump && echo "копия поднята"'
+```
+
+Имя базы подменяется внутри контейнера, из его же `DATABASE_URL`: пароль тогда
+не попадает ни в командную строку, ни в историю оболочки.
+
+```bash
+docker compose -f /opt/platitutka/docker-compose.prod.yml run --rm app sh -c 'base=${DATABASE_URL%%\?*}; export DATABASE_URL="${base%/*}/platitutka_copy?schema=public"; echo "мигрируем: ${DATABASE_URL##*@}"; npx prisma migrate deploy'
+```
+
+Дальше — та же сверка счётчиков, что в шаге 2, только с `-d platitutka_copy`.
+Числа обязаны совпасть до строки. Заодно стоит проверить межсхемный ключ:
+
+```sql
+select count(*) from pricetitute.scores s
+  join platform.users u on u.id = s."userId";
+```
+
+### 5. Боевой прогон
+
+Здесь начинается простой: идущие раунды и партии оборвутся, состояние комнат
+живёт в памяти процесса. Выкладываться лучше в затишье.
+
+```bash
+docker compose -f /opt/platitutka/docker-compose.prod.yml stop app
+```
+
+Гасить приложение **до** миграций обязательно, если среди них есть переезд
+схем: старый код ходит в `public` и после переезда таблиц просто их не найдёт.
+
+```bash
+docker compose -f /opt/platitutka/docker-compose.prod.yml run --rm app npx prisma migrate deploy
+```
+
+```bash
+docker compose -f /opt/platitutka/docker-compose.prod.yml run --rm app npm run db:rename-questions
+```
+
+До сида скрипт честно предупреждает, что строк меньше, чем в пуле, — это не
+поломка, недостающее дольёт сид. Тревожно обратное: строк больше, чем в пуле.
+
+```bash
+docker compose -f /opt/platitutka/docker-compose.prod.yml run --rm app npx prisma db seed
+```
+
+```bash
+docker compose -f /opt/platitutka/docker-compose.prod.yml exec -T postgres sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB"' <<'SQL'
+select 'вопросы' as t, count(*) from pricetitute.questions
+union all select 'дебютная книга', count(*) from chess.openings;
+SQL
+```
+
+Вопросов должно быть ровно столько, сколько в пуле; сколько именно — скажет
+`npm run audit:questions`. Вдвое больше — сид отработал раньше переименования.
+
+```bash
+docker compose -f /opt/platitutka/docker-compose.prod.yml up -d
+```
+
+### 6. Проверки после выкладки
+
+```bash
+docker compose -f /opt/platitutka/docker-compose.prod.yml ps && docker compose -f /opt/platitutka/docker-compose.prod.yml logs --tail=30 app
+```
+
+```bash
+curl -s -o /dev/null -w 'локально: код %{http_code}\n' http://127.0.0.1:3000/games
+```
+
+Дальше — снаружи по `APP_URL` и смоуки, см. «После выкладки проверить».
+
+### 7. Уборка
+
+```bash
+docker compose -f /opt/platitutka/docker-compose.prod.yml exec -T postgres sh -c 'dropdb -U "$POSTGRES_USER" platitutka_copy'
+```
+
+```bash
+docker image prune -f
+```
+
+### Грабли этой машины
+
+Каждая стоила времени на выкладке 2.0.
+
+- **`.env` не читается шеллом.** `. /opt/platitutka/.env` падает на
+  `MAIL_FROM=Кутёж <ящик@…>`: незакавыченное значение с `<` для shell —
+  перенаправление. Docker compose такие файлы читает по-своему. Отсюда приём из
+  шага 4: подменять имя базы внутри контейнера, а не собирать строку
+  подключения на хосте.
+- **У контейнеров нет IPv6, а домашний DNS раздаёт AAAA-записи.** Node ходит по
+  ним первым и виснет на рукопожатии: `npm ci` падал с ETIMEDOUT на ровном
+  месте, хотя тот же файл с хоста качался за четверть секунды. В образе поэтому
+  стоит `NODE_OPTIONS=--dns-result-order=ipv4first` во всех трёх слоях.
+- **Стокфиша нет в стабильных репозиториях Alpine** — ставится из
+  `edge/testing`, репозиторий указан прямо в `apk add`.
+- **`psql` звать через `sh -c`**, подставляя `$POSTGRES_USER` и `$POSTGRES_DB`
+  уже внутри контейнера: снаружи их взять неоткуда, `.env` не читается.
+- **Исходники раньше возили бандлом.** `git pull` на машине отвечал «Already up
+  to date», потому что `origin` смотрел в файл, а не в GitHub. Теперь там
+  обычный клон, репозиторий публичный, ключей машине не нужно.
+
+## Первая установка
 
 Готовый стек — `docker-compose.prod.yml`: база, приложение и Caddy как
 обратный прокси. Настройки берутся из `.env` рядом с ним, образец —
