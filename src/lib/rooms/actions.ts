@@ -18,7 +18,9 @@ export async function createRoomAction(
 ): Promise<FormState> {
   const userId = await getSessionUserId();
   if (!userId) {
-    redirect("/login?next=/games/pricetitute/rooms/new");
+    // На витрину, а не в форму конкретной игры: платформенный экшен не обязан
+    // знать, чью комнату заводили (src/games/chess/docs/BACKLOG.md A4).
+    redirect("/login?next=/games");
   }
 
   // Платформа разбирает только своё. Что за поля у игры и что они значат,

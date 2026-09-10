@@ -85,6 +85,24 @@ function shade(hex: string, amount: number): string {
   return `#${channel(16)}${channel(8)}${channel(0)}`;
 }
 
+/**
+ * Ключ, уникальный для палитры игры.
+ *
+ * Идентификаторы внутри SVG глобальны на весь документ, а на полке коробок
+ * несколько: с постоянным `id` все они ссылались бы на определения первой.
+ * Пока игра была одна, это не всплывало (src/games/chess/docs/BACKLOG.md A5).
+ *
+ * Считается из цветов, а не из `useId`: коробку рисует серверный компонент,
+ * хуков там нет, а результат должен совпадать на сервере и в браузере.
+ */
+function paletteKey(colors: BoxColors): string {
+  let hash = 0;
+  for (const char of Object.values(colors).join("")) {
+    hash = (hash * 31 + char.charCodeAt(0)) >>> 0;
+  }
+  return hash.toString(36);
+}
+
 export interface BoxColors {
   /** Крышка. */
   lid: string;
@@ -108,6 +126,10 @@ export function BoxFrame({
   /** Рисунок крышки в координатах 1000×620. */
   children: ReactNode;
 }) {
+  const key = paletteKey(colors);
+  const shadowId = `box-shadow-${key}`;
+  const lidId = `box-lid-${key}`;
+
   return (
     <svg
       viewBox="0 0 880 540"
@@ -116,9 +138,18 @@ export function BoxFrame({
       aria-hidden="true"
     >
       <defs>
-        <filter id="box-shadow" x="-30%" y="-30%" width="160%" height="190%">
+        <filter id={shadowId} x="-30%" y="-30%" width="160%" height="190%">
           <feGaussianBlur stdDeviation="24" />
         </filter>
+        {/*
+          Рисунок обрезается краем крышки. Пока игры рисовали мелкий декор по
+          углам, обрезка была не нужна; шахматы вывели на крышку строй фигур и
+          доску до самого края — всё, что вышло за 1000×620, повисло призраком
+          рядом с коробкой (src/games/chess/docs/BACKLOG.md A5).
+        */}
+        <clipPath id={lidId}>
+          <rect x="0" y="0" width={ART_WIDTH} height={ART_HEIGHT} />
+        </clipPath>
       </defs>
 
       <ellipse
@@ -127,7 +158,7 @@ export function BoxFrame({
         rx="298"
         ry="38"
         fill="rgba(8,3,18,0.5)"
-        filter="url(#box-shadow)"
+        filter={`url(#${shadowId})`}
       />
 
       {/* Донце */}
@@ -145,7 +176,7 @@ export function BoxFrame({
       <polygon points={path([A, D, Db, Ab])} fill={shade(colors.side, 0.32)} />
 
       {/* Крышка с рисунком игры */}
-      <g transform={`matrix(${LID_MATRIX})`}>
+      <g transform={`matrix(${LID_MATRIX})`} clipPath={`url(#${lidId})`}>
         <rect
           x="0"
           y="0"

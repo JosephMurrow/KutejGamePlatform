@@ -20,6 +20,7 @@ enum QuestionPack {
 
   @@schema("pricetitute")
 }
+
 /// Набор паков, которым играет комната.
 enum QuestionMode {
   /// Стандарт.
@@ -31,6 +32,7 @@ enum QuestionMode {
 
   @@schema("pricetitute")
 }
+
 /// Вопрос из пула. Задаётся ведущему, тот отвечает суммой (см. docs/SPEC.md §6).
 model Question {
   id     String       @id @default(cuid())
@@ -48,9 +50,9 @@ model Question {
 
   @@index([active, pack, adult])
   @@map("questions")
-
   @@schema("pricetitute")
 }
+
 /// Сыгранный раунд: что спросили, что ответил ведущий, кто сколько поставил.
 model Round {
   id      String @id @default(cuid())
@@ -73,9 +75,9 @@ model Round {
 
   @@index([roomKey, finishedAt])
   @@map("rounds")
-
   @@schema("pricetitute")
 }
+
 /// Ставка игрока в раунде.
 model RoundBet {
   id String @id @default(cuid())
@@ -93,9 +95,9 @@ model RoundBet {
 
   @@unique([roundId, playerId])
   @@map("round_bets")
-
   @@schema("pricetitute")
 }
+
 /// Накопленный счёт игрока в конкретной комнате.
 /// Очки приватных комнат наружу не идут: они лежат под своим roomKey.
 model Score {
@@ -113,9 +115,9 @@ model Score {
   @@unique([userId, roomKey])
   @@index([roomKey, points])
   @@map("scores")
-
   @@schema("pricetitute")
 }
+
 /// Очередь вопросов конкретной комнаты: порядок сохраняется между
 /// перезапусками сервера. Голова очереди — нулевой элемент массива.
 model RoomQuestionQueue {
@@ -135,9 +137,9 @@ model RoomQuestionQueue {
   updatedAt DateTime @updatedAt
 
   @@map("room_question_queues")
-
   @@schema("pricetitute")
 }
+
 /// Кто ведёт раунды.
 enum HostRotation {
   /// По кругу в порядке входа, как в общем зале.
@@ -148,6 +150,7 @@ enum HostRotation {
 
   @@schema("pricetitute")
 }
+
 /// Чем заканчивается партия в приватной комнате.
 enum RoomEndMode {
   /// Играем, пока хост не остановит.

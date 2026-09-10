@@ -46,7 +46,7 @@ openssl rand -base64 48
 | `npm start`                 | Продакшен-запуск того же кастомного сервера    |
 | `npm run lint`              | ESLint                                         |
 | `npm run format`            | Prettier                                       |
-| `npm run typecheck`         | `tsc --noEmit`                                 |
+| `npm run typecheck`         | `next typegen && tsc --noEmit`                 |
 | `npm test`                  | Юнит-тесты на встроенном раннере Node          |
 | `npm run smoke:sockets`     | Два клиента играют раунд (нужен `npm run dev`) |
 | `npm run smoke:crowd`       | Толпа клиентов в общей комнате                 |

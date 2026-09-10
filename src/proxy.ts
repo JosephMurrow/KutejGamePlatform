@@ -11,20 +11,42 @@ import { readSessionClaims, SESSION_COOKIE } from "@/lib/auth/token";
 /**
  * За стол и в рейтинг — только со своим аккаунтом.
  *
+ * Игры здесь не перечисляются поимённо: их адреса ловит `insideGame`. Список
+ * из трёх страниц платитутки означал бы, что каждая новая игра дописывает сюда
+ * свои три — и однажды забудет (src/games/chess/docs/BACKLOG.md A4).
+ *
  * Старые адреса перечислены наравне с новыми, хотя редиректы из next.config
  * срабатывают раньше proxy и досюда их не доводят. Это подстраховка: уберут
  * редирект — защита останется на месте, а не исчезнет молча.
  */
-const PROTECTED = [
-  "/profile",
-  "/games/pricetitute/play",
-  "/games/pricetitute/rooms",
-  "/games/pricetitute/leaderboard",
-  "/play",
-  "/rooms",
-  "/leaderboard",
-];
+const PROTECTED = ["/profile", "/play", "/rooms", "/leaderboard"];
 const ANONYMOUS_ONLY = ["/login", "/register"];
+
+/**
+ * Разделы игры, куда пускают только со своим аккаунтом. Одни и те же у всех
+ * игр — это платформенные адреса из `GameRoutes`, а не выдумка каждой.
+ */
+const GAME_SECTIONS = ["play", "rooms", "leaderboard"];
+
+/**
+ * Внутренности игры: общий зал, своя комната, рейтинг.
+ *
+ * Витрина `/games` и страница самой игры `/games/<игра>` остаются открытыми:
+ * посторонний должен увидеть, во что тут играют, до всякой регистрации, а
+ * войти просят на пороге стола, а не на пороге полки (docs/BACKLOG.md C1).
+ *
+ * Раздел сверяется со списком, а не «всё, что глубже первой страницы»: под
+ * адресом игры лежат ещё её знак, иконка вкладки и картинки ботов, и запрет
+ * на всё подряд отдавал бы вместо них редирект на вход — незаметно, потому
+ * что у вошедшего всё работает (src/games/chess/docs/BACKLOG.md A4).
+ */
+export function insideGame(pathname: string): boolean {
+  const [root, game, section] = pathname.split("/").filter(Boolean);
+
+  return (
+    root === "games" && !!game && !!section && GAME_SECTIONS.includes(section)
+  );
+}
 
 /**
  * Куда гостю нельзя. Он заведён ради одной стримерской комнаты: ни общего
@@ -33,15 +55,31 @@ const ANONYMOUS_ONLY = ["/login", "/register"];
  */
 const CLOSED_TO_GUESTS = [
   "/profile",
-  // Вся полка целиком: гостю не во что играть, кроме своей комнаты, и
-  // объяснять ему про другие игры незачем (docs/BACKLOG.md C1).
-  "/games",
   "/play",
   "/leaderboard",
   "/rooms",
   "/login",
   "/register",
 ];
+
+/**
+ * Страница под `/games` — в отличие от файла, который там же лежит.
+ *
+ * Гостю закрыта вся полка: играть ему не во что, кроме своей комнаты, и
+ * объяснять про другие игры незачем (docs/BACKLOG.md C1). Но под тем же
+ * адресом лежат картинки игры — фигуры, аватары ботов, знаки, — и закрывать их
+ * нельзя: гость сидит в комнате той самой игры и должен её видеть. Раньше это
+ * не всплывало, потому что у платитутки гость обходился без картинок из
+ * `/games`; шахматы упёрлись в это на первой же доске
+ * (src/games/chess/docs/BACKLOG.md A4).
+ */
+export function isGamePage(pathname: string): boolean {
+  const parts = pathname.split("/").filter(Boolean);
+  if (parts[0] !== "games") return false;
+
+  // Файл узнаётся по расширению: `pieces/br.png`, `bots/00.svg`, `logo.png`.
+  return !(parts.at(-1) ?? "").includes(".");
+}
 
 /**
  * Куда можно вести по параметру `next`: только внутрь сайта. Протокольно
@@ -58,7 +96,10 @@ export async function proxy(request: NextRequest) {
   const claims = await readSessionClaims(token);
   const userId = claims?.userId ?? null;
 
-  if (!userId && PROTECTED.some((path) => pathname.startsWith(path))) {
+  const closed =
+    PROTECTED.some((path) => pathname.startsWith(path)) || insideGame(pathname);
+
+  if (!userId && closed) {
     const url = request.nextUrl.clone();
     url.pathname = "/login";
     return NextResponse.redirect(url);
@@ -66,10 +107,11 @@ export async function proxy(request: NextRequest) {
 
   // Гостя разворачиваем на главную: объяснять ему про рейтинг и профиль
   // бессмысленно, у него их нет и не будет.
-  if (
-    claims?.guest &&
-    CLOSED_TO_GUESTS.some((path) => pathname.startsWith(path))
-  ) {
+  const closedToGuest =
+    CLOSED_TO_GUESTS.some((path) => pathname.startsWith(path)) ||
+    isGamePage(pathname);
+
+  if (claims?.guest && closedToGuest) {
     const url = request.nextUrl.clone();
     url.pathname = "/";
     url.search = "";

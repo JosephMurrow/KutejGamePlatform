@@ -58,6 +58,29 @@
   --color-accent-soft: #ff5c93;
 }
 
+/*
+ * Тема шахмат. Те же роли, свои значения — бумага и зелёное сукно.
+ */
+[data-game="chess"] {
+  /* Игра светлая, платформа тёмная: поля ввода внутри неё должны знать об
+     этом сами. */
+  color-scheme: light;
+
+  --color-surface: #f4efe4;
+  --color-paper: #fffdf7;
+  --color-tint: #e9e1ce;
+  --color-line: #d3c8ae;
+
+  --color-ink: #1b2b22;
+  /* Темнее, чем просилось на глаз: на бумажном фоне светлее этого вторичный
+     текст не дотягивает до порога читаемости. */
+  --color-muted: #5c6b62;
+
+  --color-accent: #1d5c43;
+  --color-deep: #0f3527;
+  --color-accent-soft: #2f8a63;
+}
+
 html {
   color-scheme: dark;
 }

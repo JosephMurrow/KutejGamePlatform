@@ -425,7 +425,7 @@ async function main() {
   noKey.disconnect();
   globalScreen.disconnect();
   await sleep(200);
-  await deletePrivateRoom(room.id);
+  await deletePrivateRoom(room.id, room.gameId);
   await prisma.round.deleteMany({ where: { roomKey: room.id } });
 
   const leftovers = await prisma.user.count({

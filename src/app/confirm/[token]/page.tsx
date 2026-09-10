@@ -46,10 +46,10 @@ export default async function ConfirmPage({
 
       <div className="flex flex-col gap-2 sm:flex-row">
         <Link
-          href="/games/pricetitute/play"
+          href="/games"
           className="rounded-lg bg-accent px-5 py-2.5 text-sm font-semibold text-paper transition hover:bg-deep"
         >
-          В общую комнату
+          К играм
         </Link>
         <Link
           href="/profile"
