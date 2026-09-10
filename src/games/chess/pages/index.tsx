@@ -15,7 +15,14 @@ import { ScreenView } from "@/games/chess/components/ScreenView";
  */
 
 function Room({ room, user }: GameRoomViewProps) {
-  return <GameRoom roomCode={room.code} userId={user.id} />;
+  return (
+    <GameRoom
+      roomCode={room.code}
+      userId={user.id}
+      nickname={user.nickname}
+      avatarId={user.avatarId}
+    />
+  );
 }
 
 function Screen({ room }: GameScreenViewProps) {

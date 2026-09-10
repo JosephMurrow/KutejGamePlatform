@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { io, type Socket } from "socket.io-client";
 import {
+  CLIENT_EVENT,
   GAME_QUERY,
   KEY_QUERY,
   ROOM_QUERY,
@@ -11,6 +12,7 @@ import {
   SOCKET_PATH,
   VIEW_QUERY,
   type Ack,
+  type ChatMessagePayload,
 } from "@/shared/protocol";
 import {
   GAME_EVENT,
@@ -39,6 +41,12 @@ export interface MoveRequest {
 export interface ChessRoomHandle {
   state: ChessStatePayload | null;
   connected: boolean;
+  /**
+   * Чат комнаты. Через него же говорят боты: реплики приходят обычными
+   * сообщениями от их имени (src/games/chess/docs/BOTS.md).
+   */
+  chat: ChatMessagePayload[];
+  sendChat: (text: string) => Promise<boolean>;
   /** Насколько часы сервера впереди клиентских, мс. */
   clockOffset: number;
   error: string | null;
@@ -94,6 +102,7 @@ export function useChessRoom(
   const [clockOffset, setClockOffset] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [kicked, setKicked] = useState<string | null>(null);
+  const [chat, setChat] = useState<ChatMessagePayload[]>([]);
   const socketRef = useRef<Socket | null>(null);
 
   useEffect(() => {
@@ -111,6 +120,13 @@ export function useChessRoom(
     socket.on("connect_error", (reason: Error) => {
       setConnected(false);
       setError(reason.message);
+    });
+
+    socket.on(SERVER_EVENT.chatHistory, (history: ChatMessagePayload[]) => {
+      setChat(history);
+    });
+    socket.on(SERVER_EVENT.chatMessage, (message: ChatMessagePayload) => {
+      setChat((was) => [...was, message]);
     });
 
     socket.on(SERVER_EVENT.state, (payload: ChessStatePayload) => {
@@ -174,6 +190,11 @@ export function useChessRoom(
     await act(GAME_EVENT.claimDraw);
   }, [act]);
 
+  const sendChat = useCallback(
+    (text: string) => act(CLIENT_EVENT.chat, { text }),
+    [act],
+  );
+
   const offerDraw = useCallback(async () => {
     await act(GAME_EVENT.offerDraw);
   }, [act]);
@@ -193,6 +214,8 @@ export function useChessRoom(
   return {
     state,
     connected,
+    chat,
+    sendChat,
     clockOffset,
     error,
     kicked,

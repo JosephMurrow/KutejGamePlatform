@@ -2,10 +2,13 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Avatar } from "@/components/Avatar";
+import { UserMenu } from "@/components/UserMenu";
+import { Chat } from "@/components/room/Chat";
 import { InviteModal } from "@/components/rooms/InviteModal";
 import { Countdown } from "@/components/ui/Countdown";
 import { useExitWarning } from "@/components/games/ExitToShelf";
 import { REASON_TEXT } from "../engine/outcome";
+import { MENU_LINKS } from "../menu";
 import { VIEWER_DELAY_LABEL } from "../rooms/settings";
 import type { ChessColor, ChessPlayerPayload } from "../protocol";
 import { Board } from "./Board";
@@ -24,9 +27,13 @@ import { useChessRoom } from "./useChessRoom";
 export function GameRoom({
   roomCode,
   userId,
+  nickname,
+  avatarId,
 }: {
   roomCode?: string;
   userId: string;
+  nickname: string;
+  avatarId: number;
 }) {
   const room = useChessRoom(roomCode);
   const [flipped, setFlipped] = useState<boolean | null>(null);
@@ -110,125 +117,147 @@ export function GameRoom({
   const waiting = state.phase === "waiting";
 
   return (
-    <main className="mx-auto flex w-full max-w-5xl flex-1 flex-col gap-4 px-4 py-6 lg:flex-row lg:items-start">
+    <div className="mx-auto flex w-full max-w-5xl flex-1 flex-col gap-4 px-4 py-4">
       {/*
+        Шапка комнаты. Выход на витрину рисует платформа — он висит в углу над
+        этой строкой; здесь то, что нужно за доской: звук, разворот и меню, из
+        которого открываются рейтинг, зал и своя партия.
+      */}
+      <header className="flex items-center justify-between gap-3">
+        <div className="flex items-center gap-2">
+          <IconButton
+            label={sound.on ? "Выключить звук" : "Включить звук"}
+            pressed={sound.on}
+            onClick={sound.toggle}
+          >
+            <SoundIcon on={sound.on} />
+          </IconButton>
+          <IconButton
+            label="Развернуть доску"
+            onClick={() => setFlipped(!orientation)}
+          >
+            <FlipIcon />
+          </IconButton>
+        </div>
+
+        <UserMenu
+          nickname={nickname}
+          avatarId={avatarId}
+          links={MENU_LINKS}
+          // Рейтинг — окном: переход по ссылке рвёт сокет, а вместе с ним и
+          // партию (src/games/chess/docs/BACKLOG.md E2).
+          onOverlay={() => setRatingOpen(true)}
+        />
+      </header>
+
+      <main className="flex flex-1 flex-col gap-4 lg:flex-row lg:items-start">
+        {/*
         Доска — квадрат от меньшей стороны. Высота считается в svh, а не в vh:
         на телефоне адресная строка то есть, то нет, и по vh доска регулярно
         не помещается (src/games/chess/docs/BACKLOG.md G).
       */}
-      <div className="mx-auto flex w-full max-w-[min(78svh,560px)] flex-col gap-1">
-        <Taken
-          side={orientation ? "white" : "black"}
-          fen={rewound?.fen ?? state.fen ?? START}
-        />
-
-        <Board
-          // В перемотке доска показывает прошлое и ходить из него нельзя.
-          fen={rewound?.fen ?? state.fen ?? START}
-          myColor={over || rewound ? null : myColor}
-          turn={state.turn}
-          lastMove={rewound ? rewound.lastMove : state.lastMove}
-          ply={state.moves.length}
-          flipped={orientation}
-          streamer={state.streamerMode}
-          premoves={!over && !waiting && !rewound && myColor !== null}
-          onHold={state.magnus ? room.hold : undefined}
-          onMove={room.move}
-        />
-
-        <Taken
-          side={orientation ? "black" : "white"}
-          fen={rewound?.fen ?? state.fen ?? START}
-        />
-      </div>
-
-      <aside className="flex w-full flex-col gap-3 lg:w-72">
-        <Seat
-          player={opponent}
-          color={myColor === "white" ? "black" : "white"}
-          active={!over && !waiting && state.turn !== myColor}
-          state={state}
-          clockOffset={room.clockOffset}
-          placeholder="Ждём соперника"
-        />
-
-        <Moves moves={state.moves} at={at ?? state.moves.length} onGo={setAt} />
-
-        <Seat
-          player={me}
-          color={myColor ?? "white"}
-          active={!over && !waiting && state.turn === myColor}
-          state={state}
-          clockOffset={room.clockOffset}
-          placeholder="Ты смотришь"
-        />
-
-        {waiting && roomCode ? (
-          <button
-            type="button"
-            onClick={() => setInviteOpen(true)}
-            className="rounded-lg bg-accent px-3 py-2 text-sm font-semibold text-paper transition hover:bg-deep"
-          >
-            Позвать соперника
-          </button>
-        ) : null}
-
-        {over ? (
-          <Result state={state} myColor={myColor} onRematch={room.rematch} />
-        ) : myColor ? (
-          <Controls
-            claimable={state.claimable !== null}
-            offer={state.drawOffer}
-            myColor={myColor}
-            onClaim={room.claimDraw}
-            onOffer={room.offerDraw}
-            onDecline={room.declineDraw}
-            onResign={room.resign}
+        <div className="mx-auto flex w-full max-w-[min(78svh,560px)] flex-col gap-1">
+          <Taken
+            side={orientation ? "white" : "black"}
+            fen={rewound?.fen ?? state.fen ?? START}
           />
-        ) : null}
 
-        <div className="flex gap-2">
-          <button
-            type="button"
-            onClick={() => setFlipped(!orientation)}
-            className="flex-1 rounded-lg border border-line bg-paper px-3 py-2 text-xs font-semibold text-muted transition hover:border-accent hover:text-accent"
-          >
-            Развернуть доску
-          </button>
-          {/* Окном, а не ссылкой: переход оборвал бы сокет и высадил из-за доски. */}
-          <button
-            type="button"
-            onClick={() => setRatingOpen(true)}
-            className="flex-1 rounded-lg border border-line bg-paper px-3 py-2 text-xs font-semibold text-muted transition hover:border-accent hover:text-accent"
-          >
-            Рейтинг
-          </button>
-          <button
-            type="button"
-            onClick={sound.toggle}
-            aria-pressed={sound.on}
-            className="rounded-lg border border-line bg-paper px-3 py-2 text-xs font-semibold text-muted transition hover:border-accent hover:text-accent"
-          >
-            {sound.on ? "Звук" : "Тихо"}
-          </button>
+          <Board
+            // В перемотке доска показывает прошлое и ходить из него нельзя.
+            fen={rewound?.fen ?? state.fen ?? START}
+            myColor={over || rewound ? null : myColor}
+            turn={state.turn}
+            lastMove={rewound ? rewound.lastMove : state.lastMove}
+            ply={state.moves.length}
+            flipped={orientation}
+            streamer={state.streamerMode}
+            premoves={!over && !waiting && !rewound && myColor !== null}
+            onHold={state.magnus ? room.hold : undefined}
+            onMove={room.move}
+          />
+
+          <Taken
+            side={orientation ? "black" : "white"}
+            fen={rewound?.fen ?? state.fen ?? START}
+          />
         </div>
 
-        <Notes
-          streamer={state.streamerMode}
-          delay={state.viewerDelay}
-          magnus={state.magnus && myColor !== null}
-          watching={myColor === null}
-        />
+        <aside className="flex w-full flex-col gap-3 lg:w-72">
+          <Seat
+            player={opponent}
+            color={myColor === "white" ? "black" : "white"}
+            active={!over && !waiting && state.turn !== myColor}
+            state={state}
+            clockOffset={room.clockOffset}
+            placeholder="Ждём соперника"
+          />
 
-        {room.error ? (
-          <p className="rounded-lg bg-tint px-3 py-2 text-xs text-accent">
-            {room.error}
-          </p>
-        ) : null}
-        {!room.connected ? (
-          <p className="text-xs text-muted">Связь потеряна, восстанавливаем…</p>
-        ) : null}
-      </aside>
+          <Moves
+            moves={state.moves}
+            at={at ?? state.moves.length}
+            onGo={setAt}
+          />
+
+          <Seat
+            player={me}
+            color={myColor ?? "white"}
+            active={!over && !waiting && state.turn === myColor}
+            state={state}
+            clockOffset={room.clockOffset}
+            placeholder="Ты смотришь"
+          />
+
+          {waiting && roomCode ? (
+            <button
+              type="button"
+              onClick={() => setInviteOpen(true)}
+              className="rounded-lg bg-accent px-3 py-2 text-sm font-semibold text-paper transition hover:bg-deep"
+            >
+              Позвать соперника
+            </button>
+          ) : null}
+
+          {over ? (
+            <Result state={state} myColor={myColor} onRematch={room.rematch} />
+          ) : myColor ? (
+            <Controls
+              claimable={state.claimable !== null}
+              offer={state.drawOffer}
+              myColor={myColor}
+              onClaim={room.claimDraw}
+              onOffer={room.offerDraw}
+              onDecline={room.declineDraw}
+              onResign={room.resign}
+            />
+          ) : null}
+
+          <Notes
+            streamer={state.streamerMode}
+            delay={state.viewerDelay}
+            magnus={state.magnus && myColor !== null}
+            watching={myColor === null}
+          />
+
+          {room.error ? (
+            <p className="rounded-lg bg-tint px-3 py-2 text-xs text-accent">
+              {room.error}
+            </p>
+          ) : null}
+          {!room.connected ? (
+            <p className="text-xs text-muted">
+              Связь потеряна, восстанавливаем…
+            </p>
+          ) : null}
+
+          {/*
+          Чат комнаты. Через него же говорят боты: их реплики приходят обычными
+          сообщениями от их имени (src/games/chess/docs/BOTS.md).
+        */}
+          <div className="h-72 lg:h-80">
+            <Chat messages={room.chat} youId={userId} onSend={room.sendChat} />
+          </div>
+        </aside>
+      </main>
 
       <InviteModal
         open={inviteOpen}
@@ -241,7 +270,124 @@ export function GameRoom({
         open={ratingOpen}
         onClose={() => setRatingOpen(false)}
       />
-    </main>
+    </div>
+  );
+}
+
+/**
+ * Кнопка-иконка в шапке: тот же вид, что у выхода на витрину, который платформа
+ * рисует чуть выше. Подпись всплывает и на наведении, и на фокусе с
+ * клавиатуры — иначе идущий табом видит голую иконку.
+ */
+function IconButton({
+  label,
+  pressed,
+  onClick,
+  children,
+}: {
+  label: string;
+  pressed?: boolean;
+  onClick: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="group relative w-fit">
+      <button
+        type="button"
+        aria-label={label}
+        aria-pressed={pressed}
+        onClick={onClick}
+        className="flex size-9 items-center justify-center rounded-xl border border-line bg-paper text-muted transition hover:border-accent hover:text-accent"
+      >
+        {children}
+      </button>
+
+      <span
+        aria-hidden="true"
+        className="pointer-events-none absolute left-0 top-full z-40 mt-1.5 whitespace-nowrap rounded-lg border border-line bg-paper px-2.5 py-1.5 text-xs text-muted opacity-0 shadow-sm transition-opacity group-focus-within:opacity-100 group-hover:opacity-100"
+      >
+        {label}
+      </span>
+    </div>
+  );
+}
+
+/** Динамик: со звуковыми волнами или перечёркнутый. */
+function SoundIcon({ on }: { on: boolean }) {
+  return (
+    <svg viewBox="0 0 20 20" width="18" height="18" aria-hidden="true">
+      <path
+        d="M4 8h2.5L10 5v10L6.5 12H4z"
+        fill="currentColor"
+        stroke="currentColor"
+        strokeWidth="1.2"
+        strokeLinejoin="round"
+      />
+      {on ? (
+        <>
+          <path
+            d="M12.6 7.4a3.6 3.6 0 0 1 0 5.2"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.4"
+            strokeLinecap="round"
+          />
+          <path
+            d="M14.8 5.2a6.8 6.8 0 0 1 0 9.6"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.4"
+            strokeLinecap="round"
+          />
+        </>
+      ) : (
+        <path
+          d="M13 8l4 4m0-4l-4 4"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.5"
+          strokeLinecap="round"
+        />
+      )}
+    </svg>
+  );
+}
+
+/** Две стрелки по кругу: доска поворачивается другой стороной. */
+function FlipIcon() {
+  return (
+    <svg viewBox="0 0 20 20" width="18" height="18" aria-hidden="true">
+      <path
+        d="M5.5 7.5A5 5 0 0 1 15 8"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.5"
+        strokeLinecap="round"
+      />
+      <path
+        d="M14.5 12.5A5 5 0 0 1 5 12"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.5"
+        strokeLinecap="round"
+      />
+      <path
+        d="M15.4 5.2v3h-3"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.5"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M4.6 14.8v-3h3"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.5"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
   );
 }
 
@@ -420,6 +566,21 @@ function Seat({
  * действие. Партия идёт своим чередом, и пока человек в прошлом, ходить он не
  * может — доска про это скажет сама (src/games/chess/docs/BACKLOG.md G).
  */
+/** Сколько ходов видно, пока список не развернули. */
+const MOVES_SHOWN = 3;
+
+/** «Ход», «хода», «ходов» — по числу. */
+function movesWord(count: number): string {
+  const tail = count % 100;
+  if (tail >= 11 && tail <= 14) return "ходов";
+
+  const last = count % 10;
+  if (last === 1) return "ход";
+  if (last >= 2 && last <= 4) return "хода";
+
+  return "ходов";
+}
+
 function Moves({
   moves,
   at,
@@ -430,6 +591,8 @@ function Moves({
   at: number;
   onGo: (at: number | null) => void;
 }) {
+  const [open, setOpen] = useState(false);
+
   const pairs: [string, string | undefined][] = [];
   for (let index = 0; index < moves.length; index += 2) {
     pairs.push([moves[index] as string, moves[index + 1]]);
@@ -438,27 +601,49 @@ function Moves({
   const live = at >= moves.length;
   const go = (next: number) => onGo(next >= moves.length ? null : next);
 
+  // Свёрнутый список показывает последние ходы, а не первые: за доской нужны
+  // они, а вся партия — когда её захотят посмотреть.
+  const hidden = open ? 0 : Math.max(0, pairs.length - MOVES_SHOWN);
+  const shown = pairs.slice(hidden);
+
   return (
-    <div className="flex flex-col gap-2 rounded-xl border border-line bg-paper p-3 text-sm lg:flex-1">
-      <div className="flex max-h-44 flex-col gap-1 overflow-y-auto lg:max-h-none lg:flex-1">
+    <div className="flex flex-col gap-2 rounded-xl border border-line bg-paper p-3 text-sm">
+      <div
+        className={`flex flex-col gap-1 ${open ? "max-h-64 overflow-y-auto" : ""}`}
+      >
         {pairs.length === 0 ? (
           <span className="text-xs text-muted">Ходов пока нет</span>
         ) : (
-          pairs.map(([white, black], index) => (
-            <div key={index} className="tabular flex items-center gap-2">
-              <span className="w-6 text-right text-xs text-muted">
-                {index + 1}.
-              </span>
-              <Ply san={white} to={index * 2 + 1} at={at} onGo={go} />
-              {black ? (
-                <Ply san={black} to={index * 2 + 2} at={at} onGo={go} />
-              ) : (
-                <span className="w-16" />
-              )}
-            </div>
-          ))
+          shown.map(([white, black], index) => {
+            const number = hidden + index;
+            return (
+              <div key={number} className="tabular flex items-center gap-2">
+                <span className="w-6 text-right text-xs text-muted">
+                  {number + 1}.
+                </span>
+                <Ply san={white} to={number * 2 + 1} at={at} onGo={go} />
+                {black ? (
+                  <Ply san={black} to={number * 2 + 2} at={at} onGo={go} />
+                ) : (
+                  <span className="w-16" />
+                )}
+              </div>
+            );
+          })
         )}
       </div>
+
+      {pairs.length > MOVES_SHOWN ? (
+        <button
+          type="button"
+          onClick={() => setOpen((was) => !was)}
+          className="self-start text-xs text-muted transition hover:text-accent"
+        >
+          {open
+            ? "Свернуть"
+            : `Вся партия — ${pairs.length} ${movesWord(pairs.length)}`}
+        </button>
+      ) : null}
 
       {moves.length > 0 ? (
         <div className="flex items-center gap-1 border-t border-line pt-2">

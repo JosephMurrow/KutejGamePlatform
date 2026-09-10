@@ -20,6 +20,8 @@ import { Promotion, type PromotionChoice } from "./Promotion";
 const LIGHT = "#ece3d1";
 const DARK = "#7d9b86";
 const ACCENT = "#1d5c43";
+/** Нотация на светлом поле: тёмная зелень доски, а не её же полутон. */
+const INK = "#2f4a3d";
 const SOFT = "#2f8a63";
 /** Заготовленный ход: другой цвет, чтобы не путать со сделанным. */
 const PREMOVE = "#c4813f66";
@@ -288,8 +290,13 @@ export function Board({
           dropSquareStyle: streamer ? {} : undefined,
           draggingPieceStyle: streamer ? { opacity: 0 } : undefined,
           draggingPieceGhostStyle: streamer ? { opacity: 1 } : undefined,
-          darkSquareNotationStyle: { color: LIGHT, opacity: 0.55 },
-          lightSquareNotationStyle: { color: DARK, opacity: 0.75 },
+          // Нотация читается, а не угадывается: на светлом поле — тёмная, на
+          // тёмном — светлая, обе в полную силу и покрупнее. Прежняя, вполсилы
+          // и мелкая, на телефоне пропадала вовсе.
+          darkSquareNotationStyle: { color: LIGHT },
+          lightSquareNotationStyle: { color: INK },
+          alphaNotationStyle: { fontSize: "12px", fontWeight: 700, bottom: 2 },
+          numericNotationStyle: { fontSize: "12px", fontWeight: 700, top: 3 },
           onSquareClick: ({ square }) => clickSquare(square),
           // Взялся за фигуру — соперник об этом узнает. Только один соперник.
           onPieceDrag: ({ square }) => {
