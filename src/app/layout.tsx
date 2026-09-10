@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import { PLATFORM } from "@/components/Brand";
 import { PLATFORM_SURFACE } from "@/lib/theme";
+import { COVER_IN_STANDALONE } from "@/lib/standalone";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -80,12 +81,24 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
 
         Нижний отступ — второй половиной той же починки: под панелью остаётся
         пустота, а не кнопка «Ни за какие деньги». На больших экранах панелей
-        нет, поэтому там отступа тоже нет. `viewport-fit=cover` сознательно не
-        включаем: он поднял бы `env(safe-area-inset-*)` в полную силу, но
-        заодно пустил бы содержимое под вырез и под индикатор на iPhone, а
-        iOS-вёрстку просили не трогать.
+        нет, поэтому там отступа тоже нет.
+
+        `viewport-fit=cover` во вкладке по-прежнему не включаем: он пустил бы
+        содержимое под вырез и под индикатор, а iOS-вёрстку просили не
+        трогать. В установленном приложении он включается — там рамки браузера
+        нет вовсе, — но делает это скрипт ниже и только по признаку
+        приложения. Отступ этой строки в приложении тоже снимается, уже
+        стилями (docs/BACKLOG.md B1, B2).
       */}
-      <body className="flex min-h-svh flex-col pb-16 lg:pb-0">{children}</body>
+      <body className="flex min-h-svh flex-col pb-16 lg:pb-0">
+        {/*
+          Полноэкранная раскладка включается только в приложении и только
+          отсюда — см. src/lib/standalone.ts. Первым в `body`, до содержимого:
+          позже правка вьюпорта дала бы прыжок раскладки на глазах.
+        */}
+        <script dangerouslySetInnerHTML={{ __html: COVER_IN_STANDALONE }} />
+        {children}
+      </body>
     </html>
   );
 }

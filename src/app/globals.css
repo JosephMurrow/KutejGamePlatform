@@ -109,7 +109,20 @@ body {
  */
 @media (display-mode: standalone) {
   body {
+    /*
+     * Со всех сторон, а не только снизу: с `viewport-fit=cover` страница
+     * занимает экран целиком, включая вырез и полоску home, и развести края
+     * руками — как раз то, чего требуют гайдлайны Apple.
+     *
+     * Сверху отступ пока всегда нулевой: полоса статуса непрозрачна
+     * (`statusBarStyle: "default"`), и страница под неё не заходит. Он стоит
+     * заранее, чтобы включение прозрачной полосы не потребовало искать все
+     * места заново.
+     */
+    padding-top: env(safe-area-inset-top);
+    padding-right: env(safe-area-inset-right);
     padding-bottom: env(safe-area-inset-bottom);
+    padding-left: env(safe-area-inset-left);
   }
 }
 
