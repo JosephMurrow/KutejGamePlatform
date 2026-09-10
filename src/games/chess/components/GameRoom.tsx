@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Avatar } from "@/components/Avatar";
 import { InviteModal } from "@/components/rooms/InviteModal";
 import { Countdown } from "@/components/ui/Countdown";
@@ -9,6 +9,8 @@ import { REASON_TEXT } from "../engine/outcome";
 import { VIEWER_DELAY_LABEL } from "../rooms/settings";
 import type { ChessColor, ChessPlayerPayload } from "../protocol";
 import { Board } from "./Board";
+import { frames, START, taken } from "./replay";
+import { useSound } from "./sound";
 import { LeaderboardModal } from "./leaderboard/Modal";
 import { useChessRoom } from "./useChessRoom";
 
@@ -30,6 +32,9 @@ export function GameRoom({
   const [flipped, setFlipped] = useState<boolean | null>(null);
   const [inviteOpen, setInviteOpen] = useState(false);
   const [ratingOpen, setRatingOpen] = useState(false);
+  /** Какой полуход смотрим; `null` — партию как она есть. */
+  const [at, setAt] = useState<number | null>(null);
+  const sound = useSound();
 
   // Ссылка берётся из адресной строки: снаружи и изнутри сети адрес разный, и
   // правильный тот, по которому человек сюда пришёл.
@@ -43,6 +48,29 @@ export function GameRoom({
   const opponent =
     state?.players.find((player) => player.id !== userId) ?? null;
   const myColor = me?.color ?? null;
+
+  // Пустой список нужен своей ссылкой: иначе он каждый раз новый, и от него
+  // пересчитывается всё, что на нём висит.
+  const moves = useMemo(() => state?.moves ?? NO_MOVES, [state?.moves]);
+  const list = useMemo(() => frames(moves), [moves]);
+  /** Позиция, которую смотрим: своя при перемотке, серверная — обычно. */
+  const rewound = at !== null && at < list.length - 1 ? list[at] : null;
+
+  // Звук по свежему ходу: щелчок, взятие, шах или конец партии.
+  const heard = useRef(0);
+  useEffect(() => {
+    const now = moves.length;
+    const was = heard.current;
+    heard.current = now;
+
+    if (now <= was || was === 0) return;
+
+    const last = moves.at(-1) ?? "";
+    if (state?.phase === "over") sound.play("end");
+    else if (last.includes("#") || last.includes("+")) sound.play("check");
+    else if (last.includes("x")) sound.play("capture");
+    else sound.play("move");
+  }, [moves, sound, state?.phase]);
 
   // Уход посреди партии стоит поражения — платформа спросит об этом на выходе.
   useExitWarning(
@@ -83,17 +111,34 @@ export function GameRoom({
 
   return (
     <main className="mx-auto flex w-full max-w-5xl flex-1 flex-col gap-4 px-4 py-6 lg:flex-row lg:items-start">
-      <div className="mx-auto w-full max-w-[min(78vh,560px)]">
+      {/*
+        Доска — квадрат от меньшей стороны. Высота считается в svh, а не в vh:
+        на телефоне адресная строка то есть, то нет, и по vh доска регулярно
+        не помещается (src/games/chess/docs/BACKLOG.md G).
+      */}
+      <div className="mx-auto flex w-full max-w-[min(78svh,560px)] flex-col gap-1">
+        <Taken
+          side={orientation ? "white" : "black"}
+          fen={rewound?.fen ?? state.fen ?? START}
+        />
+
         <Board
-          fen={state.fen ?? START}
-          myColor={over ? null : myColor}
+          // В перемотке доска показывает прошлое и ходить из него нельзя.
+          fen={rewound?.fen ?? state.fen ?? START}
+          myColor={over || rewound ? null : myColor}
           turn={state.turn}
-          lastMove={state.lastMove}
+          lastMove={rewound ? rewound.lastMove : state.lastMove}
           ply={state.moves.length}
           flipped={orientation}
           streamer={state.streamerMode}
+          premoves={!over && !waiting && !rewound && myColor !== null}
           onHold={state.magnus ? room.hold : undefined}
           onMove={room.move}
+        />
+
+        <Taken
+          side={orientation ? "black" : "white"}
+          fen={rewound?.fen ?? state.fen ?? START}
         />
       </div>
 
@@ -107,7 +152,7 @@ export function GameRoom({
           placeholder="Ждём соперника"
         />
 
-        <Moves moves={state.moves} />
+        <Moves moves={state.moves} at={at ?? state.moves.length} onGo={setAt} />
 
         <Seat
           player={me}
@@ -133,7 +178,11 @@ export function GameRoom({
         ) : myColor ? (
           <Controls
             claimable={state.claimable !== null}
+            offer={state.drawOffer}
+            myColor={myColor}
             onClaim={room.claimDraw}
+            onOffer={room.offerDraw}
+            onDecline={room.declineDraw}
             onResign={room.resign}
           />
         ) : null}
@@ -153,6 +202,14 @@ export function GameRoom({
             className="flex-1 rounded-lg border border-line bg-paper px-3 py-2 text-xs font-semibold text-muted transition hover:border-accent hover:text-accent"
           >
             Рейтинг
+          </button>
+          <button
+            type="button"
+            onClick={sound.toggle}
+            aria-pressed={sound.on}
+            className="rounded-lg border border-line bg-paper px-3 py-2 text-xs font-semibold text-muted transition hover:border-accent hover:text-accent"
+          >
+            {sound.on ? "Звук" : "Тихо"}
           </button>
         </div>
 
@@ -229,8 +286,6 @@ function Notes({
     </p>
   );
 }
-
-const START = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
 
 /**
  * Общий зал до посадки: очередь и сводка.
@@ -358,41 +413,182 @@ function Seat({
 }
 
 /** Список ходов парами: белые слева, чёрные справа. */
-function Moves({ moves }: { moves: string[] }) {
+/**
+ * Список ходов с перемоткой.
+ *
+ * Перемотка **ничего не отправляет на сервер**: это способ посмотреть, а не
+ * действие. Партия идёт своим чередом, и пока человек в прошлом, ходить он не
+ * может — доска про это скажет сама (src/games/chess/docs/BACKLOG.md G).
+ */
+function Moves({
+  moves,
+  at,
+  onGo,
+}: {
+  moves: string[];
+  /** Какой полуход показан: `moves.length` — последний, он же живой. */
+  at: number;
+  onGo: (at: number | null) => void;
+}) {
   const pairs: [string, string | undefined][] = [];
-  for (let at = 0; at < moves.length; at += 2) {
-    pairs.push([moves[at] as string, moves[at + 1]]);
+  for (let index = 0; index < moves.length; index += 2) {
+    pairs.push([moves[index] as string, moves[index + 1]]);
   }
 
+  const live = at >= moves.length;
+  const go = (next: number) => onGo(next >= moves.length ? null : next);
+
   return (
-    <div className="flex max-h-56 flex-col gap-1 overflow-y-auto rounded-xl border border-line bg-paper p-3 text-sm lg:flex-1">
-      {pairs.length === 0 ? (
-        <span className="text-xs text-muted">Ходов пока нет</span>
-      ) : (
-        pairs.map(([white, black], index) => (
-          <div key={index} className="tabular flex gap-2">
-            <span className="w-6 text-right text-xs text-muted">
-              {index + 1}.
-            </span>
-            <span className="w-16">{white}</span>
-            <span className="w-16">{black ?? ""}</span>
-          </div>
-        ))
-      )}
+    <div className="flex flex-col gap-2 rounded-xl border border-line bg-paper p-3 text-sm lg:flex-1">
+      <div className="flex max-h-44 flex-col gap-1 overflow-y-auto lg:max-h-none lg:flex-1">
+        {pairs.length === 0 ? (
+          <span className="text-xs text-muted">Ходов пока нет</span>
+        ) : (
+          pairs.map(([white, black], index) => (
+            <div key={index} className="tabular flex items-center gap-2">
+              <span className="w-6 text-right text-xs text-muted">
+                {index + 1}.
+              </span>
+              <Ply san={white} to={index * 2 + 1} at={at} onGo={go} />
+              {black ? (
+                <Ply san={black} to={index * 2 + 2} at={at} onGo={go} />
+              ) : (
+                <span className="w-16" />
+              )}
+            </div>
+          ))
+        )}
+      </div>
+
+      {moves.length > 0 ? (
+        <div className="flex items-center gap-1 border-t border-line pt-2">
+          <Step label="⏮" title="К началу" onGo={() => go(0)} off={at === 0} />
+          <Step
+            label="◀"
+            title="Ход назад"
+            onGo={() => go(Math.max(0, at - 1))}
+            off={at === 0}
+          />
+          <Step
+            label="▶"
+            title="Ход вперёд"
+            onGo={() => go(at + 1)}
+            off={live}
+          />
+          <Step label="⏭" title="К партии" onGo={() => onGo(null)} off={live} />
+          {!live ? (
+            <span className="ml-auto text-xs text-muted">смотришь прошлое</span>
+          ) : null}
+        </div>
+      ) : null}
     </div>
   );
 }
 
+function Ply({
+  san,
+  to,
+  at,
+  onGo,
+}: {
+  san: string;
+  to: number;
+  at: number;
+  onGo: (at: number) => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={() => onGo(to)}
+      className={`w-16 rounded px-1 text-left transition hover:text-accent ${
+        at === to ? "bg-tint font-semibold text-accent" : ""
+      }`}
+    >
+      {san}
+    </button>
+  );
+}
+
+function Step({
+  label,
+  title,
+  onGo,
+  off,
+}: {
+  label: string;
+  title: string;
+  onGo: () => void;
+  off: boolean;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onGo}
+      disabled={off}
+      title={title}
+      aria-label={title}
+      className="rounded px-2 py-1 text-xs text-muted transition hover:text-accent disabled:opacity-30"
+    >
+      {label}
+    </button>
+  );
+}
+
+/**
+ * Взятые фигуры и материальный перевес — то, что считают в уме и сбиваются.
+ *
+ * `side` — кто сидит с этой стороны доски. Показываем **его** трофеи: снятые с
+ * доски фигуры соперника и его же перевес, если тот есть.
+ */
+function Taken({ side, fen }: { side: ChessColor; fen: string }) {
+  const lost = taken(fen);
+  const pieces = side === "white" ? lost.black : lost.white;
+  const edge = side === "white" ? lost.edge : -lost.edge;
+
+  if (pieces.length === 0 && edge <= 0) return <div className="h-5" />;
+
+  return (
+    <div className="flex h-5 items-center gap-1 text-xs text-muted">
+      <span className="tracking-tight">
+        {pieces.map((type) => GLYPH[type]).join("")}
+      </span>
+      {edge > 0 ? <span className="tabular">+{edge}</span> : null}
+    </div>
+  );
+}
+
+/** Ходов ещё нет. Ссылка одна на всех: от неё зависят пересчёты. */
+const NO_MOVES: string[] = [];
+
+/** Фигуры значками: ряд взятых читается одним взглядом. */
+const GLYPH: Record<string, string> = {
+  q: "♛",
+  r: "♜",
+  b: "♝",
+  n: "♞",
+  p: "♟",
+};
+
 function Controls({
   claimable,
+  offer,
+  myColor,
   onClaim,
+  onOffer,
+  onDecline,
   onResign,
 }: {
   claimable: boolean;
+  /** Кто предложил ничью и ждёт ответа. */
+  offer: ChessColor | null;
+  myColor: ChessColor;
   onClaim: () => void;
+  onOffer: () => void;
+  onDecline: () => void;
   onResign: () => void;
 }) {
   const [confirming, setConfirming] = useState(false);
+  const theirs = offer !== null && offer !== myColor;
 
   return (
     <div className="flex flex-col gap-2">
@@ -406,12 +602,47 @@ function Controls({
         </button>
       ) : null}
 
+      {theirs ? (
+        <div className="flex flex-col gap-2 rounded-lg border border-accent bg-tint px-3 py-2">
+          <span className="text-xs text-accent">Соперник предлагает ничью</span>
+          <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={onOffer}
+              className="flex-1 rounded-lg bg-accent px-3 py-1.5 text-sm font-semibold text-paper transition hover:bg-deep"
+            >
+              Согласиться
+            </button>
+            <button
+              type="button"
+              onClick={onDecline}
+              className="flex-1 rounded-lg border border-line px-3 py-1.5 text-sm font-semibold text-muted transition hover:text-ink"
+            >
+              Играем
+            </button>
+          </div>
+        </div>
+      ) : (
+        <button
+          type="button"
+          onClick={onOffer}
+          disabled={offer === myColor}
+          className="rounded-lg border border-line px-3 py-2 text-sm font-semibold text-muted transition hover:border-accent hover:text-accent disabled:opacity-50"
+        >
+          {offer === myColor ? "Ничья предложена" : "Предложить ничью"}
+        </button>
+      )}
+
       {/*
         Сдача с подтверждением, и стоит она отдельно от прочих кнопок: цена
         промаха — партия (src/games/chess/docs/BACKLOG.md G).
       */}
+      {/*
+        Сдача стоит отдельно от «ничьей» и с отступом: рядом эти две кнопки —
+        прямой путь к промаху пальцем (src/games/chess/docs/BACKLOG.md G).
+      */}
       {confirming ? (
-        <div className="flex gap-2">
+        <div className="mt-3 flex gap-2">
           <button
             type="button"
             onClick={onResign}
@@ -431,7 +662,7 @@ function Controls({
         <button
           type="button"
           onClick={() => setConfirming(true)}
-          className="rounded-lg border border-line px-3 py-2 text-sm font-semibold text-muted transition hover:border-accent hover:text-accent"
+          className="mt-3 rounded-lg border border-line px-3 py-2 text-sm font-semibold text-muted transition hover:border-accent hover:text-accent"
         >
           Сдаться
         </button>

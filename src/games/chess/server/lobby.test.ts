@@ -213,3 +213,32 @@ describe("после партии", () => {
     });
   });
 });
+
+describe("жеребьёвка цвета", () => {
+  it("во второй партии цвета меняются", () => {
+    const { lobby, seen } = setup();
+    lobby.join("a");
+    lobby.join("b");
+
+    const firstWhite = seen("a").turn === "white" ? "a" : "b";
+    const white = (id: string) =>
+      (
+        lobby.snapshot({ kind: "player", id }).players.find((p) => p.id === id)
+          ?.extra as { color?: string }
+      )?.color;
+
+    assert.equal(white(firstWhite), "white");
+
+    // Партия кончилась, оба снова в очередь: цвет должен смениться.
+    lobby.act("game:move", firstWhite, { from: "e2", to: "e4", ply: 0 });
+    lobby.act("game:resign", firstWhite, null);
+    lobby.act("game:rematch", "a", null);
+    lobby.act("game:rematch", "b", null);
+
+    assert.equal(
+      white(firstWhite),
+      "black",
+      "шесть чёрных подряд — не случайность, а ощущение подставы",
+    );
+  });
+});

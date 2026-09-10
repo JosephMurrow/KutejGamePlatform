@@ -823,3 +823,94 @@ describe("комната и жульничество", () => {
     assert.equal(table.changes.length, before);
   });
 });
+
+describe("предложение ничьей", () => {
+  it("двое соглашаются — партия кончается ничьей", () => {
+    const { room, extra } = setup();
+    seatBoth(room);
+
+    assert.deepEqual(room.act(GAME_EVENT.offerDraw, "white", null), {
+      accepted: true,
+    });
+    assert.equal(extra("white").drawOffer, "white");
+
+    assert.deepEqual(room.act(GAME_EVENT.offerDraw, "black", null), {
+      accepted: true,
+    });
+
+    assert.equal(extra("white").phase, "over");
+    assert.equal(extra("white").result, "draw");
+    assert.equal(extra("white").reason, "agreement");
+  });
+
+  it("отказ снимает предложение, партия идёт", () => {
+    const { room, extra } = setup();
+    seatBoth(room);
+
+    room.act(GAME_EVENT.offerDraw, "white", null);
+    assert.deepEqual(room.act(GAME_EVENT.declineDraw, "black", null), {
+      accepted: true,
+    });
+
+    assert.equal(extra("white").drawOffer, null);
+    assert.equal(extra("white").phase, "playing");
+  });
+
+  it("своё предложение не отклоняют", () => {
+    const { room } = setup();
+    seatBoth(room);
+
+    room.act(GAME_EVENT.offerDraw, "white", null);
+
+    assert.equal(
+      room.act(GAME_EVENT.declineDraw, "white", null).accepted,
+      false,
+    );
+  });
+
+  it("ход соперника снимает предложение сам", () => {
+    const { room, extra } = setup();
+    seatBoth(room);
+
+    room.act(GAME_EVENT.offerDraw, "white", null);
+    room.act(GAME_EVENT.move, "white", { from: "e2", to: "e4", ply: 0 });
+
+    assert.equal(
+      extra("white").drawOffer,
+      null,
+      "висеть до конца партии нельзя",
+    );
+  });
+
+  it("предлагать каждый ход не выйдет", () => {
+    const { room } = setup();
+    seatBoth(room);
+
+    room.act(GAME_EVENT.offerDraw, "white", null);
+    room.act(GAME_EVENT.declineDraw, "black", null);
+
+    const again = room.act(GAME_EVENT.offerDraw, "white", null);
+
+    assert.equal(
+      again.accepted,
+      false,
+      "«ничья?» каждый ход — способ троллинга",
+    );
+    assert.match(again.reason ?? "", /только что/);
+  });
+
+  it("зритель предложения не видит", () => {
+    const { room, extra } = setup();
+    seatBoth(room);
+    room.join("watcher");
+
+    room.act(GAME_EVENT.offerDraw, "white", null);
+
+    assert.equal(extra("white").drawOffer, "white", "игрок видит");
+    assert.equal(
+      extra("watcher").drawOffer,
+      null,
+      "а зрителю подсказывать нечего",
+    );
+  });
+});

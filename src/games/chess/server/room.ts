@@ -52,6 +52,14 @@ const MAX_PLIES = 600;
 const MAX_GAME_MS = 3 * 60 * 60 * 1000;
 
 /**
+ * Через сколько полуходов можно предложить ничью снова.
+ *
+ * Без этого «ничья?» на каждый ход становится способом троллинга: отказаться
+ * стоит нажатия, а предложить — тоже (src/games/chess/docs/BACKLOG.md G).
+ */
+const DRAW_COOLDOWN_PLIES = 10;
+
+/**
  * Доли лимита на ход, на которых бот подаёт голос: сперва замечает, что
  * соперник задумался, потом — что у того горит флаг.
  *
@@ -239,6 +247,13 @@ export class ChessRoom implements GameRoomState {
   private readonly shown = new Map<string, Shown>();
   /** Что зрители ещё не видели: очередь кадров под задержку. */
   private readonly frames: Frame[] = [];
+  /** Кто предложил ничью и ждёт ответа. */
+  private offer: ChessColor | null = null;
+  /** На каком полуходе каждый предлагал в последний раз. */
+  private offered: Record<ChessColor, number> = {
+    white: -DRAW_COOLDOWN_PLIES,
+    black: -DRAW_COOLDOWN_PLIES,
+  };
 
   join(playerId: string): void {
     // Вернулся тот, кого ждали: место за ним и держали.
@@ -379,6 +394,8 @@ export class ChessRoom implements GameRoomState {
     if (event === GAME_EVENT.resign) return this.resign(actorId);
     if (event === GAME_EVENT.move) return this.makeMove(actorId, payload);
     if (event === GAME_EVENT.claimDraw) return this.claimDraw(actorId);
+    if (event === GAME_EVENT.offerDraw) return this.offerDraw(actorId);
+    if (event === GAME_EVENT.declineDraw) return this.declineDraw(actorId);
     if (event === GAME_EVENT.rematch) return this.rematch(actorId);
     if (event === GAME_EVENT.holding) return this.holding(actorId, payload);
 
@@ -435,8 +452,18 @@ export class ChessRoom implements GameRoomState {
           away: this.absence?.id === id,
         },
       })),
-      extra: seen ? seen.view : this.view(),
+      extra: {
+        ...(seen ? seen.view : this.view()),
+        // Предложение ничьей до ответа — секрет двоих. Зритель узнает о нём
+        // только по итогу партии (src/games/chess/docs/BACKLOG.md F2).
+        drawOffer: this.seatedViewer(viewer) ? this.offer : null,
+      },
     };
+  }
+
+  /** Смотрит ли это тот, кто сидит за доской. */
+  private seatedViewer(viewer: GameViewer): boolean {
+    return viewer.kind === "player" && this.seats.includes(viewer.id);
   }
 
   /** Игровая часть снимка, как она есть прямо сейчас. */
@@ -456,6 +483,7 @@ export class ChessRoom implements GameRoomState {
       lastMove: this.game.lastMove(),
       /** Есть ли основание требовать ничью прямо сейчас. */
       claimable: this.game.claimableDraw(),
+      drawOffer: this.offer,
       result: outcome?.result ?? null,
       reason: outcome?.reason ?? null,
       timeControl: this.settings.timeControl,
@@ -580,6 +608,9 @@ export class ChessRoom implements GameRoomState {
     this.times.push(Math.round(spentAt - this.moveStartedAt));
     this.moveStartedAt = spentAt;
     this.nudged = 0;
+    // Предложение живёт до ответа или до следующего хода — что случится
+    // раньше (src/games/chess/docs/BACKLOG.md G).
+    this.offer = null;
     this.clock.restart();
     this.finish(result.outcome ?? this.capIfTooLong());
 
@@ -669,6 +700,8 @@ export class ChessRoom implements GameRoomState {
     this.game = new ChessGame();
     this.times = [];
     this.matchId = randomUUID();
+    this.offer = null;
+    this.offered = { white: -DRAW_COOLDOWN_PLIES, black: -DRAW_COOLDOWN_PLIES };
     this.begin();
     this.bot?.restart();
     this.bot?.cheats?.restart();
@@ -676,6 +709,61 @@ export class ChessRoom implements GameRoomState {
     this.context.changed();
     // Цвета поменялись: если бот теперь белый, ходить ему.
     void this.botTurn();
+
+    return { accepted: true };
+  }
+
+  /**
+   * Предложить ничью — или принять чужое предложение.
+   *
+   * Одно действие на оба случая: у человека кнопка одна, и «принять» от
+   * «предложить» отличается только тем, кто предложил первым.
+   */
+  private offerDraw(actorId: string): ActionOutcome {
+    const color = this.colorOf(actorId);
+    if (!color) return { accepted: false, reason: "Ты не за доской" };
+    if (this.game.isOver()) {
+      return { accepted: false, reason: "Партия кончилась" };
+    }
+
+    // Висит чужое предложение — это согласие, а не новое предложение.
+    if (this.offer && this.offer !== color) {
+      this.offer = null;
+      this.finish(this.game.agreeDraw());
+
+      return { accepted: true };
+    }
+
+    const ply = this.game.ply();
+    if (ply - this.offered[color] < DRAW_COOLDOWN_PLIES) {
+      return { accepted: false, reason: "Ничью только что предлагали" };
+    }
+
+    // Соперник-программа отвечает сразу: ждать от неё раздумий бессмысленно.
+    if (this.bot) {
+      this.offered[color] = ply;
+      this.bot.cheats?.refuseDraw(ply);
+
+      return { accepted: false, reason: "Соперник не согласен" };
+    }
+
+    this.offered[color] = ply;
+    this.offer = color;
+    this.context.changed();
+
+    return { accepted: true };
+  }
+
+  /** Отказаться: предложение снимается, партия идёт дальше. */
+  private declineDraw(actorId: string): ActionOutcome {
+    const color = this.colorOf(actorId);
+    if (!color) return { accepted: false, reason: "Ты не за доской" };
+    if (!this.offer || this.offer === color) {
+      return { accepted: false, reason: "Ничью никто не предлагал" };
+    }
+
+    this.offer = null;
+    this.context.changed();
 
     return { accepted: true };
   }

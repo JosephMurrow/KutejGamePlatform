@@ -43,6 +43,13 @@ export class ChessLobby implements GameRoomState {
   private readonly queue = new Matchmaker();
   /** Все, кто в зале: и за досками, и в очереди. */
   private readonly present = new Set<string>();
+  /**
+   * Каким цветом человек играл в прошлый раз.
+   *
+   * Жеребьёвка балансируется по этой памяти: шесть чёрных подряд — не
+   * случайность, а ощущение подставы (src/games/chess/docs/BACKLOG.md G).
+   */
+  private readonly lastColor = new Map<string, "white" | "black">();
 
   constructor(
     private readonly context: GameRoomContext,
@@ -156,6 +163,7 @@ export class ChessLobby implements GameRoomState {
         moves: [],
         lastMove: null,
         claimable: null,
+        drawOffer: null,
         result: null,
         reason: null,
         timeControl: LOBBY_SETTINGS.timeControl,
@@ -182,7 +190,8 @@ export class ChessLobby implements GameRoomState {
 
   /** Собрать пары из очереди и посадить их за доски. */
   private seatPairs(): void {
-    for (const [white, black] of this.queue.pairs()) {
+    for (const pair of this.queue.pairs()) {
+      const [white, black] = this.balance(pair);
       const key = `${this.context.key}:${randomUUID()}`;
       const board = new ChessRoom(
         this.boardContext(key),
@@ -196,6 +205,9 @@ export class ChessLobby implements GameRoomState {
       this.boards.set(key, board);
       this.seats.set(white, key);
       this.seats.set(black, key);
+
+      this.lastColor.set(white, "white");
+      this.lastColor.set(black, "black");
 
       board.join(white);
       board.join(black);
@@ -243,6 +255,23 @@ export class ChessLobby implements GameRoomState {
     for (const [playerId, at] of this.seats) {
       if (at === key) this.seats.delete(playerId);
     }
+  }
+
+  /**
+   * Кому из пары белые.
+   *
+   * Белые достаются тому, кто в прошлый раз играл чёрными. Если оба одинаковы
+   * или обоих не помним — порядок остаётся тот, что дал подбор: выдумывать
+   * случайность там, где её и так хватает, незачем.
+   */
+  private balance([first, second]: [string, string]): [string, string] {
+    const one = this.lastColor.get(first);
+    const two = this.lastColor.get(second);
+    if (one === two) return [first, second];
+
+    return one === "white" || two === "black"
+      ? [second, first]
+      : [first, second];
   }
 
   /** Ещё партия: встать в очередь заново. */

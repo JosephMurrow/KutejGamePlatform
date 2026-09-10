@@ -56,6 +56,9 @@ export interface ChessRoomHandle {
   hold: (square: string) => void;
   resign: () => Promise<void>;
   claimDraw: () => Promise<void>;
+  /** Предложить ничью — или принять чужое предложение, если оно висит. */
+  offerDraw: () => Promise<void>;
+  declineDraw: () => Promise<void>;
   /** Ещё партия в той же комнате: цвета меняются местами. */
   rematch: () => Promise<void>;
   /** Уйти из очереди зала. */
@@ -171,6 +174,14 @@ export function useChessRoom(
     await act(GAME_EVENT.claimDraw);
   }, [act]);
 
+  const offerDraw = useCallback(async () => {
+    await act(GAME_EVENT.offerDraw);
+  }, [act]);
+
+  const declineDraw = useCallback(async () => {
+    await act(GAME_EVENT.declineDraw);
+  }, [act]);
+
   const rematch = useCallback(async () => {
     await act(GAME_EVENT.rematch);
   }, [act]);
@@ -189,6 +200,8 @@ export function useChessRoom(
     hold,
     resign,
     claimDraw,
+    offerDraw,
+    declineDraw,
     rematch,
     leaveQueue,
   };

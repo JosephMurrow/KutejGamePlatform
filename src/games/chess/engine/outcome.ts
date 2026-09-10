@@ -62,10 +62,12 @@ export interface Outcome {
 /** Человеческий текст причины. Показывается обоим и зрителям. */
 export const REASON_TEXT: Record<EndReason, string> = {
   checkmate: "мат",
-  stalemate: "пат",
+  // Пат новички принимают за поломку: «ходов нет, а мне не мат?». Поэтому не
+  // одно слово, а объяснение (src/games/chess/docs/BACKLOG.md G).
+  stalemate: "пат: ходить нечем, а шаха нет",
   resign: "сдача",
   flag: "время вышло",
-  insufficient: "не хватает материала на мат",
+  insufficient: "мата не поставить ни одному, ни другому",
   flagVsInsufficient: "время вышло, но матовать нечем",
   threefold: "троекратное повторение",
   fivefold: "пятикратное повторение",

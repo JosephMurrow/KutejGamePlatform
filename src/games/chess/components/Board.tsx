@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Chess } from "chess.js";
 import { Chessboard } from "react-chessboard";
 import type { ChessColor } from "../protocol";
@@ -21,6 +21,8 @@ const LIGHT = "#ece3d1";
 const DARK = "#7d9b86";
 const ACCENT = "#1d5c43";
 const SOFT = "#2f8a63";
+/** Заготовленный ход: другой цвет, чтобы не путать со сделанным. */
+const PREMOVE = "#c4813f66";
 
 export interface BoardProps {
   /** Позиция с сервера. */
@@ -51,6 +53,13 @@ export interface BoardProps {
    * ничего — обработчика просто нет.
    */
   onHold?: (square: string) => void;
+  /**
+   * Партия идёт и человек за ней сидит: можно готовить премув.
+   *
+   * Отдельно от `myColor` намеренно: в перемотке цвет гасится, чтобы нельзя
+   * было ходить из прошлого, — а премув там тем более ни к чему.
+   */
+  premoves?: boolean;
   /** Отправить ход. `false` — сервер отказал, доска возвращается как была. */
   onMove: (move: {
     from: string;
@@ -68,6 +77,7 @@ export function Board({
   ply,
   flipped,
   streamer,
+  premoves = false,
   onHold,
   onMove,
 }: BoardProps) {
@@ -78,6 +88,15 @@ export function Board({
     from: string;
     to: string;
   } | null>(null);
+  /**
+   * Ход, заготовленный на чужом ходу.
+   *
+   * Проверяется он не сейчас, а когда очередь дойдёт: премув и есть ставка на
+   * то, каким будет ответ соперника (src/games/chess/docs/BACKLOG.md G).
+   */
+  const [premove, setPremove] = useState<{ from: string; to: string } | null>(
+    null,
+  );
 
   const shown = optimistic ?? fen;
   const rules = useMemo(() => new Chess(shown), [shown]);
@@ -120,6 +139,13 @@ export function Board({
     if (picked && !streamer) {
       marks[picked] = { boxShadow: `inset 0 0 0 999px ${ACCENT}57` };
     }
+    // Премув видно только своему, и только вне режима стримера: заготовленный
+    // ход — тот самый замысел, который режим и прячет (D3, F1).
+    if (premove && !streamer) {
+      for (const square of [premove.from, premove.to]) {
+        marks[square] = { boxShadow: `inset 0 0 0 999px ${PREMOVE}` };
+      }
+    }
     for (const [square, capture] of targets) {
       marks[square] = capture
         ? { boxShadow: `inset 0 0 0 4px ${ACCENT}6b` }
@@ -129,7 +155,34 @@ export function Board({
     }
 
     return marks;
-  }, [lastMove, picked, rules, streamer, targets]);
+  }, [lastMove, picked, premove, rules, streamer, targets]);
+
+  // Очередь дошла — пробуем заготовленное. Не подошло, значит соперник сходил
+  // не так, как ожидалось: заготовка просто пропадает.
+  //
+  // Отдельным кадром, а не тут же: ход соперника должен успеть появиться на
+  // доске. Иначе премув затирает его в том же кадре, и человек не видит, на
+  // что, собственно, отвечал.
+  useEffect(() => {
+    if (!myTurn || !premove) return;
+
+    const { from, to } = premove;
+    const legal = new Chess(fen)
+      .moves({ square: from as never, verbose: true })
+      .some((move) => move.to === to);
+
+    const timer = setTimeout(() => {
+      setPremove(null);
+      if (!legal) return;
+
+      if (needsPromotion(from, to)) setPromotion({ from, to });
+      else void send(from, to);
+    }, 0);
+
+    return () => clearTimeout(timer);
+    // Заготовка срабатывает на смену очереди, а не на каждую отрисовку.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [myTurn, fen]);
 
   /** Доходит ли пешка этим ходом до края: тогда нужен выбор фигуры. */
   function needsPromotion(from: string, to: string): boolean {
@@ -179,7 +232,26 @@ export function Board({
   }
 
   function clickSquare(square: string) {
-    if (!myTurn) return;
+    const mineNow = () => {
+      const piece = rules.get(square as never);
+      return piece && piece.color === (myColor === "white" ? "w" : "b");
+    };
+
+    // Чужой ход: собираем премув. Легальность проверится, когда очередь дойдёт.
+    if (!myTurn) {
+      if (!premoves) return;
+
+      if (picked) {
+        setPicked(null);
+        if (picked !== square && !mineNow())
+          setPremove({ from: picked, to: square });
+        return;
+      }
+
+      setPremove(null);
+      if (mineNow()) setPicked(square);
+      return;
+    }
 
     if (picked) {
       if (picked === square) {
@@ -189,8 +261,7 @@ export function Board({
       if (attempt(picked, square)) return;
     }
 
-    const piece = rules.get(square as never);
-    const mine = piece && piece.color === (myColor === "white" ? "w" : "b");
+    const mine = mineNow();
     setPicked(mine ? square : null);
     if (mine) onHold?.(square);
   }
@@ -202,7 +273,7 @@ export function Board({
           position: shown,
           pieces: PIECES,
           boardOrientation: flipped ? "black" : "white",
-          allowDragging: myTurn,
+          allowDragging: myTurn || premoves,
           showNotation: true,
           // Анимация показывает ход, который ещё не сделан: фигура едет,
           // сервер ещё не ответил, а запись экрана это уже поймала.
@@ -224,10 +295,17 @@ export function Board({
           onPieceDrag: ({ square }) => {
             if (myTurn && square) onHold?.(square);
           },
-          onPieceDrop: ({ sourceSquare, targetSquare }) =>
-            targetSquare !== null && attempt(sourceSquare, targetSquare),
+          onPieceDrop: ({ sourceSquare, targetSquare }) => {
+            if (targetSquare === null || sourceSquare === targetSquare) {
+              return false;
+            }
+            if (myTurn) return attempt(sourceSquare, targetSquare);
+
+            setPremove({ from: sourceSquare, to: targetSquare });
+            return false;
+          },
           canDragPiece: ({ piece }) =>
-            myTurn &&
+            (myTurn || premoves) &&
             piece.pieceType.startsWith(myColor === "white" ? "w" : "b"),
         }}
       />
