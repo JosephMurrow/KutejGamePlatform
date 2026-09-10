@@ -38,7 +38,6 @@ function прогнать(режим: {
     querySelector: () => (режим.безМеты ? null : meta),
   };
 
-  // eslint-disable-next-line @typescript-eslint/no-implied-eval
   new Function("window", "document", COVER_IN_STANDALONE)(window, document);
   return meta.content;
 }
@@ -76,7 +75,6 @@ describe("полноэкранная раскладка в приложении"
   it("молчит на браузере без matchMedia", () => {
     const meta = { content: БАЗОВЫЙ };
     assert.doesNotThrow(() => {
-      // eslint-disable-next-line @typescript-eslint/no-implied-eval
       new Function("window", "document", COVER_IN_STANDALONE)(
         {},
         { querySelector: () => meta },
