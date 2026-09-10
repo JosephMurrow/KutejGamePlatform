@@ -9,9 +9,9 @@ import type {
 import type { Ticker } from "../engine/clock";
 import { Matchmaker } from "../engine/matchmaker";
 import { GAME_EVENT } from "../protocol";
-import { START_RATING } from "../rooms/matches";
+import { START_RATING } from "../rating/glicko";
 import type { ChessRoomSettings } from "../rooms/settings";
-import { ChessRoom, type Persist } from "./room";
+import { ChessRoom, type Persist, type Ratings } from "./room";
 
 /**
  * Общий зал: одна платформенная комната, внутри — много досок сразу.
@@ -47,6 +47,8 @@ export class ChessLobby implements GameRoomState {
     private readonly context: GameRoomContext,
     private readonly now: Ticker = () => performance.now(),
     private readonly persist?: Persist,
+    /** Откуда брать рейтинги: зал раздаёт её доскам. */
+    private readonly ratings?: Ratings,
   ) {}
 
   join(playerId: string): void {
@@ -71,6 +73,7 @@ export class ChessLobby implements GameRoomState {
     // За доской уход разбирает сама доска: место держится, часы идут, и через
     // отсрочку партия достаётся сопернику.
     this.boardOf(playerId)?.leave(playerId);
+    this.sweep();
     this.context.changed();
   }
 
@@ -96,10 +99,8 @@ export class ChessLobby implements GameRoomState {
 
   /** Время вышло у кого-то — будим все доски, каждая разберётся сама. */
   tick(): void {
-    for (const [key, board] of this.boards) {
-      board.tick();
-      if (board.isOver()) this.retire(key, board);
-    }
+    for (const board of this.boards.values()) board.tick();
+    this.sweep();
   }
 
   act(event: string, actorId: string, payload: unknown): ActionOutcome {
@@ -111,10 +112,7 @@ export class ChessLobby implements GameRoomState {
       return { accepted: false, reason: "Ты ещё не за доской" };
     }
 
-    const outcome = board.act(event, actorId, payload);
-    if (board.isOver()) this.retire(this.seats.get(actorId) ?? "", board);
-
-    return outcome;
+    return board.act(event, actorId, payload);
   }
 
   /** В зале хозяина нет, выгонять некому. */
@@ -126,8 +124,8 @@ export class ChessLobby implements GameRoomState {
     const summary = {
       /** Сколько ждёт соперника. */
       waiting: this.queue.waiting().length,
-      /** Сколько партий идёт прямо сейчас. */
-      boards: this.boards.size,
+      /** Сколько партий идёт прямо сейчас. Доигранные в счёт не идут. */
+      boards: this.live(),
       /** Сколько человек в зале всего. */
       present: this.present.size,
     };
@@ -189,6 +187,8 @@ export class ChessLobby implements GameRoomState {
         LOBBY_SETTINGS,
         this.now,
         this.persist,
+        undefined,
+        this.ratings,
       );
 
       this.boards.set(key, board);
@@ -201,7 +201,34 @@ export class ChessLobby implements GameRoomState {
   }
 
   /**
-   * Партия кончилась: доска убирается, а игроки — нет.
+   * Доигранная доска остаётся у зала, пока за ней кто-то сидит.
+   *
+   * Иначе выигравший не увидит, что выиграл: убери доску сразу — и следующим же
+   * снимком человек оказывается в очереди, без мата, без итога и без кнопки
+   * «ещё партию». Убирается она, когда оба разошлись или когда кто-то из них
+   * попросил новую партию.
+   */
+  private sweep(): void {
+    for (const [key, board] of this.boards) {
+      if (!board.isOver()) continue;
+
+      const watched = [...this.seats].some(
+        ([playerId, at]) => at === key && this.present.has(playerId),
+      );
+      if (!watched) this.retire(key, board);
+    }
+  }
+
+  /** Сколько партий идёт: доигранные, но ещё не убранные, не считаются. */
+  private live(): number {
+    let count = 0;
+    for (const board of this.boards.values()) if (!board.isOver()) count += 1;
+
+    return count;
+  }
+
+  /**
+   * Доску убрать, а игроков — нет.
    *
    * Обратно в очередь их никто не ставит: захотят ещё — нажмут сами. Молча
    * подсаживать к новому сопернику значит отнимать у человека паузу между
@@ -221,7 +248,11 @@ export class ChessLobby implements GameRoomState {
     if (!this.present.has(actorId)) {
       return { accepted: false, reason: "Тебя нет в зале" };
     }
-    if (this.boardOf(actorId)) {
+
+    // Доигранная доска до сих пор у него на экране — с неё и уходим.
+    const board = this.boardOf(actorId);
+    if (board?.isOver()) this.retire(this.seats.get(actorId) ?? "", board);
+    else if (board) {
       return { accepted: false, reason: "Партия ещё идёт" };
     }
 

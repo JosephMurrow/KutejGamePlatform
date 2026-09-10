@@ -148,22 +148,45 @@ describe("часы зала", () => {
     pass(2000);
     lobby.tick();
 
-    assert.equal(seen("a").phase, "queue", "проигравшие ушли из-за доски");
+    assert.equal(seen("a").phase, "over", "своя партия кончилась");
+    assert.equal(seen("a").reason, "flag");
     assert.equal(seen("c").phase, "playing", "чужая партия не тронута");
   });
 });
 
 describe("после партии", () => {
-  it("доска убирается, а игроки остаются в зале", () => {
+  it("доигранная доска остаётся на экране у обоих", () => {
     const { lobby, seen } = setup();
     lobby.join("a");
     lobby.join("b");
     lobby.act("game:move", "a", move("e2", "e4", 0));
     lobby.act("game:resign", "a", null);
 
-    assert.deepEqual(seen("a").lobby, { waiting: 0, boards: 0, present: 2 });
-    assert.equal(seen("a").phase, "queue");
-    assert.equal(seen("a").queued, false, "обратно в очередь никто не ставил");
+    // Убрать доску сразу значит не показать человеку, чем кончилась партия:
+    // следующим же снимком он оказался бы в очереди, без итога и без кнопки.
+    assert.equal(seen("a").phase, "over");
+    assert.equal(seen("a").result, "black");
+    assert.equal(seen("b").phase, "over", "сопернику тоже");
+    assert.deepEqual(
+      seen("a").lobby,
+      { waiting: 0, boards: 0, present: 2 },
+      "идущей партией она при этом не считается",
+    );
+  });
+
+  it("доигранную доску убирают, когда оба разошлись", () => {
+    const { lobby, seen } = setup();
+    lobby.join("a");
+    lobby.join("b");
+    lobby.act("game:move", "a", move("e2", "e4", 0));
+    lobby.act("game:resign", "a", null);
+
+    lobby.leave("a");
+    lobby.leave("b");
+    lobby.join("a");
+
+    assert.equal(seen("a").phase, "queue", "вернулся — стоит в очереди");
+    assert.equal(seen("a").queued, true);
   });
 
   it("«ещё партия» ставит обратно в очередь", () => {
