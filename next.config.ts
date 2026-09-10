@@ -19,6 +19,43 @@ const nextConfig: NextConfig = {
    */
   async headers() {
     return [
+      /**
+       * Служебный воркер (docs/BACKLOG.md D1). Половина защиты от «застрял на
+       * старой версии»: браузер обязан перепроверять сам файл воркера каждый
+       * раз. Вторая половина — `updateViaCache: "none"` при регистрации.
+       *
+       * Тип содержимого задан явно: без него отдача из `public` полагается на
+       * угадывание по расширению, а воркер с чужим типом браузер отвергает
+       * целиком.
+       */
+      {
+        source: "/sw.js",
+        headers: [
+          {
+            key: "Content-Type",
+            value: "application/javascript; charset=utf-8",
+          },
+          {
+            key: "Cache-Control",
+            value: "no-cache, no-store, must-revalidate",
+          },
+        ],
+      },
+
+      /**
+       * Иконки установки. Имена без хеша, поэтому не `immutable`: сутки кеша
+       * убирают переспросы и не мешают перерисовать набор.
+       */
+      {
+        source: "/icons/:path*.png",
+        headers: [
+          {
+            key: "Cache-Control",
+            value: "public, max-age=86400, stale-while-revalidate=604800",
+          },
+        ],
+      },
+
       {
         source: "/:dir(avatars|games)/:path*.svg",
         headers: [

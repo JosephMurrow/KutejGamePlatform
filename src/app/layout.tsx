@@ -3,6 +3,7 @@ import { Geist, Geist_Mono } from "next/font/google";
 import { PLATFORM } from "@/components/Brand";
 import { PLATFORM_SURFACE } from "@/lib/theme";
 import { COVER_IN_STANDALONE } from "@/lib/standalone";
+import { ServiceWorker } from "@/components/ServiceWorker";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -97,6 +98,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
           позже правка вьюпорта дала бы прыжок раскладки на глазах.
         */}
         <script dangerouslySetInnerHTML={{ __html: COVER_IN_STANDALONE }} />
+        <ServiceWorker />
         {children}
       </body>
     </html>
