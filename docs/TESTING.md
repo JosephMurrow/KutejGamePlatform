@@ -126,6 +126,12 @@ npm run format:check
 npm run build
 ```
 
+`typecheck` начинается с `next typegen`. Глобальные типы маршрутов —
+`LayoutProps`, `PageProps`, `RouteContext` — не пишутся руками и не лежат в
+репозитории: их генерирует Next в `.next/types` при `dev`, `build` или этой
+самой команде. Голый `tsc` на чистом клоне их не находил и падал с
+`Cannot find name 'LayoutProps'` — генерация впереди проверки это чинит.
+
 Всё это плюс `npm ci` гоняется на каждый пуш —
 [.github/workflows/checks.yml](../.github/workflows/checks.yml). Смоуков там
 нет намеренно: им нужен живой сервер и база.

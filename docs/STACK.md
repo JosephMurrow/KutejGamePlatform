@@ -87,7 +87,7 @@ npm run dev            # Next + сокеты на одном порту
 npm run build          # сборка Next
 npm test               # 225 тестов на родном раннере Node
 npm run lint           # eslint, включая правило границы платформы и игры
-npm run typecheck      # tsc --noEmit
+npm run typecheck      # next typegen + tsc --noEmit
 npm run format         # prettier
 npm run db:up          # postgres и mailpit в docker
 npm run db:migrate     # migrate dev + generate
