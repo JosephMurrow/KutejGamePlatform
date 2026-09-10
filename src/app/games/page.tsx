@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Brand, PLATFORM } from "@/components/Brand";
 import { Header } from "@/components/Header";
+import { InstallHint } from "@/components/InstallHint";
 import { Shelf } from "@/components/games/Shelf";
 import { ShelfBackdrop } from "@/components/games/ShelfBackdrop";
 import { UserMenu } from "@/components/UserMenu";
@@ -34,6 +35,7 @@ export default async function GamesPage() {
           )}
         </Header>
 
+        <InstallHint />
         <Shelf />
       </main>
     </>

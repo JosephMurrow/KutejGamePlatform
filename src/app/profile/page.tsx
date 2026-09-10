@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import { Avatar } from "@/components/Avatar";
 import { Brand, PLATFORM } from "@/components/Brand";
 import { EmailForm } from "@/components/profile/EmailForm";
+import { InstallHint } from "@/components/InstallHint";
 import { ProfileForm } from "@/components/profile/ProfileForm";
 import { UserMenu } from "@/components/UserMenu";
 import { getCurrentUser } from "@/lib/auth/session";
@@ -24,6 +25,8 @@ export default async function ProfilePage() {
       <Header brand={<Brand className="h-8" />} brandHref="/games">
         <UserMenu nickname={user.nickname} avatarId={user.avatarId} />
       </Header>
+
+      <InstallHint always />
 
       <Card className="mb-6 flex items-center gap-4">
         <Avatar id={user.avatarId} size={64} />
