@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import { PLATFORM } from "@/components/Brand";
+import { PLATFORM_SURFACE } from "@/lib/theme";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -53,6 +54,15 @@ export const viewport: Viewport = {
    * завязанная на высоту экрана, дёргается при каждом нажатии.
    */
   interactiveWidget: "resizes-content",
+
+  /**
+   * Цвет шапки и полосы статуса (docs/BACKLOG.md B3). Равен фону страницы:
+   * в установленном приложении полоса статуса тогда не отделяется от неё.
+   *
+   * Это цвет платформы. Внутри игры его перебивает `viewport` её макета —
+   * вложенный сегмент сильнее корневого, ровно как со знаком на вкладке.
+   */
+  themeColor: PLATFORM_SURFACE,
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {

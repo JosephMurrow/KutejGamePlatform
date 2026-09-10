@@ -1,5 +1,6 @@
 import type { MetadataRoute } from "next";
 import { PLATFORM, PLATFORM_TAGLINE } from "@/lib/brand";
+import { PLATFORM_SURFACE } from "@/lib/theme";
 import { GAMES } from "@/lib/games/registry";
 
 /**
@@ -12,9 +13,6 @@ import { GAMES } from "@/lib/games/registry";
  * Игры берутся из реестра, а не поимённо: платформе нельзя знать игру в лицо,
  * и правило это проверяет `npm run lint` (docs/BACKLOG.md A6).
  */
-
-/** Фон страницы платформы — `--color-surface` из globals.css. */
-const SURFACE = "#453466";
 
 export default function manifest(): MetadataRoute.Manifest {
   return {
@@ -54,8 +52,8 @@ export default function manifest(): MetadataRoute.Manifest {
      * Цвет один на всё приложение — подставить сюда цвет игры нельзя. Внутри
      * игр цвет шапки задаётся мета-тегом страницы (docs/BACKLOG.md B3).
      */
-    theme_color: SURFACE,
-    background_color: SURFACE,
+    theme_color: PLATFORM_SURFACE,
+    background_color: PLATFORM_SURFACE,
 
     categories: ["games", "entertainment"],
 
