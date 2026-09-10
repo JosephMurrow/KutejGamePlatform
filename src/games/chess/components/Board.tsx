@@ -26,6 +26,20 @@ const SOFT = "#2f8a63";
 /** Заготовленный ход: другой цвет, чтобы не путать со сделанным. */
 const PREMOVE = "#c4813f66";
 
+/**
+ * Кант вокруг доски: тёмное дерево и светлая линия по внутреннему обводу.
+ *
+ * Стилями, а не картинкой: тянется под любую ширину и ничего не весит.
+ * «Дерево» — слоёный градиент, вариант выбран хозяином из трёх (правило D0).
+ */
+const FRAME: React.CSSProperties = {
+  padding: 7,
+  borderRadius: 4,
+  background: "linear-gradient(150deg, #3f3125 0%, #55402d 50%, #35291e 100%)",
+  boxShadow:
+    "inset 0 0 0 1px rgba(236, 227, 209, 0.22), 0 4px 14px rgba(30, 20, 12, 0.24)",
+};
+
 export interface BoardProps {
   /** Позиция с сервера. */
   fen: string;
@@ -269,7 +283,7 @@ export function Board({
   }
 
   return (
-    <div className="relative">
+    <div className="relative" style={FRAME}>
       <Chessboard
         options={{
           position: shown,

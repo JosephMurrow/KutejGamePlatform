@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Avatar } from "@/components/Avatar";
 import { UserMenu } from "@/components/UserMenu";
@@ -8,6 +9,7 @@ import { InviteModal } from "@/components/rooms/InviteModal";
 import { Countdown } from "@/components/ui/Countdown";
 import { useExitWarning } from "@/components/games/ExitToShelf";
 import { REASON_TEXT } from "../engine/outcome";
+import { ROUTES } from "../manifest";
 import { MENU_LINKS } from "../menu";
 import { VIEWER_DELAY_LABEL } from "../rooms/settings";
 import type { ChessColor, ChessPlayerPayload } from "../protocol";
@@ -86,42 +88,22 @@ export function GameRoom({
       : null,
   );
 
-  if (room.kicked) {
-    return <Notice title="Комната закрыта" text={room.kicked} />;
-  }
-  if (!state) {
-    return (
-      <Notice
-        title="Подключаемся"
-        text={room.error ?? "Ищем стол и раскладываем фигуры."}
-      />
-    );
-  }
-
-  // В общем зале до посадки доски нет вовсе: человек стоит в очереди.
-  if (state.phase === "queue") {
-    return (
-      <Queue
-        queued={state.queued === true}
-        lobby={state.lobby}
-        onEnter={room.rematch}
-        onLeave={room.leaveQueue}
-        error={room.error}
-      />
-    );
-  }
-
   // Зритель смотрит с белой стороны, игрок — со своей.
   const orientation = flipped ?? myColor === "black";
-  const over = state.phase === "over";
-  const waiting = state.phase === "waiting";
+  const over = state?.phase === "over";
+  const waiting = state?.phase === "waiting";
+  // Доска есть не всегда: в общем зале до посадки человек стоит в очереди.
+  const board = state !== null && state.phase !== "queue";
 
   return (
     <div className="mx-auto flex w-full max-w-5xl flex-1 flex-col gap-4 px-4 py-4">
       {/*
-        Шапка комнаты. Выход на витрину рисует платформа — он висит в углу над
-        этой строкой; здесь то, что нужно за доской: звук, разворот и меню, из
+        Шапка. Выход на витрину рисует платформа — он висит в углу над этой
+        строкой; здесь то, что нужно игроку: звук, разворот доски и меню, из
         которого открываются рейтинг, зал и своя партия.
+
+        Рисуется всегда, а не только за доской: из очереди раньше было не выйти
+        никуда, кроме витрины.
       */}
       <header className="flex items-center justify-between gap-3">
         <div className="flex items-center gap-2">
@@ -132,12 +114,14 @@ export function GameRoom({
           >
             <SoundIcon on={sound.on} />
           </IconButton>
-          <IconButton
-            label="Развернуть доску"
-            onClick={() => setFlipped(!orientation)}
-          >
-            <FlipIcon />
-          </IconButton>
+          {board ? (
+            <IconButton
+              label="Развернуть доску"
+              onClick={() => setFlipped(!orientation)}
+            >
+              <FlipIcon />
+            </IconButton>
+          ) : null}
         </div>
 
         <UserMenu
@@ -150,114 +134,139 @@ export function GameRoom({
         />
       </header>
 
-      <main className="flex flex-1 flex-col gap-4 lg:flex-row lg:items-start">
-        {/*
+      {room.kicked ? (
+        <Notice title="Комната закрыта" text={room.kicked} />
+      ) : !state ? (
+        <Notice
+          title="Подключаемся"
+          text={room.error ?? "Ищем стол и раскладываем фигуры."}
+        />
+      ) : state.phase === "queue" ? (
+        <Queue
+          queued={state.queued === true}
+          lobby={state.lobby}
+          onEnter={room.rematch}
+          onLeave={room.leaveQueue}
+          error={room.error}
+        />
+      ) : (
+        <main className="flex flex-1 flex-col gap-4 lg:flex-row lg:items-start">
+          {/*
         Доска — квадрат от меньшей стороны. Высота считается в svh, а не в vh:
         на телефоне адресная строка то есть, то нет, и по vh доска регулярно
         не помещается (src/games/chess/docs/BACKLOG.md G).
       */}
-        <div className="mx-auto flex w-full max-w-[min(78svh,560px)] flex-col gap-1">
-          <Taken
-            side={orientation ? "white" : "black"}
-            fen={rewound?.fen ?? state.fen ?? START}
-          />
-
-          <Board
-            // В перемотке доска показывает прошлое и ходить из него нельзя.
-            fen={rewound?.fen ?? state.fen ?? START}
-            myColor={over || rewound ? null : myColor}
-            turn={state.turn}
-            lastMove={rewound ? rewound.lastMove : state.lastMove}
-            ply={state.moves.length}
-            flipped={orientation}
-            streamer={state.streamerMode}
-            premoves={!over && !waiting && !rewound && myColor !== null}
-            onHold={state.magnus ? room.hold : undefined}
-            onMove={room.move}
-          />
-
-          <Taken
-            side={orientation ? "black" : "white"}
-            fen={rewound?.fen ?? state.fen ?? START}
-          />
-        </div>
-
-        <aside className="flex w-full flex-col gap-3 lg:w-72">
-          <Seat
-            player={opponent}
-            color={myColor === "white" ? "black" : "white"}
-            active={!over && !waiting && state.turn !== myColor}
-            state={state}
-            clockOffset={room.clockOffset}
-            placeholder="Ждём соперника"
-          />
-
-          <Moves
-            moves={state.moves}
-            at={at ?? state.moves.length}
-            onGo={setAt}
-          />
-
-          <Seat
-            player={me}
-            color={myColor ?? "white"}
-            active={!over && !waiting && state.turn === myColor}
-            state={state}
-            clockOffset={room.clockOffset}
-            placeholder="Ты смотришь"
-          />
-
-          {waiting && roomCode ? (
-            <button
-              type="button"
-              onClick={() => setInviteOpen(true)}
-              className="rounded-lg bg-accent px-3 py-2 text-sm font-semibold text-paper transition hover:bg-deep"
-            >
-              Позвать соперника
-            </button>
-          ) : null}
-
-          {over ? (
-            <Result state={state} myColor={myColor} onRematch={room.rematch} />
-          ) : myColor ? (
-            <Controls
-              claimable={state.claimable !== null}
-              offer={state.drawOffer}
-              myColor={myColor}
-              onClaim={room.claimDraw}
-              onOffer={room.offerDraw}
-              onDecline={room.declineDraw}
-              onResign={room.resign}
+          <div className="mx-auto flex w-full max-w-[min(78svh,560px)] flex-col gap-1">
+            <Taken
+              side={orientation ? "white" : "black"}
+              fen={rewound?.fen ?? state.fen ?? START}
             />
-          ) : null}
 
-          <Notes
-            streamer={state.streamerMode}
-            delay={state.viewerDelay}
-            magnus={state.magnus && myColor !== null}
-            watching={myColor === null}
-          />
+            <Board
+              // В перемотке доска показывает прошлое и ходить из него нельзя.
+              fen={rewound?.fen ?? state.fen ?? START}
+              myColor={over || rewound ? null : myColor}
+              turn={state.turn}
+              lastMove={rewound ? rewound.lastMove : state.lastMove}
+              ply={state.moves.length}
+              flipped={orientation}
+              streamer={state.streamerMode}
+              premoves={!over && !waiting && !rewound && myColor !== null}
+              onHold={state.magnus ? room.hold : undefined}
+              onMove={room.move}
+            />
 
-          {room.error ? (
-            <p className="rounded-lg bg-tint px-3 py-2 text-xs text-accent">
-              {room.error}
-            </p>
-          ) : null}
-          {!room.connected ? (
-            <p className="text-xs text-muted">
-              Связь потеряна, восстанавливаем…
-            </p>
-          ) : null}
+            <Taken
+              side={orientation ? "black" : "white"}
+              fen={rewound?.fen ?? state.fen ?? START}
+            />
+          </div>
 
-          {/*
+          <aside className="flex w-full flex-col gap-3 lg:w-72">
+            <Seat
+              player={opponent}
+              color={myColor === "white" ? "black" : "white"}
+              active={!over && !waiting && state.turn !== myColor}
+              state={state}
+              clockOffset={room.clockOffset}
+              placeholder="Ждём соперника"
+            />
+
+            <Moves
+              moves={state.moves}
+              at={at ?? state.moves.length}
+              onGo={setAt}
+            />
+
+            <Seat
+              player={me}
+              color={myColor ?? "white"}
+              active={!over && !waiting && state.turn === myColor}
+              state={state}
+              clockOffset={room.clockOffset}
+              placeholder="Ты смотришь"
+            />
+
+            {waiting && roomCode ? (
+              <button
+                type="button"
+                onClick={() => setInviteOpen(true)}
+                className="rounded-lg bg-accent px-3 py-2 text-sm font-semibold text-paper transition hover:bg-deep"
+              >
+                Позвать соперника
+              </button>
+            ) : null}
+
+            {over ? (
+              <Result
+                state={state}
+                myColor={myColor}
+                onRematch={room.rematch}
+              />
+            ) : myColor ? (
+              <Controls
+                claimable={state.claimable !== null}
+                offer={state.drawOffer}
+                myColor={myColor}
+                onClaim={room.claimDraw}
+                onOffer={room.offerDraw}
+                onDecline={room.declineDraw}
+                onResign={room.resign}
+              />
+            ) : null}
+
+            <Notes
+              streamer={state.streamerMode}
+              delay={state.viewerDelay}
+              magnus={state.magnus && myColor !== null}
+              watching={myColor === null}
+            />
+
+            {room.error ? (
+              <p className="rounded-lg bg-tint px-3 py-2 text-xs text-accent">
+                {room.error}
+              </p>
+            ) : null}
+            {!room.connected ? (
+              <p className="text-xs text-muted">
+                Связь потеряна, восстанавливаем…
+              </p>
+            ) : null}
+
+            {/*
           Чат комнаты. Через него же говорят боты: их реплики приходят обычными
           сообщениями от их имени (src/games/chess/docs/BOTS.md).
         */}
-          <div className="h-72 lg:h-80">
-            <Chat messages={room.chat} youId={userId} onSend={room.sendChat} />
-          </div>
-        </aside>
-      </main>
+            <div className="h-72 lg:h-80">
+              <Chat
+                messages={room.chat}
+                youId={userId}
+                onSend={room.sendChat}
+              />
+            </div>
+          </aside>
+        </main>
+      )}
 
       <InviteModal
         open={inviteOpen}
@@ -473,17 +482,27 @@ function Queue({
 
       {queued ? (
         <div className="flex flex-col items-center gap-3">
-          <span className="text-sm text-muted">
-            Пока никого. Можно подождать здесь, позвать друга по ссылке или
-            сыграть с ботом, когда он появится.
+          <span className="text-balance text-sm text-muted">
+            Пока никого. Можно подождать здесь, а можно завести свою партию: там
+            есть ссылка для друга и соперник-бот.
           </span>
-          <button
-            type="button"
-            onClick={onLeave}
-            className="rounded-lg border border-line px-4 py-2 text-sm font-semibold text-muted transition hover:border-accent hover:text-accent"
-          >
-            Не ждать
-          </button>
+          <div className="flex flex-wrap justify-center gap-2">
+            {/* Ссылки в зале нет и быть не может: зал общий, звать в него
+                некуда. Зовут в свою комнату — оттуда и ссылка. */}
+            <Link
+              href={ROUTES.newRoom}
+              className="rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-paper transition hover:bg-deep"
+            >
+              Своя партия
+            </Link>
+            <button
+              type="button"
+              onClick={onLeave}
+              className="rounded-lg border border-line px-4 py-2 text-sm font-semibold text-muted transition hover:border-accent hover:text-accent"
+            >
+              Не ждать
+            </button>
+          </div>
         </div>
       ) : (
         <button
