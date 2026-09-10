@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { PLATFORM_TAGLINE } from "@/lib/brand";
 import { GAMES } from "@/lib/games/registry";
 
 /**
@@ -13,10 +14,7 @@ export function Shelf() {
       <h1 className="mb-2 text-3xl font-bold tracking-tight sm:text-4xl">
         Во что играем
       </h1>
-      <p className="mb-9 max-w-lg text-sm text-muted">
-        Игры для компании: заходите с телефонов, ведущий — по очереди или всегда
-        один.
-      </p>
+      <p className="mb-9 max-w-lg text-sm text-muted">{PLATFORM_TAGLINE}</p>
 
       <ul className="flex flex-col gap-5">
         {GAMES.map((game) => (

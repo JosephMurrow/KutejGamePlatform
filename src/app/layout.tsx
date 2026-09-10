@@ -16,6 +16,32 @@ const geistMono = Geist_Mono({
 export const metadata: Metadata = {
   title: PLATFORM,
   description: "Угадай, за какую сумму человек согласился бы это сделать.",
+  applicationName: PLATFORM,
+
+  /**
+   * Приложение на домашнем экране (docs/BACKLOG.md A2). Отсюда Next печатает
+   * `mobile-web-app-capable`, `apple-mobile-web-app-title` и
+   * `apple-mobile-web-app-status-bar-style`.
+   *
+   * Подпись задана явно: без неё под иконкой оказался бы заголовок вкладки,
+   * а он у каждой страницы свой.
+   */
+  appleWebApp: {
+    capable: true,
+    title: PLATFORM,
+    statusBarStyle: "default",
+  },
+
+  /**
+   * А этот тег Next не печатает вовсе — ни из `appleWebApp`, ни откуда-либо
+   * ещё: его вырезали в пятнадцатой версии и возвращать не собираются
+   * (`grep -rn "apple-mobile-web-app-capable" node_modules/next/dist` — пусто).
+   *
+   * Без него Safari до iOS 26 не открывает ярлык приложением, и никакая
+   * настройка манифеста этого не заменяет. Коварство в том, что
+   * `appleWebApp.capable` выше выглядит как «сделано».
+   */
+  other: { "apple-mobile-web-app-capable": "yes" },
 };
 
 export const viewport: Viewport = {
