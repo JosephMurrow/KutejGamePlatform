@@ -24,7 +24,12 @@ ENV PORT=3000
 # попадает, и лицензия его на нас не распространяется
 # (src/games/chess/docs/BACKLOG.md D1). Без него игра работает, просто без
 # ботов — переменная тогда остаётся пустой.
-RUN apk add --no-cache stockfish
+#
+# В стабильных репозиториях Alpine стокфиша нет — пакет лежит в edge/testing,
+# оттуда и берём. Зависимости у него те же, что уже есть в базовом образе:
+# ставится ровно один пакет, ничего чужого за собой не тянет.
+RUN apk add --no-cache stockfish \
+      --repository=https://dl-cdn.alpinelinux.org/alpine/edge/testing
 ENV CHESS_ENGINE_PATH=/usr/bin/stockfish
 
 COPY --from=build /app/node_modules ./node_modules
