@@ -14,6 +14,7 @@ import {
   type Ack,
   type ChatMessagePayload,
 } from "@/shared/protocol";
+import { wakeOnReturn } from "@/shared/socket-wake";
 import {
   GAME_EVENT,
   GAME_ID,
@@ -139,7 +140,13 @@ export function useChessRoom(
       socket.disconnect();
     });
 
+    // Вернулись в приложение с фона — проверяем связь сразу, не дожидаясь
+    // очередной попытки socket.io: на сервере отсрочка всего пятнадцать
+    // секунд (src/shared/socket-wake.ts).
+    const stopWaking = wakeOnReturn(socket);
+
     return () => {
+      stopWaking();
       socket.close();
       socketRef.current = null;
     };
