@@ -18,6 +18,17 @@ export const GAME_ID = "chess";
 export const GLOBAL_ROOM = "chess-lobby";
 
 /**
+ * Партия сыграна в общем зале.
+ *
+ * Досок в зале много, и у каждой свой ключ — ключ зала с приставленным
+ * идентификатором доски. Рейтинг зала считается только по таким партиям:
+ * приватные в него не попадают вовсе (src/games/chess/docs/BACKLOG.md E3).
+ */
+export function inLobby(roomKey: string): boolean {
+  return roomKey === GLOBAL_ROOM || roomKey.startsWith(`${GLOBAL_ROOM}:`);
+}
+
+/**
  * Действия, которые понимает движок шахмат.
  *
  * Предложение ничьей сопернику и реванш появятся со своими экранами; премув —
@@ -71,8 +82,13 @@ export interface ChessPlayerPayload extends PlayerPayload {
   color: ChessColor;
   /** Ушёл, и его ждут: соперник должен это видеть. */
   away: boolean;
-  /** Рейтинг рядом с ником. Настоящий счёт придёт своим этапом. */
+  /** Рейтинг общего зала рядом с ником. */
   rating: number;
+  /**
+   * Рейтинг ещё не устоялся: рисуется с вопросительным знаком. Первый десяток
+   * партий система по сути гадает (src/games/chess/docs/BACKLOG.md E1).
+   */
+  provisional: boolean;
 }
 
 export interface ChessStatePayload extends RoomStatePayload<ChessPlayerPayload> {

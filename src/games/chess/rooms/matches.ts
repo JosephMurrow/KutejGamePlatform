@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/prisma";
-import type { ChessResult } from "../engine/outcome";
+import type { ChessResult, EndReason } from "../engine/outcome";
+import { START_RATING } from "../rating/glicko";
 import type { TimeControl } from "./settings";
 
 /**
@@ -8,9 +9,6 @@ import type { TimeControl } from "./settings";
  * Партия хранится списком ходов и временем на каждый, а не позициями: из ходов
  * позиция восстанавливается, обратно — нет (src/games/chess/docs/BACKLOG.md G).
  */
-
-/** Стартовый рейтинг. Настоящий счёт придёт своим этапом. */
-export const START_RATING = 1500;
 
 export interface MatchRecord {
   /** Постоянный на всю партию: по нему запись обновляется, а не плодится. */
@@ -23,9 +21,11 @@ export interface MatchRecord {
   /** Сколько думали над каждым ходом, мс. */
   times: number[];
   result: ChessResult;
-  reason: string;
+  reason: EndReason;
   timeControl: TimeControl;
   startedAt: Date;
+  /** Кто из двоих бот, если играли с ним. */
+  botId: string | null;
 }
 
 const RESULT_DB = {
@@ -37,16 +37,29 @@ const RESULT_DB = {
 /**
  * Записать партию.
  *
- * Ники и рейтинги берутся здесь и запоминаются навсегда: человек сменит ник, а
- * история партии от этого меняться не должна.
+ * Ники и рейтинги берутся здесь и запоминаются навсегда: человек сменит ник и
+ * вырастет в рейтинге, а история партии от этого меняться не должна. Рейтинг
+ * пишется до пересчёта — тот, с которым садились за доску.
+ *
+ * Партии с ботом не записываются: обе стороны в этой таблице — люди из
+ * `platform.users`, а бота там нет. Историю партий с ботом заведём, если
+ * понадобится просмотр таких партий (src/games/chess/docs/PLAN.md, этап 12).
  */
 export async function saveMatch(record: MatchRecord): Promise<void> {
+  if (record.botId) return;
+
   const players = await prisma.user.findMany({
     where: { id: { in: [record.whiteId, record.blackId] } },
-    select: { id: true, nickname: true },
+    select: {
+      id: true,
+      nickname: true,
+      chessRating: { select: { rating: true } },
+    },
   });
-  const nameOf = (id: string) =>
-    players.find((player) => player.id === id)?.nickname ?? "—";
+  const found = (id: string) => players.find((player) => player.id === id);
+  const nameOf = (id: string) => found(id)?.nickname ?? "—";
+  const ratingOf = (id: string) =>
+    Math.round(found(id)?.chessRating?.rating ?? START_RATING);
 
   const data = {
     roomKey: record.roomKey,
@@ -54,8 +67,8 @@ export async function saveMatch(record: MatchRecord): Promise<void> {
     blackId: record.blackId,
     whiteName: nameOf(record.whiteId),
     blackName: nameOf(record.blackId),
-    whiteRating: START_RATING,
-    blackRating: START_RATING,
+    whiteRating: ratingOf(record.whiteId),
+    blackRating: ratingOf(record.blackId),
     moves: record.moves,
     times: record.times,
     result: RESULT_DB[record.result],

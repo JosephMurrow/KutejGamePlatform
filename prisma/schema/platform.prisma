@@ -10,11 +10,13 @@ generator client {
   provider = "prisma-client"
   output   = "../../src/generated/prisma"
 }
+
 // В Prisma 7 строка подключения живёт в prisma.config.ts, а не здесь.
 datasource db {
   provider = "postgresql"
   schemas  = ["platform", "pricetitute", "chess"]
 }
+
 /// Какого рода комната. От этого зависит, есть ли у неё вид «экран», пускают ли
 /// туда гостей и как выглядит приглашение (см. docs/BACKLOG.md Q4).
 enum RoomKind {
@@ -27,15 +29,16 @@ enum RoomKind {
 
   @@schema("platform")
 }
+
 /// Приватная комната: счёт внутри неё наружу не уходит (см. docs/SPEC.md §3.2).
 model PrivateRoom {
-  id   String @id @default(cuid())
+  id String @id @default(cuid())
 
   /// Во что тут играют. Умолчание — ради старых строк: до появления платформы
   /// игра была одна, и все существующие комнаты платитуткины.
   gameId String @default("pricetitute")
   /// Короткий код из ссылки-приглашения.
-  code String @unique
+  code   String @unique
 
   hostId String
   host   User   @relation("HostedRooms", fields: [hostId], references: [id], onDelete: Cascade)
@@ -70,9 +73,9 @@ model PrivateRoom {
 
   @@index([emptySince])
   @@map("private_rooms")
-
   @@schema("platform")
 }
+
 /// Зачем выдана одноразовая ссылка.
 enum LinkPurpose {
   /// Подтверждение адреса почты.
@@ -82,6 +85,7 @@ enum LinkPurpose {
 
   @@schema("platform")
 }
+
 /// Одноразовая ссылка из письма.
 ///
 /// Хранится хеш, а не сама ссылка: утёкшая таблица не должна давать доступ к
@@ -109,9 +113,9 @@ model OneTimeLink {
   @@index([userId, purpose])
   @@index([expiresAt])
   @@map("one_time_links")
-
   @@schema("platform")
 }
+
 /// Игрок. Регистрация — логин, пароль и почта,
 /// восстановление пароля идёт по письму (см. docs/SPEC.md §2).
 model User {
@@ -153,17 +157,19 @@ model User {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  links        OneTimeLink[]
-  hostedRounds Round[]       @relation("HostedRounds")
-  hostedRooms  PrivateRoom[] @relation("HostedRooms")
-  bets         RoundBet[]
-  scores       Score[]
+  links         OneTimeLink[]
+  hostedRounds  Round[]       @relation("HostedRounds")
+  hostedRooms   PrivateRoom[] @relation("HostedRooms")
+  bets          RoundBet[]
+  scores        Score[]
   /// Партии в шахматы. Колонок это в `users` не добавляет — только связь.
-  chessWhite   ChessMatch[]  @relation("ChessWhite")
-  chessBlack   ChessMatch[]  @relation("ChessBlack")
+  chessWhite    ChessMatch[]  @relation("ChessWhite")
+  chessBlack    ChessMatch[]  @relation("ChessBlack")
+  chessRating   ChessRating?  @relation("ChessRating")
+  chessPairLow  ChessPair[]   @relation("ChessPairLow")
+  chessPairHigh ChessPair[]   @relation("ChessPairHigh")
 
   @@index([guestRoomId])
   @@map("users")
-
   @@schema("platform")
 }

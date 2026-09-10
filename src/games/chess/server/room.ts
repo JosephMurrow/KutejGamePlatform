@@ -8,7 +8,7 @@ import { randomUUID } from "node:crypto";
 import { MoveClock, type Ticker } from "../engine/clock";
 import type { EndReason, Outcome } from "../engine/outcome";
 import { ChessGame, type MoveInput, type MoveRecord } from "../engine/rules";
-import { START_RATING } from "../rooms/matches";
+import { START_RATING } from "../rating/glicko";
 import { GAME_EVENT, type ChessColor, type ChessPhase } from "../protocol";
 import { MOVE_LIMIT_MS, type ChessRoomSettings } from "../rooms/settings";
 import type { Level } from "../bots/levels";
@@ -74,8 +74,10 @@ export interface MatchDraft {
   moves: string[];
   times: number[];
   result: "white" | "black" | "draw";
-  reason: string;
+  reason: EndReason;
   startedAt: Date;
+  /** Кто из двоих бот, если играли с ним. В базе его нет. */
+  botId: string | null;
 }
 
 /** Куда комната отдаёт партию. База — снаружи: движок про неё не знает. */
@@ -97,6 +99,19 @@ export interface Turn {
  * что кто-то умеет отвечать ходом на позицию.
  */
 export type Think = (turn: Turn, level: Level) => Promise<string | null>;
+
+/** Рейтинг игрока, каким его видно за столом. */
+export interface Shown {
+  rating: number;
+  /** Ещё не устоялся: показывается с оговоркой (docs/BACKLOG.md E2). */
+  provisional: boolean;
+}
+
+/**
+ * Где комната берёт рейтинги. База — снаружи: комната знает только, что у
+ * игрока где-то есть число, и что приходит оно не сразу.
+ */
+export type Ratings = (userId: string) => Promise<Shown | null>;
 
 /** Бот за доской: кто он, чем думает и как говорит. */
 export interface BotSeat {
@@ -138,6 +153,8 @@ export class ChessRoom implements GameRoomState {
     private readonly persist?: Persist,
     /** Бот, если играют с ним. Садится сразу и ждёт хода человека. */
     private readonly bot?: BotSeat,
+    /** Откуда брать рейтинги игроков. Без неё за столом стартовые числа. */
+    private readonly ratings?: Ratings,
   ) {
     this.clock = new MoveClock(MOVE_LIMIT_MS[settings.timeControl], now);
     this.moveStartedAt = now();
@@ -160,6 +177,8 @@ export class ChessRoom implements GameRoomState {
   private thinking = false;
   /** Сколько раз бот уже подал голос на этом ходу соперника. */
   private nudged = 0;
+  /** Рейтинги сидящих: приезжают из базы после посадки. */
+  private readonly shown = new Map<string, Shown>();
 
   join(playerId: string): void {
     // Вернулся тот, кого ждали: место за ним и держали.
@@ -170,6 +189,7 @@ export class ChessRoom implements GameRoomState {
 
     if (!this.seats.includes(playerId) && this.seats.length < SEATS) {
       this.seats.push(playerId);
+      void this.learn(playerId);
       // Бот садится напротив первого пришедшего: ждать ему некого.
       if (this.bot && this.seats.length === 1) this.seats.push(this.bot.id);
       // Мест два; третий и дальше остаются зрителями — за столом их нет, но
@@ -297,7 +317,9 @@ export class ChessRoom implements GameRoomState {
         id,
         extra: {
           color: at === 0 ? "white" : "black",
-          rating: START_RATING,
+          rating: this.shown.get(id)?.rating ?? START_RATING,
+          /** Рейтинг ещё не устоялся: рисуется с вопросительным знаком. */
+          provisional: this.shown.get(id)?.provisional ?? true,
           /** Ушёл, и его ждут: соперник должен это видеть. */
           away: this.absence?.id === id,
         },
@@ -349,6 +371,7 @@ export class ChessRoom implements GameRoomState {
       result: outcome.result,
       reason: outcome.reason,
       startedAt: this.startedWall,
+      botId: this.bot?.id ?? null,
     };
   }
 
@@ -500,6 +523,23 @@ export class ChessRoom implements GameRoomState {
     } finally {
       this.thinking = false;
     }
+  }
+
+  /**
+   * Узнать рейтинг севшего.
+   *
+   * Асинхронно и без ожидания: партия начинается сразу, а число приезжает
+   * следом и приходит очередным снимком. Бот в базе не значится — его и не
+   * спрашиваем.
+   */
+  private async learn(playerId: string): Promise<void> {
+    if (!this.ratings || playerId === this.bot?.id) return;
+
+    const shown = await this.ratings(playerId);
+    if (!shown) return;
+
+    this.shown.set(playerId, shown);
+    this.context.changed();
   }
 
   /**

@@ -8,6 +8,7 @@ import { useExitWarning } from "@/components/games/ExitToShelf";
 import { REASON_TEXT } from "../engine/outcome";
 import type { ChessColor, ChessPlayerPayload } from "../protocol";
 import { Board } from "./Board";
+import { LeaderboardModal } from "./leaderboard/Modal";
 import { useChessRoom } from "./useChessRoom";
 
 /**
@@ -27,6 +28,7 @@ export function GameRoom({
   const room = useChessRoom(roomCode);
   const [flipped, setFlipped] = useState<boolean | null>(null);
   const [inviteOpen, setInviteOpen] = useState(false);
+  const [ratingOpen, setRatingOpen] = useState(false);
 
   // Ссылка берётся из адресной строки: снаружи и изнутри сети адрес разный, и
   // правильный тот, по которому человек сюда пришёл.
@@ -134,13 +136,23 @@ export function GameRoom({
           />
         ) : null}
 
-        <button
-          type="button"
-          onClick={() => setFlipped(!orientation)}
-          className="rounded-lg border border-line bg-paper px-3 py-2 text-xs font-semibold text-muted transition hover:border-accent hover:text-accent"
-        >
-          Развернуть доску
-        </button>
+        <div className="flex gap-2">
+          <button
+            type="button"
+            onClick={() => setFlipped(!orientation)}
+            className="flex-1 rounded-lg border border-line bg-paper px-3 py-2 text-xs font-semibold text-muted transition hover:border-accent hover:text-accent"
+          >
+            Развернуть доску
+          </button>
+          {/* Окном, а не ссылкой: переход оборвал бы сокет и высадил из-за доски. */}
+          <button
+            type="button"
+            onClick={() => setRatingOpen(true)}
+            className="flex-1 rounded-lg border border-line bg-paper px-3 py-2 text-xs font-semibold text-muted transition hover:border-accent hover:text-accent"
+          >
+            Рейтинг
+          </button>
+        </div>
 
         {room.error ? (
           <p className="rounded-lg bg-tint px-3 py-2 text-xs text-accent">
@@ -157,6 +169,11 @@ export function GameRoom({
         onClose={() => setInviteOpen(false)}
         link={link}
         hint="Наведи камеру телефона — и сядешь за эту же доску."
+      />
+
+      <LeaderboardModal
+        open={ratingOpen}
+        onClose={() => setRatingOpen(false)}
       />
     </main>
   );
@@ -272,6 +289,7 @@ function Seat({
           <div className="text-sm font-semibold">{player.nickname}</div>
           <div className="text-xs text-muted">
             {color === "white" ? "белые" : "чёрные"} · {player.rating}
+            {player.provisional ? "?" : ""}
             {player.away ? " · вышел" : ""}
           </div>
         </div>

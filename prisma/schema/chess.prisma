@@ -1,5 +1,4 @@
-// Схема шахмат: настройки комнат и сыгранные партии. Рейтинг придёт своим
-// этапом (src/games/chess/docs/PLAN.md, этап 9).
+// Схема шахмат: настройки комнат, сыгранные партии и рейтинг.
 //
 // Ни одной колонки в платформенных таблицах: платформа не знает, какие у игры
 // настройки, и хранить их у себя не может (docs/DATABASE.md).
@@ -65,9 +64,9 @@ model ChessRoomSettings {
   opponent     ChessOpponentKind
   /// Режим стримера: подсказки гасит клиент, поэтому флаг лежит на комнате, а
   /// не на человеке (src/games/chess/docs/BACKLOG.md F1).
-  streamerMode Boolean     @default(false)
+  streamerMode Boolean           @default(false)
   /// Уровень бота. Значим только когда соперник — бот.
-  botLevel     ChessBotLevel @default(NORMAL)
+  botLevel     ChessBotLevel     @default(NORMAL)
 
   @@map("room_settings")
   @@schema("chess")
@@ -138,14 +137,75 @@ model ChessMatch {
 /// Ключ — хеш позиции, а не номер хода: одна и та же позиция приходит разными
 /// порядками ходов, и по номеру её не найти.
 model ChessOpening {
-  level ChessBotLevel
+  level    ChessBotLevel
   /// Zobrist-хеш позиции, из которой делается ход.
   position String
   /// Ход в координатах: e2e4.
-  move String
+  move     String
 
   @@id([level, position, move])
   @@index([level, position])
   @@map("openings")
+  @@schema("chess")
+}
+
+/// Рейтинг игрока по Glicko-2.
+///
+/// Хранится не одно число, а тройка: рейтинг, отклонение и волатильность.
+/// Отклонение — это неуверенность системы в рейтинге; из-за него новичок
+/// калибруется за десяток партий, а вернувшийся через год не обваливает чужие
+/// рейтинги (src/games/chess/docs/BACKLOG.md E1).
+///
+/// Дробные значения намеренно: округление до целого на каждой партии съедало бы
+/// мелкие изменения, и рейтинг замирал бы у сильных игроков. Округляем при
+/// показе.
+model ChessRating {
+  userId String @id
+  user   User   @relation("ChessRating", fields: [userId], references: [id], onDelete: Cascade)
+
+  /// Рейтинг общего зала. Приватные партии его не трогают вовсе (E3).
+  rating     Float @default(1500)
+  /// Отклонение: насколько система не уверена в рейтинге.
+  deviation  Float @default(350)
+  /// Волатильность: насколько игрок нестабилен от партии к партии.
+  volatility Float @default(0.06)
+
+  /// Партий сыграно всего: зал и приватные вместе.
+  games   Int   @default(0)
+  /// Накопленная надбавка за победы. Дробная: за одну победу дают не больше
+  /// единицы, а на повторах с тем же соперником она тает (E2).
+  bonus   Float @default(0)
+  /// Победы над ботами. В рейтинг не идут вовсе, но по ним однажды откроется
+  /// пятый уровень (D3).
+  botWins Int   @default(0)
+
+  /// Когда рейтинг считали в последний раз. От простоя растёт отклонение, и
+  /// растёт оно по времени, а не пачками: иначе рейтинг замирает между
+  /// пересчётами (E1).
+  ratedAt DateTime @default(now())
+
+  @@index([rating])
+  @@map("ratings")
+  @@schema("chess")
+}
+
+/// Сколько партий сыграно между двумя игроками.
+///
+/// Нужно ради надбавки: каждый десяток партий с одним и тем же соперником
+/// снижает её на одну десятую. Это же правило само делает общий зал ценнее
+/// приватных комнат, и отдельного штрафа за приватность не требуется
+/// (src/games/chess/docs/BACKLOG.md E2).
+model ChessPair {
+  /// Меньший из двух идентификаторов. Пара хранится одной строкой, а не двумя:
+  /// «сколько мы с ним сыграли» — вопрос без стороны.
+  lowId  String
+  low    User   @relation("ChessPairLow", fields: [lowId], references: [id], onDelete: Cascade)
+  highId String
+  high   User   @relation("ChessPairHigh", fields: [highId], references: [id], onDelete: Cascade)
+
+  games Int @default(0)
+
+  @@id([lowId, highId])
+  @@map("pairs")
   @@schema("chess")
 }

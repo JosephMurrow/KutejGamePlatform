@@ -19,6 +19,8 @@ import {
   type ChessRoomSettings,
 } from "../rooms/settings";
 import { saveMatch } from "../rooms/matches";
+import { applyMatch } from "../rating/apply";
+import { shownRating } from "../rating/read";
 import { GLOBAL_ROOM } from "../protocol";
 import { ChessLobby } from "./lobby";
 import { ChessRoom, type BotSeat, type MatchDraft } from "./room";
@@ -57,13 +59,14 @@ class ChessServer implements GameServer {
     const record = (draft: MatchDraft) => this.record(draft, settings);
     const room =
       context.key === GLOBAL_ROOM
-        ? new ChessLobby(context, undefined, record)
+        ? new ChessLobby(context, undefined, record, shownRating)
         : new ChessRoom(
             context,
             settings,
             undefined,
             record,
             this.botFor(settings, context.key),
+            shownRating,
           );
 
     this.rooms.set(context.key, room);
@@ -196,18 +199,33 @@ class ChessServer implements GameServer {
   }
 
   /**
-   * Записать партию.
+   * Записать партию и разнести её по рейтингам.
    *
-   * Ошибка записи гасится: история важна, но уронить из-за неё живую комнату
+   * Порядок важен: запись идёт первой, потому что в неё попадают рейтинги «на
+   * момент партии» — те, с которыми садились за доску.
+   *
+   * Ошибка гасится: история и рейтинг важны, но уронить из-за них живую комнату
    * важнее не дать. Незаписанная партия видна в логе.
    */
   private record(draft: MatchDraft, settings: ChessRoomSettings): void {
     const writing = saveMatch({
       ...draft,
       timeControl: settings.timeControl,
-    }).catch((error: unknown) => {
-      console.error(`[chess ${draft.roomKey}] партия не записана:`, error);
-    });
+    })
+      .then(() =>
+        applyMatch({
+          roomKey: draft.roomKey,
+          whiteId: draft.whiteId,
+          blackId: draft.blackId,
+          result: draft.result,
+          reason: draft.reason,
+          plies: draft.moves.length,
+          botId: draft.botId,
+        }),
+      )
+      .catch((error: unknown) => {
+        console.error(`[chess ${draft.roomKey}] партия не записана:`, error);
+      });
 
     this.writing.add(writing);
     void writing.finally(() => this.writing.delete(writing));

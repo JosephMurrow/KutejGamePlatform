@@ -10,7 +10,7 @@ PostgreSQL 17, Prisma 7. Схема разложена по файлам:
 platform     users · one_time_links · private_rooms
 pricetitute  questions · rounds · round_bets · scores · room_question_queues
              room_settings
-chess        room_settings
+chess        room_settings · matches · openings · ratings · pairs
 public       только _prisma_migrations
 ```
 
