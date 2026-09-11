@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { notFound, redirect } from "next/navigation";
 import { cache } from "react";
 import { PLATFORM } from "@/components/Brand";
@@ -8,6 +8,7 @@ import { gameById } from "@/lib/games/registry";
 import { gamePages } from "@/lib/games/pages";
 import { getCurrentUser } from "@/lib/auth/session";
 import { findPrivateRoom } from "@/lib/rooms/private";
+import { PLATFORM_SURFACE } from "@/lib/theme";
 import { allowsGuests } from "@/shared/room-settings";
 
 /**
@@ -27,6 +28,26 @@ export async function generateMetadata({
   const game = room ? gameById(room.gameId) : null;
 
   return { title: `Своя комната — ${game?.title ?? PLATFORM}` };
+}
+
+/**
+ * Цвет шапки — тоже игры, что записана в комнате (docs/BACKLOG.md B3).
+ *
+ * Макетом это не решается: адрес `/r/<code>` в дерево игры не входит, а игру
+ * знает только база. Та же причина, по которой рядом лежит свой `icon.tsx`.
+ *
+ * Незнакомая комната остаётся в цвете платформы — как и её знак.
+ */
+export async function generateViewport({
+  params,
+}: {
+  params: Promise<{ code: string }>;
+}): Promise<Viewport> {
+  const { code } = await params;
+  const room = await roomByCode(code);
+  const game = room ? gameById(room.gameId) : null;
+
+  return { themeColor: game?.themeColor ?? PLATFORM_SURFACE };
 }
 
 export default async function PrivateRoomPage({
