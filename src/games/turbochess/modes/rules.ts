@@ -11,6 +11,8 @@ import {
   oneKindPosition,
   oneKindRules,
 } from "./oneKind";
+import { reinforcementsPosition, reinforcementsRules } from "./reinforcements";
+import { zombiePosition, zombieRules } from "./zombies";
 
 /**
  * Каркас режимов: чем режим отличается от обычных шахмат.
@@ -33,6 +35,8 @@ const READY: ReadonlySet<TurboMode> = new Set([
   "ANNIHILATION",
   "GIVEAWAY",
   "NUCLEAR",
+  "REINFORCEMENTS",
+  "ZOMBIE",
 ]);
 
 export function isReady(mode: TurboMode): boolean {
@@ -55,6 +59,10 @@ export function startPosition(mode: TurboMode, options: ModeOptions): Position {
       return annihilationPosition();
     case "GIVEAWAY":
       return giveawayPosition();
+    case "REINFORCEMENTS":
+      return reinforcementsPosition();
+    case "ZOMBIE":
+      return zombiePosition();
     default:
       return classicPosition();
   }
@@ -108,6 +116,10 @@ export function rulesOf(mode: TurboMode, options: ModeOptions): ModeRules {
         lines: nuclearRules(options),
         ready: true,
       };
+    case "REINFORCEMENTS":
+      return { variant: null, lines: reinforcementsRules(), ready: true };
+    case "ZOMBIE":
+      return { variant: null, lines: zombieRules(), ready: true };
     default:
       return {
         variant: null,

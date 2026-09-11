@@ -1,20 +1,24 @@
 "use client";
 
 import { useMemo, useState, type CSSProperties } from "react";
-import { Chessboard } from "react-chessboard";
-import type { MoveInput } from "../engine/game";
+import { Chessboard, ChessboardProvider, SparePiece } from "react-chessboard";
+import type { DropKind, MoveInput } from "../engine/game";
 import { parseSquare } from "../engine/geometry";
 import { legalMoves, play } from "../engine/moves";
-import type { Side } from "../engine/pieces";
-import type { Position } from "../engine/position";
+import type { PieceKind, Side } from "../engine/pieces";
+import { nextSide, type Position } from "../engine/position";
+import { zombieQueue, zombieWait } from "../modes/zombies";
 import {
   boardPosition,
   checkedKing,
+  dropTargets,
+  dropTo,
   moveKind,
   movesBetween,
+  pieceType,
   targetsFrom,
 } from "./boardView";
-import { PIECES, colorOf } from "./pieces";
+import { PIECES, colorOf, pieceSrc } from "./pieces";
 import { Promotion, type PromotionChoice } from "./Promotion";
 
 /**
@@ -76,6 +80,8 @@ export function Board({
   /** Позиция после своего хода, пока его не приняли. */
   const [preview, setPreview] = useState<Position | null>(null);
   const [picked, setPicked] = useState<string | null>(null);
+  /** Фигура, взятая с полки резерва: ждёт клетки. */
+  const [dropping, setDropping] = useState<PieceKind | null>(null);
   const [promotion, setPromotion] = useState<{
     from: string;
     to: string;
@@ -114,8 +120,18 @@ export function Board({
       }
     }
 
+    // Куда встанет фигура с полки. Взятия тут не бывает: выставляют только на
+    // свободную клетку.
+    if (dropping) {
+      for (const square of dropTargets(shown, legal, dropping)) {
+        marks[square] = {
+          background: `radial-gradient(circle, ${ACCENT}66 24%, transparent 26%)`,
+        };
+      }
+    }
+
     return marks;
-  }, [lastMove, legal, picked, shown]);
+  }, [dropping, lastMove, legal, picked, shown]);
 
   /** Своя ли фигура на клетке — того, чья очередь. */
   function own(square: string): boolean {
@@ -139,6 +155,29 @@ export function Board({
     setPreview(null);
   }
 
+  /** Выставить фигуру с полки. Превращения тут не бывает, диалога не нужно. */
+  async function sendDrop(kind: PieceKind, to: string): Promise<void> {
+    const move = dropTo(shown, legal, kind, to);
+    if (!move) return;
+
+    setDropping(null);
+    setPicked(null);
+    setPreview(play(shown, move));
+
+    await onMove({ drop: kind as DropKind, to });
+    setPreview(null);
+  }
+
+  /** Фигура с полки: `wQ` — светлый ферзь. Своя — только в свой ход. */
+  function pickShelf(type: string): void {
+    if (!canMove) return;
+    if (!type.startsWith(colorOf(shown.turn))) return;
+
+    setPicked(null);
+    const kind = type.slice(1).toLowerCase() as PieceKind;
+    setDropping(dropping === kind ? null : kind);
+  }
+
   function attempt(from: string, to: string): boolean {
     if (!canMove || from === to) return false;
 
@@ -157,6 +196,12 @@ export function Board({
   function clickSquare(square: string) {
     if (!canMove) return;
 
+    if (dropping) {
+      void sendDrop(dropping, square);
+      setDropping(null);
+      return;
+    }
+
     if (picked) {
       if (picked === square) {
         setPicked(null);
@@ -168,47 +213,145 @@ export function Board({
     setPicked(own(square) ? square : null);
   }
 
-  return (
-    <div className="relative" style={FRAME}>
-      <Chessboard
-        options={{
-          position: boardPosition(shown),
-          pieces: PIECES,
-          chessboardRows: shown.geometry.height,
-          chessboardColumns: shown.geometry.width,
-          boardOrientation: flipped ? "black" : "white",
-          allowDragging: canMove,
-          showNotation: true,
-          animationDurationInMs: 180,
-          lightSquareStyle: { backgroundColor: LIGHT },
-          darkSquareStyle: { backgroundColor: DARK },
-          squareStyles: styles,
-          darkSquareNotationStyle: { color: LIGHT },
-          lightSquareNotationStyle: { color: INK },
-          alphaNotationStyle: { fontSize: "12px", fontWeight: 700, bottom: 2 },
-          numericNotationStyle: { fontSize: "12px", fontWeight: 700, top: 3 },
-          onSquareClick: ({ square }) => clickSquare(square),
-          onPieceDrop: ({ sourceSquare, targetSquare }) => {
-            if (targetSquare === null) return false;
-            return attempt(sourceSquare, targetSquare);
-          },
-          canDragPiece: ({ piece }) =>
-            canMove && piece.pieceType.startsWith(colorOf(shown.turn)),
-        }}
-      />
+  // Своя полка под доской, чужая над ней — как места игроков. Пустую полку
+  // всё равно держим: иначе доска прыгала бы на каждое выставление.
+  const bottom: Side = flipped ? 1 : 0;
+  const shelves =
+    shown.reserve.some((list) => list.length > 0) || shown.pending.length > 0;
 
-      {promotion ? (
-        <Promotion
-          color={colorOf(shown.turn)}
-          // Отмена откатывает ход: иначе фигура зависает в воздухе.
-          onCancel={() => setPromotion(null)}
-          onChoose={(choice) => {
-            const { from, to } = promotion;
-            setPromotion(null);
-            void send(from, to, choice);
-          }}
-        />
-      ) : null}
+  return (
+    <ChessboardProvider
+      options={{
+        position: boardPosition(shown),
+        pieces: PIECES,
+        chessboardRows: shown.geometry.height,
+        chessboardColumns: shown.geometry.width,
+        boardOrientation: flipped ? "black" : "white",
+        allowDragging: canMove,
+        showNotation: true,
+        animationDurationInMs: 180,
+        lightSquareStyle: { backgroundColor: LIGHT },
+        darkSquareStyle: { backgroundColor: DARK },
+        squareStyles: styles,
+        darkSquareNotationStyle: { color: LIGHT },
+        lightSquareNotationStyle: { color: INK },
+        alphaNotationStyle: { fontSize: "12px", fontWeight: 700, bottom: 2 },
+        numericNotationStyle: { fontSize: "12px", fontWeight: 700, top: 3 },
+        onSquareClick: ({ square }) => clickSquare(square),
+        onPieceClick: ({ isSparePiece, piece }) => {
+          if (isSparePiece) pickShelf(piece.pieceType);
+        },
+        onPieceDrop: ({ sourceSquare, targetSquare }) => {
+          if (targetSquare === null) return false;
+
+          // Фигуру принесли с полки: «откуда» у неё не клетка, а вид фигуры.
+          if (parseSquare(shown.geometry, sourceSquare) === null) {
+            const kind = sourceSquare.slice(1).toLowerCase() as PieceKind;
+            if (!dropTo(shown, legal, kind, targetSquare)) return false;
+            void sendDrop(kind, targetSquare);
+            return true;
+          }
+
+          return attempt(sourceSquare, targetSquare);
+        },
+        canDragPiece: ({ piece }) =>
+          canMove && piece.pieceType.startsWith(colorOf(shown.turn)),
+      }}
+    >
+      <div className="flex flex-col gap-1.5">
+        {shelves ? (
+          <Shelf
+            position={shown}
+            side={nextSide(shown, bottom)}
+            dropping={dropping}
+          />
+        ) : null}
+
+        <div className="relative" style={FRAME}>
+          <Chessboard />
+
+          {promotion ? (
+            <Promotion
+              color={colorOf(shown.turn)}
+              // Отмена откатывает ход: иначе фигура зависает в воздухе.
+              onCancel={() => setPromotion(null)}
+              onChoose={(choice) => {
+                const { from, to } = promotion;
+                setPromotion(null);
+                void send(from, to, choice);
+              }}
+            />
+          ) : null}
+        </div>
+
+        {shelves ? (
+          <Shelf position={shown} side={bottom} dropping={dropping} />
+        ) : null}
+      </div>
+    </ChessboardProvider>
+  );
+}
+
+/**
+ * Полка резерва: что сторона может выставить на доску и что ещё доспевает.
+ *
+ * Готовые фигуры перетаскиваются на доску и берутся кликом — теми же руками,
+ * что и фигуры на доске: полка живёт внутри доски и делит с ней перетаскивание.
+ * Доспевающие зомби показываются обратным отсчётом и не берутся.
+ */
+function Shelf({
+  position,
+  side,
+  dropping,
+}: {
+  position: Position;
+  side: Side;
+  /** Что взято с полки прямо сейчас — та подсвечена. */
+  dropping: PieceKind | null;
+}) {
+  const ready = new Map<PieceKind, number>();
+  for (const kind of position.reserve[side] ?? []) {
+    ready.set(kind, (ready.get(kind) ?? 0) + 1);
+  }
+  const queue = zombieQueue(position, side);
+
+  return (
+    <div className="flex min-h-11 flex-wrap items-center gap-1.5">
+      {[...ready].map(([kind, count]) => (
+        <div
+          key={kind}
+          className={`relative size-10 rounded-lg border p-0.5 transition ${
+            dropping === kind
+              ? "border-accent bg-tint"
+              : "border-line bg-surface"
+          }`}
+        >
+          <SparePiece pieceType={pieceType({ kind, side })} />
+          {count > 1 ? (
+            <span className="absolute -right-1 -top-1 rounded-full bg-accent px-1 text-[10px] font-semibold text-surface">
+              {count}
+            </span>
+          ) : null}
+        </div>
+      ))}
+
+      {queue.map((zombie, index) => (
+        <div
+          key={`${zombie.kind}-${index}`}
+          className="flex items-center gap-1 rounded-lg border border-dashed border-line px-1.5 py-0.5 text-[10px] text-muted"
+        >
+          {/* Правило зовёт `next/image`, но файлы уже нужного размера. */}
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={pieceSrc(colorOf(side), zombie.kind)}
+            alt=""
+            width={256}
+            height={256}
+            className="size-7 opacity-60"
+          />
+          {zombieWait(zombie.left)}
+        </div>
+      ))}
     </div>
   );
 }

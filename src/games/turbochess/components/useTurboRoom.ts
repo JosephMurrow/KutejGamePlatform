@@ -32,9 +32,12 @@ const ERROR_LIFETIME_MS = 4000;
 
 /** Ход на проводе: координаты, фигура превращения и номер полухода. */
 export interface MoveRequest {
-  from: string;
+  /** Откуда идут; у выставления из резерва её нет. */
+  from?: string;
   to: string;
   promotion?: "q" | "r" | "b" | "n";
+  /** Какую фигуру выставляют из резерва вместо хода. */
+  drop?: "q" | "r" | "b" | "n" | "p";
   ply: number;
 }
 

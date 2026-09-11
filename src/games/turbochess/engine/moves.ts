@@ -17,10 +17,12 @@ import {
   type Side,
 } from "./pieces";
 import {
+  ZOMBIE_DELAY,
   kingIsRoyal,
   nextSide,
   type CastleRight,
   type Position,
+  type Zombie,
 } from "./position";
 
 /**
@@ -32,7 +34,15 @@ import {
  * проходе со вскрытием горизонтали ловятся без отдельных правил.
  */
 
+/**
+ * Откуда идёт выставленная из резерва: ниоткуда. Номером клетки, а не
+ * отдельным полем, — так ход остаётся одной формы, и всё, что перебирает
+ * ходы, о резерве не думает.
+ */
+export const DROP = -1;
+
 export interface Move {
+  /** Клетка, с которой идут; `DROP` — фигура пришла из резерва. */
   readonly from: number;
   readonly to: number;
   readonly piece: Piece;
@@ -54,7 +64,7 @@ function at(board: Board, square: number): Piece | null {
   return board[square] ?? null;
 }
 
-/** Где у стороны пешек вторая и последняя линии. */
+/** Где у стороны её первая, вторая и последняя линии. */
 function pawnLines(geometry: Geometry, [dx, dy]: Vec) {
   const alongFiles = dx !== 0;
   const direction = alongFiles ? dx : dy;
@@ -64,6 +74,7 @@ function pawnLines(geometry: Geometry, [dx, dy]: Vec) {
   return {
     coordinate: (square: number) =>
       alongFiles ? fileOf(geometry, square) : rankOf(geometry, square),
+    first: back,
     second: back + direction,
     last: direction > 0 ? size - 1 : 0,
   };
@@ -244,6 +255,34 @@ function castleMoves(position: Position, moves: Move[]): void {
   }
 }
 
+/**
+ * Выставление из резерва: фигура встаёт на свободную клетку своих двух
+ * стартовых горизонталей, и это ход (docs/MODES.md, режимы 2 и 14).
+ *
+ * Пешку на первую горизонталь не выставляют — как в крейзихаусе, откуда взята
+ * механика: ходить ей оттуда было бы некуда назад, а вперёд она и так пойдёт.
+ */
+function dropMoves(position: Position, moves: Move[]): void {
+  const { geometry, board, turn } = position;
+  const kinds = new Set(position.reserve[turn] ?? []);
+  if (kinds.size === 0) return;
+
+  const forward = position.sides[turn]?.forward;
+  if (!forward) return;
+  const lines = pawnLines(geometry, forward);
+
+  for (let to = 0; to < board.length; to++) {
+    if (at(board, to)) continue;
+    const line = lines.coordinate(to);
+    if (line !== lines.first && line !== lines.second) continue;
+
+    for (const kind of kinds) {
+      if (kind === "p" && line === lines.first) continue;
+      moves.push(basic(DROP, to, piece(kind, turn), null));
+    }
+  }
+}
+
 /** Все ходы стороны, чья очередь, по виду фигур — без проверки своего короля. */
 export function pseudoMoves(position: Position): Move[] {
   const moves: Move[] = [];
@@ -254,6 +293,7 @@ export function pseudoMoves(position: Position): Move[] {
     else pieceMoves(position, from, mover, moves);
   });
   castleMoves(position, moves);
+  dropMoves(position, moves);
 
   return moves;
 }
@@ -348,7 +388,7 @@ export function inCheck(
 function boardAfter(position: Position, move: Move): (Piece | null)[] {
   const board = position.board.slice();
 
-  board[move.from] = null;
+  if (move.from !== DROP) board[move.from] = null;
   if (move.capturedAt !== null) board[move.capturedAt] = null;
   if (move.castle) {
     board[move.castle.rook] = null;
@@ -379,6 +419,43 @@ export function legalMoves(position: Position): Move[] {
   return captures.length > 0 ? captures : moves;
 }
 
+/**
+ * Резерв и очередь зомби после хода.
+ *
+ * Три хода отсчитываются по ходам того, кто срубил: так понятнее по счётчику
+ * у полки. Свежесрубленная в этом же ходу не считается — иначе первый же ход
+ * после взятия съедал бы у неё ход ожидания.
+ */
+function reserveAfter(position: Position, move: Move) {
+  const mover = move.piece.side;
+  const reserve = position.reserve.map((list) => [...list]);
+  const pending: Zombie[] = [];
+
+  if (move.from === DROP) {
+    const own = reserve[mover];
+    const at = own?.indexOf(move.piece.kind) ?? -1;
+    if (own && at >= 0) own.splice(at, 1);
+  }
+
+  for (const zombie of position.pending) {
+    const left = zombie.side === mover ? zombie.left - 1 : zombie.left;
+    if (left <= 0) reserve[zombie.side]?.push(zombie.kind);
+    else pending.push({ ...zombie, left });
+  }
+
+  // Король не зомбируется никогда: его берут только там, где мата нет, и
+  // возвращать его на доску было бы вторым королём.
+  if (position.rules.zombies && move.captured && move.captured.kind !== "k") {
+    pending.push({
+      kind: move.captured.kind,
+      side: mover,
+      left: ZOMBIE_DELAY,
+    });
+  }
+
+  return { reserve, pending };
+}
+
 /** Позиция после хода. Ход должен быть из `legalMoves`. */
 export function play(position: Position, move: Move): Position {
   const mover = move.piece.side;
@@ -386,6 +463,7 @@ export function play(position: Position, move: Move): Position {
 
   return {
     ...position,
+    ...reserveAfter(position, move),
     board: boardAfter(position, move),
     turn: nextSide(position, mover),
     // Король сходил — сгорают все права его стороны; ладья ушла или её
@@ -436,7 +514,10 @@ export function san(
   const { geometry } = position;
   let text: string;
 
-  if (move.castle) {
+  if (move.from === DROP) {
+    // Как в крейзихаусе: «Q@d5», у пешки буква тоже пишется.
+    text = `${move.piece.kind === "p" ? "P" : LETTER[move.piece.kind]}@${squareName(geometry, move.to)}`;
+  } else if (move.castle) {
     text =
       fileOf(geometry, move.castle.rook) > fileOf(geometry, move.castle.king)
         ? "O-O"
@@ -497,8 +578,17 @@ export function repetitionKey(position: Position): string {
     position.enPassant && legalMoves(position).some((move) => move.enPassant)
       ? String(position.enPassant.target)
       : "-";
+  // Резерв и очередь зомби — часть позиции: с теми же фигурами на доске, но
+  // с ферзём в кармане это другая позиция, и повторением она не считается.
+  const reserve = position.reserve
+    .map((list) => [...list].sort().join(""))
+    .join("/");
+  const pending = position.pending
+    .map((zombie) => `${zombie.kind}${zombie.side}${zombie.left}`)
+    .sort()
+    .join(",");
 
-  return `${board}|${position.turn}|${castling}|${passant}`;
+  return `${board}|${position.turn}|${castling}|${passant}|${reserve}|${pending}`;
 }
 
 /** Цвет поля: слоны на полях одного цвета доску не покрывают. */
@@ -515,6 +605,11 @@ function squareShade(geometry: Geometry, square: number): number {
  * не форсируется.
  */
 export function insufficientMaterial(position: Position): boolean {
+  // С резервом и очередью зомби материал ещё придёт: голые короли на доске
+  // ничего не значат, пока у кого-то в кармане ферзь.
+  if (position.reserve.some((list) => list.length > 0)) return false;
+  if (position.pending.length > 0) return false;
+
   const pieces: { kind: PieceKind; square: number }[] = [];
   position.board.forEach((cell, square) => {
     if (cell) pieces.push({ kind: cell.kind, square });
@@ -544,6 +639,10 @@ export function insufficientMaterial(position: Position): boolean {
  * решено у шахмат и так же делают площадки.
  */
 export function canMate(position: Position, side: Side): boolean {
+  // Тем, кому есть что выставить, матовать есть чем — хоть и не сразу.
+  if ((position.reserve[side]?.length ?? 0) > 0) return true;
+  if (position.pending.some((zombie) => zombie.side === side)) return true;
+
   const own: { kind: PieceKind; square: number }[] = [];
   position.board.forEach((cell, square) => {
     if (cell && cell.side === side) own.push({ kind: cell.kind, square });

@@ -572,10 +572,22 @@ const REJECTION_TEXT: Record<MoveRejection, string> = {
 function parseMove(payload: unknown): { move: MoveInput; ply: number } | null {
   if (typeof payload !== "object" || payload === null) return null;
 
-  const { from, to, promotion, ply } = payload as Record<string, unknown>;
+  const { from, to, promotion, drop, ply } = payload as Record<string, unknown>;
 
-  if (typeof from !== "string" || typeof to !== "string") return null;
+  if (typeof to !== "string") return null;
   if (typeof ply !== "number" || !Number.isInteger(ply) || ply < 0) return null;
+
+  // Выставление из резерва приходит вместо клетки «откуда»: фигура ниоткуда.
+  if (
+    drop === "q" ||
+    drop === "r" ||
+    drop === "b" ||
+    drop === "n" ||
+    drop === "p"
+  ) {
+    return { move: { drop, to }, ply };
+  }
+  if (typeof from !== "string") return null;
 
   const move: MoveInput = { from, to };
   if (

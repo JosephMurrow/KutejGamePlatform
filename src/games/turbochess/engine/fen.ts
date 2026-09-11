@@ -90,5 +90,7 @@ export function fromFen(
     quiet: Number(quiet ?? 0),
     sinceCapture: 0,
     taken: [[], []],
+    reserve: [[], []],
+    pending: [],
   };
 }

@@ -7,6 +7,7 @@ import {
   type Position,
 } from "./position";
 import {
+  DROP,
   canMate,
   inCheck,
   insufficientMaterial,
@@ -30,19 +31,28 @@ import type { EndReason, Outcome, Result } from "./outcome";
  * упавшего флага. Так правила прогоняются тестами целиком.
  */
 
+/** Что можно выставить из резерва: всё, кроме короля. */
+export type DropKind = "q" | "r" | "b" | "n" | "p";
+
 /** Ход на проводе: координаты и фигура превращения, а не запись партии. */
 export interface MoveInput {
-  from: string;
+  /** Откуда идут. У выставления из резерва её нет — есть `drop`. */
+  from?: string;
   to: string;
   /** Во что превращать пешку. Обязательна, если пешка доходит до края. */
   promotion?: "q" | "r" | "b" | "n";
+  /** Какую фигуру выставляют из резерва — вместо `from`. */
+  drop?: DropKind;
 }
 
 /** Принятый ход: всё, что о нём знает сервер. */
 export interface MoveRecord {
+  /** У выставленной из резерва — та же клетка, что и `to`: она ниоткуда. */
   from: string;
   to: string;
   promotion?: PieceKind;
+  /** Что выставили из резерва. */
+  drop?: PieceKind;
   /** Запись хода. Её считает сервер: от позиции она зависит, клиент — нет. */
   san: string;
   /** Какой это полуход по счёту, начиная с первого. */
@@ -147,13 +157,20 @@ export class TurboGame {
   legal(): MoveInput[] {
     const { geometry } = this.top.position;
 
-    return legalMoves(this.top.position).map((move) => ({
-      from: squareName(geometry, move.from),
-      to: squareName(geometry, move.to),
-      ...(move.promotion
-        ? { promotion: move.promotion as MoveInput["promotion"] }
-        : {}),
-    }));
+    return legalMoves(this.top.position).map((move) =>
+      move.from === DROP
+        ? {
+            drop: move.piece.kind as DropKind,
+            to: squareName(geometry, move.to),
+          }
+        : {
+            from: squareName(geometry, move.from),
+            to: squareName(geometry, move.to),
+            ...(move.promotion
+              ? { promotion: move.promotion as MoveInput["promotion"] }
+              : {}),
+          },
+    );
   }
 
   outcome(): Outcome | null {
@@ -176,17 +193,11 @@ export class TurboGame {
 
     const position = this.top.position;
     const { geometry } = position;
-    const from = parseSquare(geometry, input.from);
     const target = parseSquare(geometry, input.to);
-    if (from === null || target === null) {
-      return { ok: false, reason: "illegal" };
-    }
-    const to = this.normalizeCastling(from, target);
+    if (target === null) return { ok: false, reason: "illegal" };
 
     const legal = legalMoves(position);
-    const matching = legal.filter(
-      (move) => move.from === from && move.to === to,
-    );
+    const matching = this.matching(input, legal, target);
     if (matching.length === 0) return { ok: false, reason: "illegal" };
 
     let chosen: Move | undefined;
@@ -201,9 +212,11 @@ export class TurboGame {
     if (!chosen) return { ok: false, reason: "illegal" };
 
     const after = play(position, chosen);
+    const drop = chosen.from === DROP;
     const record: MoveRecord = {
-      from: squareName(geometry, chosen.from),
+      from: squareName(geometry, drop ? chosen.to : chosen.from),
       to: squareName(geometry, chosen.to),
+      ...(drop ? { drop: chosen.piece.kind } : {}),
       ...(chosen.promotion ? { promotion: chosen.promotion } : {}),
       san: san(position, chosen, legal),
       ply: this.ply() + 1,
@@ -429,6 +442,34 @@ export class TurboGame {
     const seen = (this.seen.get(key) ?? 0) + delta;
     if (seen <= 0) this.seen.delete(key);
     else this.seen.set(key, seen);
+  }
+
+  /**
+   * Ходы, подходящие под присланное. Несколько их бывает у превращения: одна
+   * пара клеток, четыре фигуры.
+   */
+  private matching(
+    input: MoveInput,
+    legal: readonly Move[],
+    target: number,
+  ): Move[] {
+    if (input.drop) {
+      return legal.filter(
+        (move) =>
+          move.from === DROP &&
+          move.piece.kind === input.drop &&
+          move.to === target,
+      );
+    }
+
+    const from =
+      input.from === undefined
+        ? null
+        : parseSquare(this.top.position.geometry, input.from);
+    if (from === null) return [];
+
+    const to = this.normalizeCastling(from, target);
+    return legal.filter((move) => move.from === from && move.to === to);
   }
 
   /**

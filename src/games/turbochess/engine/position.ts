@@ -40,13 +40,31 @@ export interface PositionRules {
   readonly goal: Goal;
   /** Есть чем взять — брать обязательно, как в шашках. */
   readonly mustCapture: boolean;
+  /**
+   * Взятая фигура через три хода переходит срубившему в резерв
+   * (docs/MODES.md, режим 14).
+   */
+  readonly zombies: boolean;
 }
 
-/** Правила обычных шахмат: мат и взятие по желанию. */
+/** Правила обычных шахмат: мат, взятие по желанию, мёртвые не встают. */
 export const CLASSIC_RULES: PositionRules = {
   goal: "mate",
   mustCapture: false,
+  zombies: false,
 };
+
+/** Сколько своих ходов хозяину ждать, прежде чем зомби встанет в резерв. */
+export const ZOMBIE_DELAY = 3;
+
+/** Фигура в очереди на воскрешение. */
+export interface Zombie {
+  readonly kind: PieceKind;
+  /** Кто её срубил — к тому она и придёт, и его цветом. */
+  readonly side: Side;
+  /** Сколько ходов хозяину ещё сделать; ноль — уже в резерве. */
+  readonly left: number;
+}
 
 /**
  * Сколько полуходов без взятия останавливают партию там, где цель — снять всё.
@@ -110,6 +128,13 @@ export interface Position {
    * (docs/MODES.md, режимы 3, 8, 13, 14).
    */
   readonly taken: readonly (readonly Piece[])[];
+  /**
+   * Что каждая сторона может выставить на доску вместо хода: подкрепление и
+   * доспевшие зомби (docs/MODES.md, режимы 2 и 14).
+   */
+  readonly reserve: readonly (readonly PieceKind[])[];
+  /** Зомби, которым до резерва ещё несколько ходов их нового хозяина. */
+  readonly pending: readonly Zombie[];
 }
 
 /** Белые ходят вверх, чёрные вниз. */
@@ -155,6 +180,8 @@ export function classicPosition(): Position {
     quiet: 0,
     sinceCapture: 0,
     taken: [[], []],
+    reserve: [[], []],
+    pending: [],
   };
 }
 

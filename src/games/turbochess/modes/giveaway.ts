@@ -1,4 +1,8 @@
-import { classicPosition, type Position } from "../engine/position";
+import {
+  CLASSIC_RULES,
+  classicPosition,
+  type Position,
+} from "../engine/position";
 
 /**
  * Режим 11, «Поддавки» (docs/MODES.md): цель обратная — скормить сопернику
@@ -15,7 +19,7 @@ export function giveawayPosition(): Position {
     // Рокировки нет: король здесь обычная фигура, которую подставляют, и
     // прятать его за ладью незачем.
     castling: [],
-    rules: { goal: "feed", mustCapture: true },
+    rules: { ...CLASSIC_RULES, goal: "feed", mustCapture: true },
   };
 }
 

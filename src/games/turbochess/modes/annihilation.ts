@@ -1,5 +1,6 @@
 import type { Side } from "../engine/pieces";
 import {
+  CLASSIC_RULES,
   STALL_PLIES,
   classicPosition,
   type Position,
@@ -20,7 +21,7 @@ export const STALL_WARN = 15;
 export function annihilationPosition(): Position {
   return {
     ...classicPosition(),
-    rules: { goal: "wipe", mustCapture: false },
+    rules: { ...CLASSIC_RULES, goal: "wipe" },
   };
 }
 

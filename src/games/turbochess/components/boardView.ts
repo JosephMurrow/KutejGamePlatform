@@ -1,6 +1,6 @@
 import { squareName } from "../engine/geometry";
-import { inCheck, type Move } from "../engine/moves";
-import type { Piece } from "../engine/pieces";
+import { DROP, inCheck, type Move } from "../engine/moves";
+import type { Piece, PieceKind } from "../engine/pieces";
 import type { Position } from "../engine/position";
 import { colorOf } from "./pieces";
 
@@ -57,6 +57,7 @@ export function targetsFrom(
   const targets = new Map<string, boolean>();
 
   for (const move of legal) {
+    if (move.from === DROP) continue;
     if (squareName(position.geometry, move.from) !== from) continue;
     const to = squareName(position.geometry, move.to);
     targets.set(to, (targets.get(to) ?? false) || move.captured !== null);
@@ -78,12 +79,44 @@ export function movesBetween(
   const { geometry } = position;
 
   return legal.filter((move) => {
+    if (move.from === DROP) return false;
     if (squareName(geometry, move.from) !== from) return false;
     if (squareName(geometry, move.to) === to) return true;
     return (
       move.castle !== null && squareName(geometry, move.castle.rook) === to
     );
   });
+}
+
+/** Куда можно выставить фигуру этого вида из резерва. */
+export function dropTargets(
+  position: Position,
+  legal: readonly Move[],
+  kind: PieceKind,
+): Set<string> {
+  const targets = new Set<string>();
+
+  for (const move of legal) {
+    if (move.from !== DROP || move.piece.kind !== kind) continue;
+    targets.add(squareName(position.geometry, move.to));
+  }
+
+  return targets;
+}
+
+/** Ход выставления на эту клетку; `undefined` — так нельзя. */
+export function dropTo(
+  position: Position,
+  legal: readonly Move[],
+  kind: PieceKind,
+  to: string,
+): Move | undefined {
+  return legal.find(
+    (move) =>
+      move.from === DROP &&
+      move.piece.kind === kind &&
+      squareName(position.geometry, move.to) === to,
+  );
 }
 
 /** Каков ход: есть ли он вообще и нужна ли для него фигура превращения. */

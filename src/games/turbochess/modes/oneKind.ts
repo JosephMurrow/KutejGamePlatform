@@ -92,6 +92,8 @@ export function oneKindPosition(kind: OneKind): Position {
     quiet: 0,
     sinceCapture: 0,
     taken: [[], []],
+    reserve: [[], []],
+    pending: [],
   };
 }
 

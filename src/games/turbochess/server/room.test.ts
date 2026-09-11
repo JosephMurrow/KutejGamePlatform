@@ -425,6 +425,58 @@ describe("режим", () => {
   });
 });
 
+describe("подкрепление", () => {
+  it("выставление из запаса идёт через ход и проверяется сервером", () => {
+    const settings: TurboRoomSettings = {
+      mode: "REINFORCEMENTS",
+      timeControl: "SEC_30",
+      options: {},
+    };
+    const context: GameRoomContext = {
+      key: "turbo-reserve",
+      ownerId: "white",
+      isPrivate: true,
+      settings,
+      connections: () => 2,
+      introduce: () => {},
+      forget: () => {},
+      emitted: () => {},
+      changed: () => {},
+    };
+    const room = new TurboRoom(context, settings);
+    room.join("white");
+    room.join("black");
+
+    const position = view(room).position as Position;
+    assert.deepEqual(position.reserve, [
+      ["q", "r", "b", "n", "p"],
+      ["q", "r", "b", "n", "p"],
+    ]);
+    assert.equal(
+      room.act(GAME_EVENT.move, "white", { drop: "q", to: "a2", ply: 0 })
+        .reason,
+      "Так не ходят",
+      "в начале ставить некуда",
+    );
+
+    move(room, "white", "b1", "c3");
+    move(room, "black", "b8", "c6");
+
+    assert.equal(
+      room.act(GAME_EVENT.move, "white", { drop: "q", to: "b1", ply: 2 })
+        .accepted,
+      true,
+    );
+    assert.equal((view(room).moves as string[]).at(-1), "Q@b1");
+    assert.equal(view(room).turn, 1, "выставление стоит хода");
+    assert.deepEqual(
+      (view(room).position as Position).reserve[0],
+      ["r", "b", "n", "p"],
+      "ферзь ушёл из запаса",
+    );
+  });
+});
+
 describe("бомба", () => {
   function nuclearTable(options: ModeOptions = { threshold: 20 }) {
     const settings: TurboRoomSettings = {
