@@ -12,6 +12,12 @@
       "runtimeExecutable": "npm",
       "runtimeArgs": ["run", "start"],
       "port": 3000
+    },
+    {
+      "name": "pricetitute-prod-3100",
+      "runtimeExecutable": "sh",
+      "runtimeArgs": ["-c", "PORT=3100 npm run start"],
+      "port": 3100
     }
   ]
 }

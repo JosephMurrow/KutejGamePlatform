@@ -21,6 +21,7 @@ export const CHESS: GameManifest = {
   tagline: "Величайшая война в истории, запертая на 64 клетках",
   adult: false,
   routes: ROUTES,
+  themeColor: "#f4efe4",
   Box: ChessBox,
   logo: "/games/chess/logo.png",
   icon: "/games/chess/icon.png",

@@ -25,6 +25,7 @@ export const PRICETITUTE: GameManifest = {
   tagline: "Угадай, за сколько человек на это согласится",
   adult: true,
   routes: ROUTES,
+  themeColor: "#fff5f8",
   Box: PricetituteBox,
   logo: "/games/pricetitute/logo.png",
   icon: "/games/pricetitute/icon.png",
