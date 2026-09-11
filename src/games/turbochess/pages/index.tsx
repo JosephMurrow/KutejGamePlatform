@@ -3,29 +3,30 @@ import type {
   GameRoomViewProps,
   GameScreenViewProps,
 } from "@/lib/games/pages";
-import { LocalTable } from "../components/LocalTable";
-import { WaitingRoom } from "../components/WaitingRoom";
-import { loadRoomSettings } from "../rooms/store";
+import { GameRoom } from "../components/GameRoom";
+import { ScreenView } from "../components/ScreenView";
 
 /**
  * Что турбо-шахматы рисуют в комнате и на экране. Платформа зовёт это через
  * страничный реестр и внутрь не смотрит (docs/BACKLOG.md E1).
  *
- * В комнате пока доска за одним экраном — партия по сети придёт на этапе 5
- * (docs/PLAN.md). Экрану трансляции доска без сети ни к чему: он показывает,
- * что комната поднялась и в каком она режиме.
+ * Обе страницы — тонкие обёртки: всё состояние приходит снимком по сокету, и
+ * серверу тут считать нечего. Так же устроены страницы шахмат.
  */
 
-async function Room({ room }: GameRoomViewProps) {
-  const settings = await loadRoomSettings(room.id);
-
-  return <LocalTable code={room.code} mode={settings.mode} />;
+function Room({ room, user }: GameRoomViewProps) {
+  return (
+    <GameRoom
+      roomCode={room.code}
+      userId={user.id}
+      nickname={user.nickname}
+      avatarId={user.avatarId}
+    />
+  );
 }
 
-async function Screen({ room }: GameScreenViewProps) {
-  const settings = await loadRoomSettings(room.id);
-
-  return <WaitingRoom code={room.code} mode={settings.mode} screen />;
+function Screen({ room }: GameScreenViewProps) {
+  return <ScreenView roomCode={room.code} screenKey={room.screenKey} />;
 }
 
 export const TURBOCHESS_PAGES: GamePages = { Room, Screen };

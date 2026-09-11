@@ -1,5 +1,9 @@
 import type { PlayerPayload, RoomStatePayload } from "@/shared/protocol";
+import type { Result, EndReason } from "./engine/outcome";
+import type { Side } from "./engine/pieces";
+import type { Position } from "./engine/position";
 import type { TurboMode } from "./modes/catalog";
+import type { TimeControl } from "./rooms/settings";
 
 /**
  * Протокол турбо-шахмат: код игры, ключ зала, события сокета и форма снимка.
@@ -24,23 +28,54 @@ export const GLOBAL_ROOM = "turbochess-hall";
 
 /**
  * События, которые игра слушает в сокете. Платформа регистрирует ровно то, что
- * здесь перечислено. Пока пусто: ходить нечем, партия появится на этапе 5
- * (docs/PLAN.md).
+ * здесь перечислено. Имена те же, что у шахмат: сокет принадлежит одной
+ * комнате одной игры, и путаницы между играми быть не может.
  */
-export const GAME_EVENT = {} as const satisfies Record<string, string>;
+export const GAME_EVENT = {
+  /** `{ from, to, promotion?, ply }` */
+  move: "game:move",
+  resign: "game:resign",
+  /** Требовать ничью по повторению или пятидесяти ходам. */
+  claimDraw: "game:draw",
+  /** Предложить ничью — или принять чужое предложение: у человека кнопка одна. */
+  offerDraw: "game:offer",
+  declineDraw: "game:decline",
+  /** Ещё партия в той же комнате: места меняются. */
+  rematch: "game:rematch",
+} as const;
 
-/** Где стол: ждёт игроков, все расселись — или это закрытая дверь зала. */
-export type TurboPhase = "waiting" | "ready" | "closed";
+/** Где стол: ждёт игроков, партия идёт, кончилась — или это закрытая дверь зала. */
+export type TurboPhase = "waiting" | "playing" | "over" | "closed";
 
 export interface TurboPlayerPayload extends PlayerPayload {
-  /** Место за столом, с нуля. Мест два, в королевской битве — четыре. */
+  /** Место за столом, с нуля. У двоих это и сторона: белые — 0, чёрные — 1. */
   seat: number;
+  /** Ушёл, и его ждут: соперник должен это видеть. */
+  away: boolean;
 }
 
 export interface TurboStatePayload extends RoomStatePayload<TurboPlayerPayload> {
   phase: TurboPhase;
   /** Режим партии; у закрытой двери — null. */
   mode: TurboMode | null;
-  /** Сколько мест за столом в этом режиме. */
+  /** Сколько мест за столом. */
   seats: number;
+  /**
+   * Позиция — объектом, как её понимает движок. Клиент гоняет по ней тот же
+   * движок: подсказать ходы и показать ход до ответа сервера. Правда одна —
+   * серверная. У закрытой двери — null.
+   */
+  position: Position | null;
+  /** Записи ходов по порядку. */
+  moves: string[];
+  lastMove: { from: string; to: string } | null;
+  /** Чья очередь; вне партии — null. */
+  turn: Side | null;
+  /** Есть ли прямо сейчас основание требовать ничью. */
+  claimable: "threefold" | "fiftyMoves" | null;
+  /** Кто предложил ничью и ждёт ответа. Видят только сидящие за столом. */
+  drawOffer: Side | null;
+  result: Result | null;
+  reason: EndReason | null;
+  timeControl: TimeControl | null;
 }

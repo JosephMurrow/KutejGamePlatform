@@ -1,4 +1,4 @@
-import { MODE_IDS, type TurboMode } from "../modes/catalog";
+import { PLAYER_MODES, type TurboMode } from "../modes/catalog";
 
 /**
  * Настройки партии: типы, умолчание и разбор формы.
@@ -16,14 +16,48 @@ import { MODE_IDS, type TurboMode } from "../modes/catalog";
  */
 export type ModeOptions = Record<string, string | number | boolean>;
 
+/**
+ * Контроль времени. Лимит на ход, а не бюджет на партию — как у шахмат, и по
+ * той же причине: это ровно один дедлайн, и он ложится на будильник
+ * платформы без правки договора.
+ */
+export type TimeControl = "SEC_10" | "SEC_30" | "MIN_1" | "MIN_3" | "UNLIMITED";
+
 export interface TurboRoomSettings {
   mode: TurboMode;
+  timeControl: TimeControl;
   options: ModeOptions;
 }
 
-/** Первый режим каталога: с него начинается и сама разработка (этап 6). */
+/**
+ * Сколько миллисекунд даётся на ход. `null` — без ограничения: платформа в
+ * этом случае будильник не заводит вовсе.
+ */
+export const MOVE_LIMIT_MS: Record<TimeControl, number | null> = {
+  SEC_10: 10_000,
+  SEC_30: 30_000,
+  MIN_1: 60_000,
+  MIN_3: 180_000,
+  UNLIMITED: null,
+};
+
+/** Как контроль времени называется в интерфейсе. */
+export const TIME_CONTROL_LABEL: Record<TimeControl, string> = {
+  SEC_10: "10 секунд",
+  SEC_30: "30 секунд",
+  MIN_1: "1 минута",
+  MIN_3: "3 минуты",
+  UNLIMITED: "без ограничения",
+};
+
+const TIME_CONTROLS = Object.keys(MOVE_LIMIT_MS) as TimeControl[];
+
+/**
+ * Первый режим каталога — с него начинается и сама разработка (этап 6), —
+ * и полминуты на ход, как в общем зале шахмат.
+ */
 export function defaultRoomSettings(): TurboRoomSettings {
-  return { mode: "ONE_KIND", options: {} };
+  return { mode: "ONE_KIND", timeControl: "SEC_30", options: {} };
 }
 
 /**
@@ -35,8 +69,17 @@ export function defaultRoomSettings(): TurboRoomSettings {
  */
 export function normalizeRoomSettings(raw: {
   mode: unknown;
+  timeControl: unknown;
 }): TurboRoomSettings {
-  return { mode: pickMode(raw.mode), options: {} };
+  const fallback = defaultRoomSettings();
+
+  return {
+    mode: pickMode(raw.mode),
+    timeControl: TIME_CONTROLS.includes(raw.timeControl as TimeControl)
+      ? (raw.timeControl as TimeControl)
+      : fallback.timeControl,
+    options: {},
+  };
 }
 
 /**
@@ -60,8 +103,11 @@ export function readOptions(raw: unknown): ModeOptions {
   return options;
 }
 
+/**
+ * Режим из формы. Сверяется со списком тех, что видят игроки: служебную
+ * «Классику» формой не выбрать, даже если прислать её руками.
+ */
 export function pickMode(value: unknown): TurboMode {
-  return MODE_IDS.includes(value as TurboMode)
-    ? (value as TurboMode)
-    : defaultRoomSettings().mode;
+  const found = PLAYER_MODES.find((mode) => mode.id === value);
+  return found ? found.id : defaultRoomSettings().mode;
 }

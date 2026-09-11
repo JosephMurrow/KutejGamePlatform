@@ -28,7 +28,8 @@ export type TurboMode =
   | "BLACK_MARKET"
   | "ZOMBIE"
   | "ANARCHY"
-  | "SHOWDOWN";
+  | "SHOWDOWN"
+  | "CLASSIC";
 
 export interface ModeInfo {
   id: TurboMode;
@@ -42,6 +43,11 @@ export interface ModeInfo {
   short: string;
   /** Мест за столом. Всюду двое, в королевской битве — четверо. */
   seats: number;
+  /**
+   * Служебный режим: игрокам не показывается и формой не выбирается. Такой
+   * один — «Классика» (docs/PLAN.md, этап 5).
+   */
+  hidden?: boolean;
 }
 
 export const MODES: readonly ModeInfo[] = [
@@ -157,7 +163,21 @@ export const MODES: readonly ModeInfo[] = [
     short: "Расставляешь фигуры вслепую, вскрываетесь одновременно.",
     seats: 2,
   },
+  {
+    // Номер ноль: у служебного режима места в нумерации MODES.md нет.
+    id: "CLASSIC",
+    number: 0,
+    title: "Классика",
+    short: "Обычные шахматы — служебный режим для проверок.",
+    seats: 2,
+    hidden: true,
+  },
 ];
+
+/** Режимы, которые видят игроки: форма комнаты и главная игры. */
+export const PLAYER_MODES: readonly ModeInfo[] = MODES.filter(
+  (mode) => !mode.hidden,
+);
 
 export const MODE_IDS: readonly TurboMode[] = MODES.map((mode) => mode.id);
 

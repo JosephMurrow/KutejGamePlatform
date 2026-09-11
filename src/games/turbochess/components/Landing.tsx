@@ -1,5 +1,5 @@
 import { ButtonLink } from "@/components/ui/Button";
-import { MODES } from "../modes/catalog";
+import { PLAYER_MODES } from "../modes/catalog";
 import { PIECE_KINDS, PIECE_NAME, pieceSrc } from "./pieces";
 import { ROUTES, TURBOCHESS } from "../manifest";
 
@@ -59,7 +59,7 @@ export function Landing() {
       </section>
 
       <section className="grid gap-4 sm:grid-cols-2">
-        {MODES.map((mode) => (
+        {PLAYER_MODES.map((mode) => (
           <div
             key={mode.id}
             className="flex flex-col gap-2 rounded-xl border border-line bg-paper p-5"

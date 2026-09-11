@@ -10,6 +10,7 @@ import {
   loadRoomSettings,
   saveRoomSettings,
 } from "../rooms/store";
+import { dropRoomMatches } from "../rooms/matches";
 import { createTurboServer } from ".";
 
 /** Серверная половина договора турбо-шахмат с платформой. */
@@ -27,15 +28,19 @@ export const TURBOCHESS_SERVER: GameServerManifest = {
   async saveRoomSettings(roomId: string, form: FormData): Promise<void> {
     await saveRoomSettings(
       roomId,
-      normalizeRoomSettings({ mode: form.get("mode") }),
+      normalizeRoomSettings({
+        mode: form.get("mode"),
+        timeControl: form.get("timeControl"),
+      }),
     );
   },
 
   actions: Object.values(GAME_EVENT),
 
   async dropRoomData(key: string): Promise<void> {
-    // Комнату удалили — уходят и её настройки. Партий в базе пока нет.
+    // Комнату удалили — уходят и настройки, и сыгранные в ней партии.
     await dropRoomSettings(key);
+    await dropRoomMatches(key);
   },
 
   createServer: createTurboServer,

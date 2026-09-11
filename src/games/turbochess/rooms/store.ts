@@ -19,8 +19,8 @@ export async function saveRoomSettings(
 ): Promise<void> {
   await prisma.turboRoomSettings.upsert({
     where: { roomId },
-    create: { roomId, mode: settings.mode, options: settings.options },
-    update: { mode: settings.mode, options: settings.options },
+    create: { roomId, ...settings },
+    update: settings,
   });
 }
 
@@ -34,7 +34,11 @@ export async function loadRoomSettings(
   const row = await prisma.turboRoomSettings.findUnique({ where: { roomId } });
   if (!row) return defaultRoomSettings();
 
-  return { mode: row.mode, options: readOptions(row.options) };
+  return {
+    mode: row.mode,
+    timeControl: row.timeControl,
+    options: readOptions(row.options),
+  };
 }
 
 /** Комнату удалили: своя строка уходит вместе с ней. */

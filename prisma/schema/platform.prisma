@@ -158,16 +158,18 @@ model User {
   updatedAt DateTime @updatedAt
 
   links         OneTimeLink[]
-  hostedRounds  Round[]       @relation("HostedRounds")
-  hostedRooms   PrivateRoom[] @relation("HostedRooms")
+  hostedRounds  Round[]          @relation("HostedRounds")
+  hostedRooms   PrivateRoom[]    @relation("HostedRooms")
   bets          RoundBet[]
   scores        Score[]
   /// Партии в шахматы. Колонок это в `users` не добавляет — только связь.
-  chessWhite    ChessMatch[]  @relation("ChessWhite")
-  chessBlack    ChessMatch[]  @relation("ChessBlack")
-  chessRating   ChessRating?  @relation("ChessRating")
-  chessPairLow  ChessPair[]   @relation("ChessPairLow")
-  chessPairHigh ChessPair[]   @relation("ChessPairHigh")
+  chessWhite    ChessMatch[]     @relation("ChessWhite")
+  chessBlack    ChessMatch[]     @relation("ChessBlack")
+  chessRating   ChessRating?     @relation("ChessRating")
+  chessPairLow  ChessPair[]      @relation("ChessPairLow")
+  chessPairHigh ChessPair[]      @relation("ChessPairHigh")
+  /// Места за столом в партиях турбо-шахмат. Тоже только связь.
+  turboSeats    TurboMatchSeat[] @relation("TurboSeats")
 
   @@index([guestRoomId])
   @@map("users")

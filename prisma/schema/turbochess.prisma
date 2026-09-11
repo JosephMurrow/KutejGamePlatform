@@ -1,4 +1,4 @@
-// Схема турбо-шахмат: пока одни настройки комнаты.
+// Схема турбо-шахмат: настройки комнат и сыгранные партии.
 //
 // Ни одной колонки в платформенных таблицах: платформа не знает, какие у игры
 // настройки, и хранить их у себя не может (docs/DATABASE.md).
@@ -46,6 +46,22 @@ enum TurboMode {
   ANARCHY
   /// 16. Вскрываемся.
   SHOWDOWN
+  /// Классика: обычные шахматы. Служебный — игрокам не показывается, нужен
+  /// смоуку и тестам: правила остальных режимов меняются на их этапах, а
+  /// проверка партии через сервер должна от этого не зависеть.
+  CLASSIC
+
+  @@schema("turbochess")
+}
+
+/// Сколько времени даётся на один ход — как у шахмат: лимит на ход, а не
+/// бюджет на партию.
+enum TurboTimeControl {
+  SEC_10
+  SEC_30
+  MIN_1
+  MIN_3
+  UNLIMITED
 
   @@schema("turbochess")
 }
@@ -54,14 +70,66 @@ enum TurboMode {
 model TurboRoomSettings {
   /// Строкой без внешнего ключа — так на комнату ссылаются все игры
   /// (docs/DATABASE.md).
-  roomId  String    @id
-  mode    TurboMode
+  roomId      String           @id
+  mode        TurboMode
+  timeControl TurboTimeControl @default(SEC_30)
   /// Ручки режима: вид фигур у одновидовых, порог заряда у ядерных и так
   /// далее. Одним полем, а не колонкой на ручку: режимов шестнадцать, и
   /// миграция живой базы на каждую ручку стоила бы дороже, чем проверка формы
   /// в коде. Разбирает и сверяет их src/games/turbochess/rooms/settings.ts.
-  options Json      @default("{}")
+  options     Json             @default("{}")
 
   @@map("room_settings")
+  @@schema("turbochess")
+}
+
+/// Сыгранная партия.
+///
+/// Хранится не позициями, а тем, из чего позиции восстанавливаются: режимом,
+/// его ручками, зерном случайности и ходами. Зерно — ради режимов, где
+/// бросают кости: второй прогон тех же ходов с тем же зерном даст ту же
+/// партию (src/games/turbochess/docs/BACKLOG.md C3).
+model TurboMatch {
+  /// Постоянный на всю партию: по нему запись обновляется, а не плодится.
+  id          String           @id
+  /// Строкой без внешнего ключа — так на комнату ссылаются все игры.
+  roomKey     String
+  mode        TurboMode
+  options     Json             @default("{}")
+  /// Зерно генератора случайных чисел партии.
+  seed        Int
+  timeControl TurboTimeControl
+  /// Ходы записью, по порядку.
+  moves       String[]
+  /// Сколько думали над каждым ходом, мс.
+  times       Int[]
+  /// Место победителя; `null` — ничья.
+  winner      Int?
+  /// Почему кончилась (src/games/turbochess/engine/outcome.ts).
+  reason      String
+  startedAt   DateTime
+  endedAt     DateTime
+  seats       TurboMatchSeat[]
+
+  @@index([roomKey, endedAt])
+  @@map("matches")
+  @@schema("turbochess")
+}
+
+/// Кто сидел за столом. Отдельной таблицей, а не парой колонок «белые —
+/// чёрные»: в королевской битве мест четыре (docs/MODES.md, режим 9).
+model TurboMatchSeat {
+  matchId String
+  /// Место за столом, с нуля: у двоих это белые и чёрные.
+  seat    Int
+  userId  String
+  /// Ник на момент партии: человек его сменит, а история меняться не должна.
+  name    String
+  match   TurboMatch @relation(fields: [matchId], references: [id], onDelete: Cascade)
+  user    User       @relation("TurboSeats", fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([matchId, seat])
+  @@index([userId])
+  @@map("match_seats")
   @@schema("turbochess")
 }

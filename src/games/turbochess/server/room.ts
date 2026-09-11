@@ -1,52 +1,162 @@
+import { randomInt, randomUUID } from "node:crypto";
 import type {
   ActionOutcome,
   GameRoomContext,
   GameRoomSnapshot,
   GameRoomState,
+  GameViewer,
 } from "@/lib/games/engine";
-import { modeInfo } from "../modes/catalog";
-import type { TurboPhase } from "../protocol";
-import type { TurboRoomSettings } from "../rooms/settings";
+import { MoveClock, type Ticker } from "../engine/clock";
+import { TurboGame, type MoveInput, type MoveRejection } from "../engine/game";
+import type { EndReason, Outcome } from "../engine/outcome";
+import type { Side } from "../engine/pieces";
+import type { TurboMode } from "../modes/catalog";
+import { GAME_EVENT, type TurboPhase } from "../protocol";
+import {
+  MOVE_LIMIT_MS,
+  type ModeOptions,
+  type TimeControl,
+  type TurboRoomSettings,
+} from "../rooms/settings";
 
 /**
- * Стол в приватной комнате — пока заглушка, реализующая договор целиком.
+ * Партия в одной комнате: стык правил с платформой.
  *
- * Умеет ровно то, что нужно скелету: посадить столько, сколько мест в режиме,
- * остальных оставить зрителями и отдать снимок. Правил здесь нет намеренно:
- * свой движок пишется отдельным этапом и без сети, чтобы его можно было
- * покрыть тестами целиком (docs/PLAN.md, этап 3), а партия по сети приходит на
- * этапе 5. Так же начинались шахматы.
- *
- * Образец договора — `src/lib/games/stub-game.test.ts`.
+ * Платформа держит соединения, состав и рассылку; отсюда она получает только
+ * дедлайн и снимок, а внутрь не смотрит. Устроено по образцу шахматной
+ * комнаты (src/games/chess/server/room.ts) — копией, а не импортом: игра не
+ * импортирует игру. Ботов, задержки для зрителей и общего зала здесь нет:
+ * бот придёт на этапе 11, а зала у турбо-шахмат нет вовсе.
  */
+
+/**
+ * Сколько ждать ушедшего, прежде чем засчитать партию брошенной.
+ *
+ * Поверх платформенной отсрочки в пятнадцать секунд, которая переживает
+ * перезагрузку страницы. Часы хода при этом **не останавливаются**: иначе
+ * выдернутый кабель стал бы способом не проиграть.
+ */
+const ABANDON_MS = 90_000;
+
+/**
+ * Потолок партии. Лимит на ход ограничивает ход, но не партию: в безлимитной
+ * комнате партия не кончилась бы никогда. Проверяется на ходах, а не
+ * будильником: иначе безлимитная комната заводила бы таймер, которого у неё
+ * быть не должно.
+ */
+const MAX_PLIES = 600;
+const MAX_GAME_MS = 3 * 60 * 60 * 1000;
+
+/**
+ * Через сколько полуходов можно предложить ничью снова. Без этого «ничья?» на
+ * каждый ход становится способом троллинга.
+ */
+const DRAW_COOLDOWN_PLIES = 10;
+
+/** Кто ушёл и когда — момент по монотонным часам. */
+interface Absence {
+  id: string;
+  since: number;
+}
+
+/** Партия для записи: всё, что о ней нужно знать базе. */
+export interface MatchDraft {
+  id: string;
+  roomKey: string;
+  mode: TurboMode;
+  options: ModeOptions;
+  seed: number;
+  timeControl: TimeControl;
+  /** Кто где сидел: место — это индекс. */
+  seats: string[];
+  moves: string[];
+  times: number[];
+  /** Место победителя; `null` — ничья. */
+  winner: Side | null;
+  reason: EndReason;
+  startedAt: Date;
+}
+
+/** Куда комната отдаёт партию. База — снаружи: комната про неё не знает. */
+export type Persist = (draft: MatchDraft) => void;
+
+/**
+ * Зерно случайности партии. Правила пока без костей, но запись партии несёт
+ * его с первой же партии: форму записи на живой базе менять дорого
+ * (docs/BACKLOG.md C3).
+ */
+function newSeed(): number {
+  return randomInt(0, 2 ** 31);
+}
+
 export class TurboRoom implements GameRoomState {
-  /** Сидящие в порядке посадки: место за столом — это индекс. */
+  private game = new TurboGame();
+  private readonly clock: MoveClock;
+  /** Сидящие в порядке посадки: место за столом — это индекс и сторона. */
   private readonly seats: string[] = [];
-  /** Мест два, в королевской битве — четыре. Остальные смотрят. */
-  private readonly capacity: number;
+  private absence: Absence | null = null;
+  /** Момент начала партии по монотонным часам; `null` — ещё не началась. */
+  private startedAt: number | null = null;
+  /** Он же настенным временем: в базу уезжает именно оно. */
+  private startedWall: Date | null = null;
+  /** Начало текущего хода по монотонным часам: из него считается время хода. */
+  private moveStartedAt: number;
+  /** Сколько думали над каждым ходом, мс. */
+  private times: number[] = [];
+  /** Постоянный на всю партию: запись обновляется, а не плодится. */
+  private matchId = randomUUID();
+  private seed = newSeed();
+  /** Кто предложил ничью и ждёт ответа. */
+  private offer: Side | null = null;
+  /** На каком полуходе каждая сторона предлагала в последний раз. */
+  private offered: number[] = [];
 
   constructor(
     private readonly context: GameRoomContext,
     private readonly settings: TurboRoomSettings,
+    private readonly now: Ticker = () => performance.now(),
+    /** Запись партии в базу. Без неё комната работает — просто без истории. */
+    private readonly persist?: Persist,
   ) {
-    this.capacity = modeInfo(settings.mode).seats;
+    this.clock = new MoveClock(MOVE_LIMIT_MS[settings.timeControl], now);
+    this.moveStartedAt = now();
+    this.resetOffers();
+  }
+
+  /** Мест столько, сколько сторон в позиции: двое, в королевской битве — четверо. */
+  private get capacity(): number {
+    return this.game.position().sides.length;
   }
 
   join(playerId: string): void {
-    if (this.seats.includes(playerId)) return;
-    // Лишние остаются зрителями: за столом их нет, но в комнате они есть, и
-    // снимок им приходит. Лимит держит движок, а не платформенное
-    // `maxPlayers` — тот отбил бы само подключение, и зритель получил бы «нет
-    // свободных мест» (так же решено у шахмат).
-    if (this.seats.length < this.capacity) this.seats.push(playerId);
+    // Вернулся тот, кого ждали: место за ним и держали.
+    if (this.absence?.id === playerId) this.absence = null;
+
+    if (!this.seats.includes(playerId) && this.seats.length < this.capacity) {
+      this.seats.push(playerId);
+      // Лишние остаются зрителями: за столом их нет, но партию видят целиком.
+      if (this.seats.length === this.capacity) this.start();
+    }
+
     this.context.changed();
   }
 
+  /**
+   * Игрок ушёл: закрыл вкладки и не вернулся за платформенную отсрочку.
+   *
+   * Посреди партии место за ним держится — иначе на него сядет зритель, — и
+   * через полторы минуты партия достаётся сопернику. До партии и после неё
+   * держать место незачем: оно освобождается сразу.
+   */
   leave(playerId: string): void {
     const at = this.seats.indexOf(playerId);
     if (at < 0) return;
 
-    this.seats.splice(at, 1);
+    if (this.playing()) {
+      this.absence = { id: playerId, since: this.now() };
+    } else {
+      this.seats.splice(at, 1);
+    }
     this.context.changed();
   }
 
@@ -54,46 +164,111 @@ export class TurboRoom implements GameRoomState {
     return this.seats;
   }
 
-  /** Часы стоят: ходить пока нечем, будильник не нужен. */
+  /**
+   * Когда комнату будить: по часам хода или по ожиданию ушедшего. `null` —
+   * незачем, и платформа таймер не заводит вовсе: так работает безлимитная
+   * комната.
+   *
+   * Наружу дедлайн уходит настенным временем, а считается от монотонного
+   * остатка: настенные часы прыгают при синхронизации.
+   */
   deadline(): number | null {
-    return null;
+    const showing = this.showing();
+    return showing === null ? null : Date.now() + showing;
   }
 
+  /** Сколько осталось — по часам хода или по ожиданию ушедшего. */
+  private showing(): number | null {
+    if (!this.playing()) return null;
+
+    const waits: number[] = [];
+    const left = this.clock.left();
+    if (left !== null) waits.push(left);
+    if (this.absence) {
+      waits.push(Math.max(0, ABANDON_MS - (this.now() - this.absence.since)));
+    }
+
+    return waits.length === 0 ? null : Math.min(...waits);
+  }
+
+  /** Время вышло. Что именно вышло — разбираем здесь. */
   tick(): void {
-    // Будить нечем: пока часов нет, платформа сюда не приходит.
+    if (!this.playing()) return;
+
+    if (this.absence && this.now() - this.absence.since >= ABANDON_MS) {
+      const gone = this.sideOf(this.absence.id);
+      if (gone !== null) this.finish(this.game.abandon(gone));
+      return;
+    }
+
+    if (this.clock.expired()) {
+      this.finish(this.game.flag(this.game.turn()));
+      return;
+    }
+
+    // Разбудили раньше срока. `changed` обязателен и тут: будильник платформа
+    // заводит только на него, и молчаливый тик оставил бы комнату без часов.
+    this.context.changed();
+  }
+
+  act(event: string, actorId: string, payload: unknown): ActionOutcome {
+    switch (event) {
+      case GAME_EVENT.move:
+        return this.makeMove(actorId, payload);
+      case GAME_EVENT.resign:
+        return this.resign(actorId);
+      case GAME_EVENT.offerDraw:
+        return this.offerDraw(actorId);
+      case GAME_EVENT.declineDraw:
+        return this.declineDraw(actorId);
+      case GAME_EVENT.claimDraw:
+        return this.claimDraw(actorId);
+      case GAME_EVENT.rematch:
+        return this.rematch(actorId);
+      default:
+        return { accepted: false, reason: "Неизвестное действие" };
+    }
   }
 
   /**
-   * Платформа зовёт сюда только события из `GAME_EVENT`, а их пока нет. Отказ
-   * всё равно внятный — на случай, если действие появится в протоколе раньше,
-   * чем в движке.
+   * Хозяин убирает игрока. Посреди партии это то же, что уйти и не вернуться:
+   * партия достаётся сопернику, а не растворяется. Вне партии — просто
+   * освобождается место.
    */
-  act(): ActionOutcome {
-    return { accepted: false, reason: "Партия ещё не готова" };
-  }
-
   remove(actorId: string, targetId: string): ActionOutcome {
     if (this.context.ownerId !== actorId) {
       return { accepted: false, reason: "Выгоняет только хозяин" };
     }
 
-    this.leave(targetId);
+    const side = this.sideOf(targetId);
+    if (side === null) return { accepted: true };
+
+    if (this.playing()) {
+      this.finish(this.game.abandon(side));
+    } else {
+      this.seats.splice(side, 1);
+      this.context.changed();
+    }
     return { accepted: true };
   }
 
-  // Зритель снимку пока безразличен: секретов у заглушки нет. Появятся они с
-  // «двойным агентом» и «вскрываемся» — там снимок станет разным для разных
-  // глаз (docs/MODES.md, режимы 10 и 16).
-  snapshot(): GameRoomSnapshot {
-    const phase: TurboPhase =
-      this.seats.length < this.capacity ? "waiting" : "ready";
+  snapshot(viewer: GameViewer): GameRoomSnapshot {
+    const showing = this.showing();
 
     return {
-      deadline: null,
-      phaseDurationMs: null,
+      deadline: showing === null ? null : Date.now() + showing,
+      phaseDurationMs: MOVE_LIMIT_MS[this.settings.timeControl],
       playerCount: this.seats.length,
-      players: this.seats.map((id, seat) => ({ id, extra: { seat } })),
-      extra: { phase, mode: this.settings.mode, seats: this.capacity },
+      players: this.seats.map((id, seat) => ({
+        id,
+        extra: { seat, away: this.absence?.id === id },
+      })),
+      extra: {
+        ...this.view(),
+        // Предложение ничьей до ответа — секрет сидящих. Зритель узнает о нём
+        // только по итогу партии.
+        drawOffer: this.seatedViewer(viewer) ? this.offer : null,
+      },
     };
   }
 
@@ -102,6 +277,276 @@ export class TurboRoom implements GameRoomState {
   }
 
   stop(): void {
-    // Гасить нечего: таймеров у заглушки нет.
+    this.clock.stop();
   }
+
+  /** Игровая часть снимка. */
+  private view(): Record<string, unknown> {
+    const outcome = this.game.outcome();
+    const phase: TurboPhase = outcome
+      ? "over"
+      : this.startedAt === null
+        ? "waiting"
+        : "playing";
+
+    return {
+      phase,
+      mode: this.settings.mode,
+      seats: this.capacity,
+      position: this.game.position(),
+      moves: this.game.history(),
+      lastMove: this.game.lastMove(),
+      turn: phase === "playing" ? this.game.turn() : null,
+      claimable: phase === "playing" ? this.game.claimableDraw() : null,
+      result: outcome?.result ?? null,
+      reason: outcome?.reason ?? null,
+      timeControl: this.settings.timeControl,
+    };
+  }
+
+  /** Партия идёт: началась и не кончилась. */
+  private playing(): boolean {
+    return this.startedAt !== null && !this.game.isOver();
+  }
+
+  private seatedViewer(viewer: GameViewer): boolean {
+    return viewer.kind === "player" && this.seats.includes(viewer.id);
+  }
+
+  private sideOf(playerId: string): Side | null {
+    const at = this.seats.indexOf(playerId);
+    return at < 0 ? null : at;
+  }
+
+  private resetOffers(): void {
+    this.offer = null;
+    this.offered = Array.from(
+      { length: this.capacity },
+      () => -DRAW_COOLDOWN_PLIES,
+    );
+  }
+
+  /**
+   * Стол заполнился — партия пошла. Если за ним уже сыграли, для нового
+   * соперника начинается новая партия: старая записана и кончилась.
+   */
+  private start(): void {
+    if (this.game.isOver()) this.fresh();
+
+    this.startedAt = this.now();
+    this.startedWall = new Date();
+    this.moveStartedAt = this.startedAt;
+    this.clock.restart();
+  }
+
+  /** Чистая партия: новая доска, новая запись, новое зерно. */
+  private fresh(): void {
+    this.game = new TurboGame();
+    this.times = [];
+    this.matchId = randomUUID();
+    this.seed = newSeed();
+    this.absence = null;
+    this.resetOffers();
+  }
+
+  private makeMove(actorId: string, payload: unknown): ActionOutcome {
+    const side = this.sideOf(actorId);
+    if (side === null) return { accepted: false, reason: "Ты не за доской" };
+    if (this.game.isOver()) {
+      return { accepted: false, reason: "Партия кончилась" };
+    }
+    if (!this.playing()) {
+      return { accepted: false, reason: "Соперник ещё не сел" };
+    }
+    if (side !== this.game.turn()) {
+      return { accepted: false, reason: "Сейчас не твой ход" };
+    }
+
+    const input = parseMove(payload);
+    if (!input) return { accepted: false, reason: "Непонятный ход" };
+
+    const spentAt = this.now();
+    const result = this.game.move(input.move, input.ply);
+    if (!result.ok) {
+      return { accepted: false, reason: REJECTION_TEXT[result.reason] };
+    }
+
+    this.times.push(Math.round(spentAt - this.moveStartedAt));
+    this.moveStartedAt = spentAt;
+    // Предложение живёт до ответа или до следующего хода — что раньше.
+    this.offer = null;
+    this.clock.restart();
+    this.finish(result.outcome ?? this.capIfTooLong());
+    // Без этого дедлайн сдвинулся бы, а будильник звонил бы по старому времени.
+    this.context.changed();
+
+    return { accepted: true };
+  }
+
+  private resign(actorId: string): ActionOutcome {
+    const side = this.sideOf(actorId);
+    if (side === null) return { accepted: false, reason: "Ты не за доской" };
+    if (!this.playing()) return { accepted: false, reason: "Партия не идёт" };
+
+    this.finish(this.game.resign(side));
+    return { accepted: true };
+  }
+
+  /**
+   * Предложить ничью — или принять чужое предложение. Одно действие на оба
+   * случая: у человека кнопка одна.
+   */
+  private offerDraw(actorId: string): ActionOutcome {
+    const side = this.sideOf(actorId);
+    if (side === null) return { accepted: false, reason: "Ты не за доской" };
+    if (!this.playing()) return { accepted: false, reason: "Партия не идёт" };
+
+    if (this.offer !== null && this.offer !== side) {
+      this.offer = null;
+      this.finish(this.game.agreeDraw());
+      return { accepted: true };
+    }
+
+    const ply = this.game.ply();
+    if (
+      ply - (this.offered[side] ?? -DRAW_COOLDOWN_PLIES) <
+      DRAW_COOLDOWN_PLIES
+    ) {
+      return { accepted: false, reason: "Ничью только что предлагали" };
+    }
+
+    this.offered[side] = ply;
+    this.offer = side;
+    this.context.changed();
+    return { accepted: true };
+  }
+
+  private declineDraw(actorId: string): ActionOutcome {
+    const side = this.sideOf(actorId);
+    if (side === null) return { accepted: false, reason: "Ты не за доской" };
+    if (this.offer === null || this.offer === side) {
+      return { accepted: false, reason: "Ничью никто не предлагал" };
+    }
+
+    this.offer = null;
+    this.context.changed();
+    return { accepted: true };
+  }
+
+  /** Требовать ничью может любой из сидящих, а не только тот, чья очередь. */
+  private claimDraw(actorId: string): ActionOutcome {
+    if (this.sideOf(actorId) === null) {
+      return { accepted: false, reason: "Ты не за доской" };
+    }
+
+    const outcome = this.game.claimDraw();
+    if (!outcome) {
+      return { accepted: false, reason: "Требовать ничью пока не на чем" };
+    }
+
+    this.finish(outcome);
+    return { accepted: true };
+  }
+
+  /**
+   * Ещё партия в той же комнате. Места меняются: играть подряд одним цветом
+   * нечестно, а смены и ждут от реванша.
+   */
+  private rematch(actorId: string): ActionOutcome {
+    if (this.sideOf(actorId) === null) {
+      return { accepted: false, reason: "Ты не за доской" };
+    }
+    if (!this.game.isOver()) {
+      return { accepted: false, reason: "Партия ещё идёт" };
+    }
+    if (this.seats.length < this.capacity) {
+      return { accepted: false, reason: "Соперник ушёл" };
+    }
+
+    this.seats.reverse();
+    this.start();
+    this.context.changed();
+    return { accepted: true };
+  }
+
+  /** Партия упёрлась в потолок — по числу ходов или по времени. */
+  private capIfTooLong(): Outcome | null {
+    const long =
+      this.game.ply() >= MAX_PLIES ||
+      (this.startedAt !== null && this.now() - this.startedAt >= MAX_GAME_MS);
+
+    return long ? this.game.capOut() : null;
+  }
+
+  /** Партия для записи; `null` — записывать нечего. */
+  private draft(): MatchDraft | null {
+    const outcome = this.game.outcome();
+    if (!outcome || !this.startedWall) return null;
+    if (this.seats.length < this.capacity) return null;
+
+    return {
+      id: this.matchId,
+      roomKey: this.context.key,
+      mode: this.settings.mode,
+      options: this.settings.options,
+      seed: this.seed,
+      timeControl: this.settings.timeControl,
+      seats: [...this.seats],
+      moves: this.game.history(),
+      times: [...this.times],
+      winner: outcome.result === "draw" ? null : outcome.result,
+      reason: outcome.reason,
+      startedAt: this.startedWall,
+    };
+  }
+
+  /**
+   * Партия кончилась: погасить часы, записать её и рассказать платформе. Запись
+   * именно здесь: конец партии — единственный момент, когда история обязана
+   * оказаться в базе.
+   */
+  private finish(outcome: Outcome | null): void {
+    if (!outcome) return;
+
+    this.clock.stop();
+    this.absence = null;
+
+    // Партия без единого хода не сохраняется: её как будто и не было.
+    const draft = this.draft();
+    if (draft && draft.moves.length > 0) this.persist?.(draft);
+
+    this.context.emitted([{ type: "turbochess_finished", ...outcome }]);
+    this.context.changed();
+  }
+}
+
+/** Почему ход не принят — человеческим текстом. */
+const REJECTION_TEXT: Record<MoveRejection, string> = {
+  gameOver: "Партия кончилась",
+  notYourTurn: "Сейчас не твой ход",
+  stalePly: "Этот ход уже сделан",
+  needsPromotion: "Выбери, во что превратить пешку",
+  illegal: "Так не ходят",
+};
+
+/** Разобрать присланное клиентом. Верить ему нельзя ни в одном поле. */
+function parseMove(payload: unknown): { move: MoveInput; ply: number } | null {
+  if (typeof payload !== "object" || payload === null) return null;
+
+  const { from, to, promotion, ply } = payload as Record<string, unknown>;
+
+  if (typeof from !== "string" || typeof to !== "string") return null;
+  if (typeof ply !== "number" || !Number.isInteger(ply) || ply < 0) return null;
+
+  const move: MoveInput = { from, to };
+  if (
+    promotion === "q" ||
+    promotion === "r" ||
+    promotion === "b" ||
+    promotion === "n"
+  ) {
+    move.promotion = promotion;
+  }
+
+  return { move, ply };
 }

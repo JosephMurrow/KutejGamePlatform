@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { MODES } from "../modes/catalog";
+import { MODES, PLAYER_MODES } from "../modes/catalog";
 import {
   defaultRoomSettings,
   normalizeRoomSettings,
@@ -8,18 +8,33 @@ import {
 } from "./settings";
 
 describe("настройки комнаты", () => {
-  it("принимают любой режим из каталога", () => {
-    for (const { id } of MODES) {
-      assert.equal(normalizeRoomSettings({ mode: id }).mode, id);
+  it("принимают любой режим, который видят игроки, и любой контроль времени", () => {
+    for (const { id } of PLAYER_MODES) {
+      assert.equal(
+        normalizeRoomSettings({ mode: id, timeControl: "MIN_3" }).mode,
+        id,
+      );
     }
+    assert.equal(
+      normalizeRoomSettings({ mode: "MEGA", timeControl: "UNLIMITED" })
+        .timeControl,
+      "UNLIMITED",
+    );
+  });
+
+  it("служебную «Классику» формой не выбрать, даже прислав её руками", () => {
+    assert.equal(
+      normalizeRoomSettings({ mode: "CLASSIC", timeControl: "SEC_30" }).mode,
+      defaultRoomSettings().mode,
+    );
   });
 
   it("на мусоре из формы откатываются к умолчанию", () => {
     for (const junk of [null, undefined, "", "one_kind", "HACK", 7, {}]) {
-      assert.deepEqual(normalizeRoomSettings({ mode: junk }), {
-        mode: defaultRoomSettings().mode,
-        options: {},
-      });
+      assert.deepEqual(
+        normalizeRoomSettings({ mode: junk, timeControl: junk }),
+        defaultRoomSettings(),
+      );
     }
   });
 
@@ -46,10 +61,17 @@ describe("настройки комнаты", () => {
 });
 
 describe("каталог режимов", () => {
-  it("номера идут подряд с единицы — по ним ссылается MODES.md", () => {
+  it("номера режимов игроков идут подряд с единицы — по ним ссылается MODES.md", () => {
     assert.deepEqual(
-      MODES.map((mode) => mode.number),
-      MODES.map((_, at) => at + 1),
+      PLAYER_MODES.map((mode) => mode.number),
+      PLAYER_MODES.map((_, at) => at + 1),
+    );
+  });
+
+  it("скрыт ровно один режим — «Классика»", () => {
+    assert.deepEqual(
+      MODES.filter((mode) => mode.hidden).map((mode) => mode.id),
+      ["CLASSIC"],
     );
   });
 

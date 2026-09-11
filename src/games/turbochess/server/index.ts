@@ -4,8 +4,9 @@ import type {
   GameServer,
 } from "@/lib/games/engine";
 import { defaultRoomSettings, type TurboRoomSettings } from "../rooms/settings";
+import { saveMatch } from "../rooms/matches";
 import { ClosedHall } from "./hall";
-import { TurboRoom } from "./room";
+import { TurboRoom, type MatchDraft } from "./room";
 
 /**
  * Серверная часть турбо-шахмат: живые столы и всё, что игра держит у себя на
@@ -24,7 +25,7 @@ class TurboServer implements GameServer {
     const settings = (context.settings ??
       defaultRoomSettings()) as TurboRoomSettings;
 
-    const room = new TurboRoom(context, settings);
+    const room = new TurboRoom(context, settings, undefined, record);
     this.rooms.set(context.key, room);
 
     return Promise.resolve(room);
@@ -37,6 +38,16 @@ class TurboServer implements GameServer {
   stop(): void {
     this.rooms.clear();
   }
+}
+
+/**
+ * Записать партию. Сбой базы партию не роняет: игроки уже увидели итог, а
+ * потерянная запись — строчка в логе, а не пятисотка посреди стола.
+ */
+function record(draft: MatchDraft): void {
+  saveMatch(draft).catch((error: unknown) => {
+    console.error("Не удалось записать партию турбо-шахмат:", error);
+  });
 }
 
 /**

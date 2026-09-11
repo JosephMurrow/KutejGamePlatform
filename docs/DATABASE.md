@@ -11,7 +11,7 @@ platform     users · one_time_links · private_rooms
 pricetitute  questions · rounds · round_bets · scores · room_question_queues
              room_settings
 chess        room_settings · matches · openings · ratings · pairs
-turbochess   room_settings
+turbochess   room_settings · matches · match_seats
 public       только _prisma_migrations
 ```
 
