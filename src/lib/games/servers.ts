@@ -1,6 +1,7 @@
 import type { GameServerManifest } from "./engine";
 import { PRICETITUTE_SERVER } from "@/games/pricetitute/server/manifest";
 import { CHESS_SERVER } from "@/games/chess/server/manifest";
+import { TURBOCHESS_SERVER } from "@/games/turbochess/server/manifest";
 
 /**
  * Реестр серверных половин игр. Отдельно от клиентского реестра: сюда тянется
@@ -11,6 +12,7 @@ export const GAME_SERVERS: readonly GameServerManifest[] = [
   // и на нём висит совместимость старых вкладок (docs/BACKLOG.md A4).
   PRICETITUTE_SERVER,
   CHESS_SERVER,
+  TURBOCHESS_SERVER,
 ];
 
 export function gameServerById(id: string): GameServerManifest | null {

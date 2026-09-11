@@ -14,7 +14,7 @@ generator client {
 // В Prisma 7 строка подключения живёт в prisma.config.ts, а не здесь.
 datasource db {
   provider = "postgresql"
-  schemas  = ["platform", "pricetitute", "chess"]
+  schemas  = ["platform", "pricetitute", "chess", "turbochess"]
 }
 
 /// Какого рода комната. От этого зависит, есть ли у неё вид «экран», пускают ли

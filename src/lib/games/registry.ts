@@ -5,6 +5,7 @@ import {
 } from "./manifest";
 import { PRICETITUTE } from "@/games/pricetitute/manifest";
 import { CHESS } from "@/games/chess/manifest";
+import { TURBOCHESS } from "@/games/turbochess/manifest";
 
 /**
  * Реестр игр — единственное место платформы, которому позволено знать игры
@@ -14,7 +15,7 @@ import { CHESS } from "@/games/chess/manifest";
  *
  * Здесь только клиентская половина манифестов. Серверная — в servers.ts.
  */
-export const GAMES: readonly GameManifest[] = [PRICETITUTE, CHESS];
+export const GAMES: readonly GameManifest[] = [PRICETITUTE, CHESS, TURBOCHESS];
 
 export function gameById(id: string): GameManifest | null {
   return GAMES.find((game) => game.id === id) ?? null;

@@ -1,8 +1,8 @@
 # База
 
 PostgreSQL 17, Prisma 7. Схема разложена по файлам:
-`prisma/schema/platform.prisma`, `prisma/schema/pricetitute.prisma` и
-`prisma/schema/chess.prisma`.
+`prisma/schema/platform.prisma`, `prisma/schema/pricetitute.prisma`,
+`prisma/schema/chess.prisma` и `prisma/schema/turbochess.prisma`.
 
 ## У каждой игры своя схема
 
@@ -11,6 +11,7 @@ platform     users · one_time_links · private_rooms
 pricetitute  questions · rounds · round_bets · scores · room_question_queues
              room_settings
 chess        room_settings · matches · openings · ratings · pairs
+turbochess   room_settings
 public       только _prisma_migrations
 ```
 
