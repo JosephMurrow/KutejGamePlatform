@@ -1,5 +1,6 @@
 import { ButtonLink } from "@/components/ui/Button";
 import { MODES } from "../modes/catalog";
+import { PIECE_KINDS, PIECE_NAME, pieceSrc } from "./pieces";
 import { ROUTES, TURBOCHESS } from "../manifest";
 
 /**
@@ -28,6 +29,34 @@ export function Landing() {
           Своя партия
         </ButtonLink>
       </div>
+
+      {/*
+        Состав: фигуры с листа хозяина. Каждая колонка — вид фигуры, светлая
+        над тёмной, как на листе.
+      */}
+      <section className="mx-auto grid w-full max-w-xl grid-cols-6 gap-x-1 sm:gap-x-3">
+        {PIECE_KINDS.map((kind) => (
+          <figure key={kind} className="flex flex-col items-center gap-1">
+            {(["w", "b"] as const).map((color) => (
+              // Правило зовёт `next/image`, но файлы уже нужного размера, а
+              // размер задаёт колонка — оптимизатору тут нечего делать. Так
+              // же сделано у фигур шахмат и у платформенного аватара.
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                key={color}
+                src={pieceSrc(color, kind)}
+                alt=""
+                width={256}
+                height={256}
+                className="h-auto w-full max-w-20"
+              />
+            ))}
+            <figcaption className="text-xs text-muted">
+              {PIECE_NAME[kind]}
+            </figcaption>
+          </figure>
+        ))}
+      </section>
 
       <section className="grid gap-4 sm:grid-cols-2">
         {MODES.map((mode) => (
