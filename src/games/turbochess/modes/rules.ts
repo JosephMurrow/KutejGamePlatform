@@ -1,6 +1,9 @@
 import { classicPosition, type Position } from "../engine/position";
 import type { ModeOptions } from "../rooms/settings";
+import { annihilationPosition, annihilationRules } from "./annihilation";
 import { modeInfo, type TurboMode } from "./catalog";
+import { giveawayPosition, giveawayRules } from "./giveaway";
+import { nuclearOptions, nuclearRules, nuclearThreshold } from "./nuclear";
 import {
   ONE_KIND_LABEL,
   oneKindOf,
@@ -24,17 +27,34 @@ import {
  * Режимы, у которых свои правила уже работают. Остальные пока играют
  * обычные шахматы, и экран комнаты говорит об этом прямо.
  */
-const READY: ReadonlySet<TurboMode> = new Set(["CLASSIC", "ONE_KIND"]);
+const READY: ReadonlySet<TurboMode> = new Set([
+  "CLASSIC",
+  "ONE_KIND",
+  "ANNIHILATION",
+  "GIVEAWAY",
+  "NUCLEAR",
+]);
 
 export function isReady(mode: TurboMode): boolean {
   return READY.has(mode);
 }
 
-/** Начальная позиция партии в этом режиме. */
+/**
+ * Начальная позиция партии в этом режиме.
+ *
+ * Позиция несёт не только расстановку, но и правила режима — чем кончается
+ * партия и обязательно ли брать (engine/position.ts). Поэтому режим, который
+ * меняет цель, а не доску, тоже приходит сюда: у «ядерных» расстановка
+ * обычная, и они остаются с умолчанием.
+ */
 export function startPosition(mode: TurboMode, options: ModeOptions): Position {
   switch (mode) {
     case "ONE_KIND":
       return oneKindPosition(oneKindOf(options));
+    case "ANNIHILATION":
+      return annihilationPosition();
+    case "GIVEAWAY":
+      return giveawayPosition();
     default:
       return classicPosition();
   }
@@ -51,6 +71,8 @@ export function modeOptions(
   switch (mode) {
     case "ONE_KIND":
       return oneKindOptions(read);
+    case "NUCLEAR":
+      return nuclearOptions(read);
     default:
       return {};
   }
@@ -74,6 +96,16 @@ export function rulesOf(mode: TurboMode, options: ModeOptions): ModeRules {
       return {
         variant: `все — ${ONE_KIND_LABEL[oneKindOf(options)]}`,
         lines: oneKindRules(options),
+        ready: true,
+      };
+    case "ANNIHILATION":
+      return { variant: null, lines: annihilationRules(), ready: true };
+    case "GIVEAWAY":
+      return { variant: null, lines: giveawayRules(), ready: true };
+    case "NUCLEAR":
+      return {
+        variant: `порог ${nuclearThreshold(options)} очков`,
+        lines: nuclearRules(options),
         ready: true,
       };
     default:

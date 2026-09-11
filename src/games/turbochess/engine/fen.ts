@@ -1,10 +1,12 @@
 import { CLASSIC, offset, parseSquare, squareAt } from "./geometry";
 import { piece, type Piece, type PieceKind } from "./pieces";
 import {
+  CLASSIC_RULES,
   TWO_SIDES,
   classicCastling,
   type CastleRight,
   type Position,
+  type PositionRules,
 } from "./position";
 
 /**
@@ -12,9 +14,13 @@ import {
  *
  * Для партий FEN не нужен: позиция — объект (position.ts). Нужен он тестам:
  * сверка с `chess.js` и справочные позиции perft записаны именно так, и
- * расставлять их руками значило бы ошибаться в самих проверках.
+ * расставлять их руками значило бы ошибаться в самих проверках. Правила
+ * режима FEN не описывает, поэтому они приходят вторым доводом.
  */
-export function fromFen(fen: string): Position {
+export function fromFen(
+  fen: string,
+  rules: PositionRules = CLASSIC_RULES,
+): Position {
   const [placement, turn, rights, passant, quiet] = fen.trim().split(/\s+/);
   const geometry = CLASSIC;
   const rows = (placement ?? "").split("/");
@@ -76,11 +82,13 @@ export function fromFen(fen: string): Position {
   return {
     geometry,
     sides: TWO_SIDES,
+    rules,
     board,
     turn: side,
     castling,
     enPassant: target !== null && victim !== null ? { target, victim } : null,
     quiet: Number(quiet ?? 0),
+    sinceCapture: 0,
     taken: [[], []],
   };
 }

@@ -1,6 +1,11 @@
 import { CLASSIC, squareAt } from "../engine/geometry";
 import { piece, type Piece, type Side } from "../engine/pieces";
-import { TWO_SIDES, castlingFor, type Position } from "../engine/position";
+import {
+  CLASSIC_RULES,
+  TWO_SIDES,
+  castlingFor,
+  type Position,
+} from "../engine/position";
 import type { ModeOptions } from "../rooms/settings";
 
 /**
@@ -79,11 +84,13 @@ export function oneKindPosition(kind: OneKind): Position {
   return {
     geometry,
     sides: TWO_SIDES,
+    rules: CLASSIC_RULES,
     board,
     turn: 0,
     castling: castlingFor(geometry, board),
     enPassant: null,
     quiet: 0,
+    sinceCapture: 0,
     taken: [[], []],
   };
 }

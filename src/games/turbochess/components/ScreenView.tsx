@@ -2,7 +2,9 @@
 
 import { Countdown } from "@/components/ui/Countdown";
 import { REASON_TEXT } from "../engine/outcome";
+import { takenCount } from "../modes/annihilation";
 import { modeInfo } from "../modes/catalog";
+import { nuclearCharge, nuclearThreshold } from "../modes/nuclear";
 import { rulesOf } from "../modes/rules";
 import { Board } from "./Board";
 import { useTurboRoom } from "./useTurboRoom";
@@ -37,6 +39,25 @@ export function ScreenView({
   const name = (seat: number) =>
     state.players.find((player) => player.seat === seat)?.nickname ?? "—";
 
+  /**
+   * Что режим показывает на экране: счёт снятых фигур у «на уничтожение» и
+   * заряд у «ядерных».
+   *
+   * Здесь открыты обе шкалы заряда: экран смотрят зрители, и напряжение —
+   * весь его смысл. Соперник за столом чужого заряда по-прежнему не видит.
+   */
+  const score = (seat: number): string | null => {
+    if (!state.position) return null;
+    if (state.mode === "ANNIHILATION") {
+      return `снял фигур: ${takenCount(state.position, seat)}`;
+    }
+    if (state.mode === "NUCLEAR") {
+      const options = state.options ?? {};
+      return `заряд ${nuclearCharge(state.position, seat)} из ${nuclearThreshold(options)}`;
+    }
+    return null;
+  };
+
   return (
     <main className="flex flex-1 flex-col items-center justify-center gap-6 p-8">
       {state.mode ? (
@@ -49,8 +70,13 @@ export function ScreenView({
       ) : null}
 
       <div className="flex w-full max-w-[min(80vh,900px)] items-end justify-between gap-6">
-        <Name nickname={name(1)} side={SIDE_NAME[1]} />
-        <Name nickname={name(0)} side={SIDE_NAME[0]} align="right" />
+        <Name nickname={name(1)} side={SIDE_NAME[1]} score={score(1)} />
+        <Name
+          nickname={name(0)}
+          side={SIDE_NAME[0]}
+          score={score(0)}
+          align="right"
+        />
       </div>
 
       <div className="w-full max-w-[min(80vh,900px)]">
@@ -93,16 +119,22 @@ export function ScreenView({
 function Name({
   nickname,
   side,
+  score,
   align = "left",
 }: {
   nickname: string;
   side: string;
+  /** Что показывает режим: счёт снятых фигур, заряд бомбы. */
+  score?: string | null;
   align?: "left" | "right";
 }) {
   return (
     <div className={align === "right" ? "text-right" : ""}>
       <div className="text-3xl font-semibold">{nickname}</div>
-      <div className="text-lg text-muted">{side}</div>
+      <div className="text-lg text-muted">
+        {side}
+        {score ? ` · ${score}` : ""}
+      </div>
     </div>
   );
 }

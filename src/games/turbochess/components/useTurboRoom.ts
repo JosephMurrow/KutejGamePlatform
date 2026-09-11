@@ -58,6 +58,8 @@ export interface TurboRoomHandle {
   declineDraw: () => Promise<void>;
   /** Ещё партия в той же комнате: места меняются. */
   rematch: () => Promise<void>;
+  /** «Ядерные»: сбросить бомбу вместо хода. */
+  bomb: () => Promise<void>;
 }
 
 function connectionQuery(
@@ -190,6 +192,10 @@ export function useTurboRoom(
     await act(GAME_EVENT.rematch);
   }, [act]);
 
+  const bomb = useCallback(async () => {
+    await act(GAME_EVENT.bomb);
+  }, [act]);
+
   return {
     state,
     connected,
@@ -204,5 +210,6 @@ export function useTurboRoom(
     offerDraw,
     declineDraw,
     rematch,
+    bomb,
   };
 }

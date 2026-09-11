@@ -10,8 +10,12 @@ import { useExitWarning } from "@/components/games/ExitToShelf";
 import type { MoveInput } from "../engine/game";
 import { REASON_TEXT } from "../engine/outcome";
 import type { Side } from "../engine/pieces";
+import type { Position } from "../engine/position";
+import { STALL_WARN, stallLeft, takenCount } from "../modes/annihilation";
 import { modeInfo } from "../modes/catalog";
+import { nuclearCharge, nuclearThreshold } from "../modes/nuclear";
 import { rulesOf } from "../modes/rules";
+import type { ModeOptions } from "../rooms/settings";
 import { MENU_LINKS } from "../menu";
 import type { TurboPlayerPayload, TurboStatePayload } from "../protocol";
 import { Board } from "./Board";
@@ -141,6 +145,7 @@ export function GameRoom({
 
           <aside className="flex w-full flex-col gap-3 lg:w-72">
             <ModeCard state={state} />
+            <ModeStatus state={state} mySide={mySide} onBomb={room.bomb} />
 
             <Seat
               state={state}
@@ -268,6 +273,129 @@ function ModeCard({ state }: { state: TurboStatePayload }) {
   );
 }
 
+/**
+ * Что режим показывает по ходу партии: остаток до остановки у «на
+ * уничтожение» и своя шкала заряда с кнопкой бомбы у «ядерных». Счёт взятых
+ * фигур стоит у мест, рядом с теми, кто их съел.
+ */
+function ModeStatus({
+  state,
+  mySide,
+  onBomb,
+}: {
+  state: TurboStatePayload;
+  mySide: Side | null;
+  onBomb: () => void;
+}) {
+  if (!state.position || state.phase !== "playing") return null;
+
+  if (state.mode === "ANNIHILATION") {
+    const left = stallLeft(state.position);
+    if (left > STALL_WARN) return null;
+
+    return (
+      <p className="rounded-lg bg-tint px-3 py-2 text-xs text-accent">
+        Полуходов без взятий осталось: {left}. Потом партию остановят и
+        посчитают по взятым фигурам.
+      </p>
+    );
+  }
+
+  if (state.mode === "NUCLEAR" && mySide !== null) {
+    return (
+      <Charge
+        position={state.position}
+        options={state.options ?? {}}
+        side={mySide}
+        myTurn={state.turn === mySide}
+        onBomb={onBomb}
+      />
+    );
+  }
+
+  return null;
+}
+
+/**
+ * Шкала заряда «Ядерных» — своя у каждого: соперник не должен понимать, в
+ * каком состоянии бомба. Так решил хозяин (docs/MODES.md, режим 8).
+ */
+function Charge({
+  position,
+  options,
+  side,
+  myTurn,
+  onBomb,
+}: {
+  position: Position;
+  options: ModeOptions;
+  side: Side;
+  myTurn: boolean;
+  onBomb: () => void;
+}) {
+  const [confirming, setConfirming] = useState(false);
+  const charge = nuclearCharge(position, side);
+  const threshold = nuclearThreshold(options);
+  const ready = charge >= threshold;
+
+  return (
+    <div className="flex flex-col gap-2 rounded-xl border border-line bg-paper px-4 py-3">
+      <div className="flex items-baseline justify-between gap-3">
+        <span className="text-sm font-semibold">Заряд</span>
+        <span className="tabular text-xs text-muted">
+          {charge} из {threshold}
+        </span>
+      </div>
+
+      <div
+        className="h-2 overflow-hidden rounded-full bg-tint"
+        role="progressbar"
+        aria-valuenow={Math.min(charge, threshold)}
+        aria-valuemin={0}
+        aria-valuemax={threshold}
+        aria-label="Заряд бомбы"
+      >
+        <div
+          className="h-full rounded-full bg-accent transition-[width]"
+          style={{ width: `${Math.min(100, (charge / threshold) * 100)}%` }}
+        />
+      </div>
+
+      {!ready ? (
+        <p className="text-xs text-muted">
+          Шкалу видишь только ты. Режь фигуры — за них дают очки.
+        </p>
+      ) : confirming ? (
+        <div className="flex gap-2">
+          <button
+            type="button"
+            onClick={onBomb}
+            className="flex-1 rounded-lg bg-accent px-3 py-2 text-sm font-semibold text-surface transition hover:bg-deep"
+          >
+            Сбросить
+          </button>
+          <button
+            type="button"
+            onClick={() => setConfirming(false)}
+            className="flex-1 rounded-lg border border-line px-3 py-2 text-sm font-semibold text-muted transition hover:text-ink"
+          >
+            Ещё поиграю
+          </button>
+        </div>
+      ) : (
+        <button
+          type="button"
+          onClick={() => setConfirming(true)}
+          disabled={!myTurn}
+          className="rounded-lg border border-accent bg-tint px-3 py-2 text-sm font-semibold text-accent transition hover:bg-accent-soft/20 disabled:opacity-50"
+        >
+          {myTurn ? "Бомба готова" : "Бомба готова — жди хода"}
+        </button>
+      )}
+    </div>
+  );
+}
+
 function Seat({
   state,
   side,
@@ -307,6 +435,13 @@ function Seat({
           <div className="text-xs text-muted">
             {sideName(side)}
             {player.away ? " · вышел" : ""}
+            {/*
+              Счёт взятых — у места, а не общей строкой: считать в уме, кто
+              кого обогнал, посреди резни некогда.
+            */}
+            {state.mode === "ANNIHILATION" && state.position
+              ? ` · снял фигур: ${takenCount(state.position, side)}`
+              : ""}
           </div>
         </div>
       </div>

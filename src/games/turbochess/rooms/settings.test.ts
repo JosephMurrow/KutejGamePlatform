@@ -23,12 +23,19 @@ describe("настройки комнаты", () => {
   });
 
   it("ручки режима читает сам режим, чужие ручки выбрасываются", () => {
-    const field = (name: string) => (name === "oneKind" ? "n" : "мусор");
+    const field = (name: string) =>
+      name === "oneKind" ? "n" : name === "threshold" ? "30" : "мусор";
 
     assert.deepEqual(
       normalizeRoomSettings({ mode: "ONE_KIND", timeControl: "SEC_30", field })
         .options,
       { kind: "n" },
+    );
+    assert.deepEqual(
+      normalizeRoomSettings({ mode: "NUCLEAR", timeControl: "SEC_30", field })
+        .options,
+      { threshold: 30 },
+      "у ядерных своя ручка, и чужой вид фигур ей не достаётся",
     );
     assert.deepEqual(
       normalizeRoomSettings({ mode: "MEGA", timeControl: "SEC_30", field })

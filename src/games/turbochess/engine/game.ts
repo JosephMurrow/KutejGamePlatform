@@ -1,6 +1,11 @@
 import { parseSquare, squareName } from "./geometry";
 import type { Piece, PieceKind, Side } from "./pieces";
-import { classicPosition, type Position } from "./position";
+import {
+  STALL_PLIES,
+  classicPosition,
+  kingIsRoyal,
+  type Position,
+} from "./position";
 import {
   canMate,
   inCheck,
@@ -238,12 +243,28 @@ export class TurboGame {
   /**
    * У этой стороны упал флаг. Если сопернику нечем ставить мат — ничья, а не
    * поражение: это правило забывают чаще всего остального.
+   *
+   * Правило это матовое: там, где партию выигрывают не матом, «нечем
+   * матовать» не бывает, и флаг — просто поражение.
    */
   flag(side: Side): Outcome | null {
-    if (!this.canMate(opponent(side))) {
+    if (kingIsRoyal(this.top.position) && !this.canMate(opponent(side))) {
       return this.finish("draw", "flagVsInsufficient");
     }
     return this.finish(opponent(side), "flag");
+  }
+
+  /**
+   * Сбросить бомбу: только в свой ход и вместо хода — партия сразу кончается
+   * победой (docs/MODES.md, режим 8).
+   *
+   * Заряжена ли она, знает комната: порог лежит в настройках, а очки
+   * считаются по взятым фигурам (modes/nuclear.ts). Фасаду остаётся то, что и
+   * всем прочим выходам, — проверить, что партия идёт и очередь твоя.
+   */
+  dropBomb(side: Side): Outcome | null {
+    if (this.ended || this.turn() !== side) return null;
+    return this.finish(side, "nuke");
   }
 
   /** Партия упёрлась в потолок — ничья. Предохранитель, а не правило. */
@@ -263,6 +284,9 @@ export class TurboGame {
    */
   claimableDraw(): "threefold" | "fiftyMoves" | null {
     if (this.ended) return null;
+    // «На уничтожение» стоит на своём счёте взятых: ничья по повторению была
+    // бы там лазейкой для того, кто съел меньше.
+    if (this.top.position.rules.goal === "wipe") return null;
     if ((this.seen.get(this.top.key) ?? 0) >= 3) return "threefold";
     if (this.top.position.quiet >= 100) return "fiftyMoves";
 
@@ -291,10 +315,25 @@ export class TurboGame {
     return canMate(this.top.position, side);
   }
 
-  /** Позиция после хода: не кончилась ли партия сама собой. */
+  /**
+   * Позиция после хода: не кончилась ли партия сама собой. Чем она кончается,
+   * сказано в самой позиции — режим кладёт это туда начальной расстановкой.
+   */
   private detect(): Outcome | null {
     const position = this.top.position;
 
+    switch (position.rules.goal) {
+      case "wipe":
+        return this.detectWipe(position);
+      case "feed":
+        return this.detectFeed(position);
+      default:
+        return this.detectMate(position);
+    }
+  }
+
+  /** Обычная цель: мат, пат, недостаток материала, повторения. */
+  private detectMate(position: Position): Outcome | null {
     if (legalMoves(position).length === 0) {
       // Ходить нечем тому, чья очередь: под шахом — мат, без шаха — пат.
       return inCheck(position, position.turn)
@@ -305,7 +344,68 @@ export class TurboGame {
       return this.finish("draw", "insufficient");
     }
 
-    // Дальше — только то, что кончает партию само, без заявки.
+    return this.autoDraw(position);
+  }
+
+  /**
+   * «На уничтожение»: снял с доски всё — выиграл. Мата нет, а значит нет и
+   * пата: сторона без ходов не проигрывает, а останавливает партию, и счёт
+   * идёт по взятым фигурам — так же, как после полусотни полуходов, в которые
+   * никто никого не съел (docs/MODES.md, режим 3).
+   */
+  private detectWipe(position: Position): Outcome | null {
+    const wiped = position.sides.findIndex(
+      (_, side) => !position.board.some((cell) => cell?.side === side),
+    );
+    if (wiped >= 0) return this.finish(opponent(wiped), "wiped");
+
+    if (
+      legalMoves(position).length === 0 ||
+      position.sinceCapture >= STALL_PLIES
+    ) {
+      return this.countTaken(position);
+    }
+
+    return null;
+  }
+
+  /** Партия остановлена: победа тому, кто взял больше фигур; поровну — ничья. */
+  private countTaken(position: Position): Outcome | null {
+    const counts = position.taken.map((list) => list.length);
+    const best = Math.max(...counts);
+    const leaders = counts.filter((count) => count === best).length;
+
+    return this.finish(
+      leaders === 1 ? counts.indexOf(best) : "draw",
+      "counted",
+    );
+  }
+
+  /**
+   * «Поддавки»: победил тот, чьего короля съели. Ходов не осталось — тоже
+   * победа: отдавать больше нечего (docs/MODES.md, режим 11).
+   *
+   * Ничьи по повторению остаются предохранителем: короля скармливают не
+   * всегда, а бегать друг от друга вечно партия не должна.
+   */
+  private detectFeed(position: Position): Outcome | null {
+    const fed = position.sides.findIndex(
+      (_, side) =>
+        !position.board.some(
+          (cell) => cell?.kind === "k" && cell.side === side,
+        ),
+    );
+    if (fed >= 0) return this.finish(fed, "kingTaken");
+
+    if (legalMoves(position).length === 0) {
+      return this.finish(position.turn, "noMoves");
+    }
+
+    return this.autoDraw(position);
+  }
+
+  /** То, что кончает партию само, без заявки: пятикратное и семьдесят пять. */
+  private autoDraw(position: Position): Outcome | null {
     if ((this.seen.get(this.top.key) ?? 0) >= 5) {
       return this.finish("draw", "fivefold");
     }

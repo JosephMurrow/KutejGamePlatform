@@ -16,7 +16,12 @@ import {
   type PieceKind,
   type Side,
 } from "./pieces";
-import { nextSide, type CastleRight, type Position } from "./position";
+import {
+  kingIsRoyal,
+  nextSide,
+  type CastleRight,
+  type Position,
+} from "./position";
 
 /**
  * Ходы: какие есть, законен ли, что будет после.
@@ -191,6 +196,10 @@ function pieceMoves(
  * Рокировки стороны, чья очередь. Правило общее и для обычных шахмат, и для
  * любой расстановки: между королём, ладьёй и местами, куда они встают, пусто
  * (кроме их самих), король не под шахом и не проходит через битое поле.
+ *
+ * Битые поля проверяются только там, где король королевский. Где шаха нет
+ * вовсе — «на уничтожение», — рокироваться можно и под боем, и через удар:
+ * лишь бы дорога была свободна. Так решил хозяин (docs/MODES.md, режим 3).
  */
 function castleMoves(position: Position, moves: Move[]): void {
   const { geometry, board, turn } = position;
@@ -216,18 +225,20 @@ function castleMoves(position: Position, moves: Move[]): void {
     }
     if (blocked) continue;
 
-    const from = fileOf(geometry, right.king);
-    const to = fileOf(geometry, right.kingTo);
-    const step = Math.sign(to - from);
-    let safe = true;
-    for (let x = from; ; x += step) {
-      if (attacked(position, squareAt(geometry, x, y), turn)) {
-        safe = false;
-        break;
+    if (kingIsRoyal(position)) {
+      const from = fileOf(geometry, right.king);
+      const to = fileOf(geometry, right.kingTo);
+      const step = Math.sign(to - from);
+      let safe = true;
+      for (let x = from; ; x += step) {
+        if (attacked(position, squareAt(geometry, x, y), turn)) {
+          safe = false;
+          break;
+        }
+        if (x === to || step === 0) break;
       }
-      if (x === to || step === 0) break;
+      if (!safe) continue;
     }
-    if (!safe) continue;
 
     moves.push(basic(right.king, right.kingTo, king, null, { castle: right }));
   }
@@ -310,12 +321,20 @@ export function attacked(
   return false;
 }
 
-/** Король этой стороны под боем. Нет короля — нет и шаха. */
+/**
+ * Король этой стороны под боем. Нет короля — нет и шаха.
+ *
+ * Где цель партии не мат, шаха нет как понятия: король там обычная фигура,
+ * которую бьют и которой подставляются. Отвечать «нет» одним местом дешевле,
+ * чем помнить про это в отсеве ходов, в записи и в подсветке короля.
+ */
 export function inCheck(
   position: Position,
   side: Side,
   board: Board = position.board,
 ): boolean {
+  if (!kingIsRoyal(position)) return false;
+
   for (let square = 0; square < board.length; square++) {
     const king = at(board, square);
     if (king?.kind === "k" && king.side === side) {
@@ -342,11 +361,22 @@ function boardAfter(position: Position, move: Move): (Piece | null)[] {
   return board;
 }
 
-/** Законные ходы стороны, чья очередь. */
+/**
+ * Законные ходы стороны, чья очередь.
+ *
+ * Сначала отсев по своему королю — он сам собой пропадает там, где короля не
+ * берегут. Потом обязательное взятие поддавков: есть чем взять — только
+ * взятия и остаются, а каким из них брать, игрок выбирает сам
+ * (docs/MODES.md, режим 11).
+ */
 export function legalMoves(position: Position): Move[] {
-  return pseudoMoves(position).filter(
+  const moves = pseudoMoves(position).filter(
     (move) => !inCheck(position, position.turn, boardAfter(position, move)),
   );
+  if (!position.rules.mustCapture) return moves;
+
+  const captures = moves.filter((move) => move.captured);
+  return captures.length > 0 ? captures : moves;
 }
 
 /** Позиция после хода. Ход должен быть из `legalMoves`. */
@@ -374,6 +404,7 @@ export function play(position: Position, move: Move): Position {
           }
         : null,
     quiet: move.piece.kind === "p" || move.captured ? 0 : position.quiet + 1,
+    sinceCapture: move.captured ? 0 : position.sinceCapture + 1,
     taken: move.captured
       ? position.taken.map((list, side) =>
           side === mover && move.captured ? [...list, move.captured] : list,

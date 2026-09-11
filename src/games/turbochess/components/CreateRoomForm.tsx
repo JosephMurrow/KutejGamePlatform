@@ -1,11 +1,16 @@
 "use client";
 
-import { useActionState, useState } from "react";
+import { useActionState, useState, type ComponentType } from "react";
 import { FormError, SubmitButton } from "@/components/ui/form";
 import { RoomKindPicker, RoomTitleField } from "@/components/rooms/RoomBasics";
 import { createRoomAction } from "@/lib/rooms/actions";
 import { hasScreen, type RoomKind } from "@/shared/room-settings";
 import { PLAYER_MODES, type TurboMode } from "../modes/catalog";
+import {
+  NUCLEAR_FIELD,
+  NUCLEAR_THRESHOLDS,
+  nuclearThreshold,
+} from "../modes/nuclear";
 import {
   ONE_KINDS,
   ONE_KIND_FIELD,
@@ -45,6 +50,16 @@ const TIME_HINT: Record<TimeControl, string> = {
   UNLIMITED: "часы не заводятся вовсе",
 };
 
+/**
+ * Ручки режимов: у кого они есть, тот и рисует их под своей строкой. Таблицей,
+ * а не цепочкой условий: режимов шестнадцать, и своими ручками обзаводится
+ * каждый второй.
+ */
+const KNOBS: Partial<Record<TurboMode, ComponentType>> = {
+  ONE_KIND: OneKindPicker,
+  NUCLEAR: NuclearPicker,
+};
+
 export function CreateRoomForm() {
   const [state, formAction] = useActionState(createRoomAction, {});
   const [kind, setKind] = useState<RoomKind>("private");
@@ -58,35 +73,39 @@ export function CreateRoomForm() {
       <fieldset>
         <legend className="mb-2 text-sm font-medium">Режим</legend>
         <div className="flex flex-col gap-2.5">
-          {PLAYER_MODES.map((info) => (
-            <div key={info.id} className="flex flex-col gap-2">
-              <label className="flex cursor-pointer items-start gap-2.5">
-                <input
-                  type="radio"
-                  name="mode"
-                  value={info.id}
-                  checked={mode === info.id}
-                  onChange={() => setMode(info.id)}
-                  className="mt-0.5 size-4 shrink-0 accent-accent"
-                />
-                <span className="text-sm">
-                  {info.title}
-                  {info.seats > 2 ? (
-                    <span className="text-muted"> · {info.seats} игрока</span>
-                  ) : null}
-                  {isReady(info.id) ? null : (
-                    <span className="text-muted"> · скоро</span>
-                  )}
-                  <span className="block text-xs text-muted">{info.short}</span>
-                </span>
-              </label>
+          {PLAYER_MODES.map((info) => {
+            const Knobs = KNOBS[info.id];
 
-              {/* Ручки режима — прямо под ним, только когда он выбран. */}
-              {mode === "ONE_KIND" && info.id === "ONE_KIND" ? (
-                <OneKindPicker />
-              ) : null}
-            </div>
-          ))}
+            return (
+              <div key={info.id} className="flex flex-col gap-2">
+                <label className="flex cursor-pointer items-start gap-2.5">
+                  <input
+                    type="radio"
+                    name="mode"
+                    value={info.id}
+                    checked={mode === info.id}
+                    onChange={() => setMode(info.id)}
+                    className="mt-0.5 size-4 shrink-0 accent-accent"
+                  />
+                  <span className="text-sm">
+                    {info.title}
+                    {info.seats > 2 ? (
+                      <span className="text-muted"> · {info.seats} игрока</span>
+                    ) : null}
+                    {isReady(info.id) ? null : (
+                      <span className="text-muted"> · скоро</span>
+                    )}
+                    <span className="block text-xs text-muted">
+                      {info.short}
+                    </span>
+                  </span>
+                </label>
+
+                {/* Ручки режима — прямо под ним, только когда он выбран. */}
+                {mode === info.id && Knobs ? <Knobs /> : null}
+              </div>
+            );
+          })}
         </div>
       </fieldset>
 
@@ -122,6 +141,39 @@ export function CreateRoomForm() {
       <FormError>{state.error}</FormError>
       <SubmitButton>Создать комнату</SubmitButton>
     </form>
+  );
+}
+
+/**
+ * Порог заряда в «Ядерных»: сколько очков за взятые фигуры нужно набрать,
+ * чтобы бомба стала доступна. Всего у стороны 39 очков материала, так что
+ * даже меньший порог — это середина партии, а не первые ходы.
+ */
+function NuclearPicker() {
+  const initial = nuclearThreshold({});
+
+  return (
+    <fieldset className="ml-6.5">
+      <legend className="sr-only">Сколько очков до бомбы</legend>
+      <div className="grid grid-cols-3 gap-1.5">
+        {NUCLEAR_THRESHOLDS.map((threshold) => (
+          <label
+            key={threshold}
+            className="flex cursor-pointer flex-col items-center gap-0.5 rounded-xl border border-line bg-surface p-2 text-xs text-muted transition has-checked:border-accent has-checked:bg-tint has-checked:text-ink"
+          >
+            <input
+              type="radio"
+              name={NUCLEAR_FIELD}
+              value={threshold}
+              defaultChecked={threshold === initial}
+              className="sr-only"
+            />
+            <span className="text-base font-semibold">{threshold}</span>
+            очков
+          </label>
+        ))}
+      </div>
+    </fieldset>
   );
 }
 

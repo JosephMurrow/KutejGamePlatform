@@ -1,7 +1,15 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { GameRoomContext, GameRoomEvent } from "@/lib/games/engine";
-import type { TimeControl, TurboRoomSettings } from "../rooms/settings";
+import { squareName } from "../engine/geometry";
+import { legalMoves, play, type Move } from "../engine/moves";
+import type { Position } from "../engine/position";
+import { PIECE_VALUE, nuclearCharge } from "../modes/nuclear";
+import type {
+  ModeOptions,
+  TimeControl,
+  TurboRoomSettings,
+} from "../rooms/settings";
 import { GAME_EVENT } from "../protocol";
 import { createTurboServer } from ".";
 import { ClosedHall } from "./hall";
@@ -414,6 +422,136 @@ describe("режим", () => {
     room.act(GAME_EVENT.resign, "black", {});
     room.act(GAME_EVENT.rematch, "white", {});
     assert.equal(knights(), 30, "реванш — те же кони");
+  });
+});
+
+describe("бомба", () => {
+  function nuclearTable(options: ModeOptions = { threshold: 20 }) {
+    const settings: TurboRoomSettings = {
+      mode: "NUCLEAR",
+      timeControl: "SEC_30",
+      options,
+    };
+    const drafts: MatchDraft[] = [];
+    const events: GameRoomEvent[] = [];
+    const context: GameRoomContext = {
+      key: "turbo-nuke",
+      ownerId: "white",
+      isPrivate: true,
+      settings,
+      connections: () => 2,
+      introduce: () => {},
+      forget: () => {},
+      emitted: (list) => events.push(...list),
+      changed: () => {},
+    };
+    const room = new TurboRoom(context, settings, undefined, (draft) =>
+      drafts.push(draft),
+    );
+    room.join("white");
+    room.join("black");
+
+    return { room, drafts, events };
+  }
+
+  /** Во сколько очков обходится взятие этим ходом. */
+  function gain(move: Move): number {
+    return move.captured ? (PIECE_VALUE[move.captured.kind] ?? 0) : 0;
+  }
+
+  /** Самое дорогое взятие, какое есть у того, чья очередь. */
+  function best(position: Position): number {
+    return legalMoves(position).reduce(
+      (most, move) => Math.max(most, gain(move)),
+      0,
+    );
+  }
+
+  /**
+   * Довести белых до порога настоящей партией: позицию комнате не подсунуть,
+   * а заряд она обязана насчитать сама. Белые берут самое дорогое, чёрные
+   * подставляют самое дорогое — так порог набирается за десяток ходов.
+   *
+   * Матовать белые не станут: партия должна дожить до бомбы, а жадность к
+   * шестнадцатому полуходу ставит мат раньше, чем набирается заряд.
+   */
+  function feed(room: TurboRoom, threshold: number): void {
+    for (let step = 0; step < 200; step++) {
+      const state = view(room);
+      const position = state.position as Position;
+      if (state.phase !== "playing") return;
+      if (position.turn === 0 && nuclearCharge(position, 0) >= threshold) {
+        return;
+      }
+
+      const legal = legalMoves(position);
+      const alive = legal.filter(
+        (move) => legalMoves(play(position, move)).length > 0,
+      );
+      const chosen =
+        position.turn === 0
+          ? (alive.length > 0 ? alive : legal).sort(
+              (one, other) => gain(other) - gain(one),
+            )[0]
+          : legal.sort(
+              (one, other) =>
+                best(play(position, other)) - best(play(position, one)),
+            )[0];
+      if (!chosen) return;
+
+      move(
+        room,
+        position.turn === 0 ? "white" : "black",
+        squareName(position.geometry, chosen.from),
+        squareName(position.geometry, chosen.to),
+        chosen.promotion ?? undefined,
+      );
+    }
+  }
+
+  it("без заряда, не в свой ход и не за доской бомбу не сбросить", () => {
+    const { room } = nuclearTable();
+
+    assert.equal(room.act(GAME_EVENT.bomb, "watcher", {}).accepted, false);
+    assert.equal(
+      room.act(GAME_EVENT.bomb, "black", {}).reason,
+      "Сейчас не твой ход",
+    );
+    assert.equal(
+      room.act(GAME_EVENT.bomb, "white", {}).reason,
+      "Заряд ещё не набран",
+    );
+  });
+
+  it("в другом режиме бомбы нет вовсе", () => {
+    const { room } = seated();
+
+    assert.equal(
+      room.act(GAME_EVENT.bomb, "white", {}).reason,
+      "В этом режиме бомбы нет",
+    );
+  });
+
+  it("набрал порог — сбросил, и партия записалась взрывом", () => {
+    const { room, drafts, events } = nuclearTable();
+    feed(room, 20);
+
+    const position = view(room).position as Position;
+    assert.ok(
+      nuclearCharge(position, 0) >= 20,
+      "белые набрали заряд настоящими взятиями",
+    );
+
+    assert.equal(room.act(GAME_EVENT.bomb, "white", {}).accepted, true);
+    assert.equal(view(room).phase, "over");
+    assert.equal(view(room).result, 0);
+    assert.equal(view(room).reason, "nuke");
+    assert.equal(drafts.at(-1)?.reason, "nuke");
+    assert.equal(drafts.at(-1)?.winner, 0);
+    assert.ok(
+      events.some((event) => event.type === "turbochess_finished"),
+      "платформе о конце партии сказали",
+    );
   });
 });
 

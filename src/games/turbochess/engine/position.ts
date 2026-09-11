@@ -17,6 +17,53 @@ export interface SideRules {
 }
 
 /**
+ * Чем кончается партия. Отсюда же следует, королевский ли король: где цель не
+ * мат, он обычная фигура, которую бьют.
+ */
+export type Goal =
+  /** Обычная цель — мат. */
+  | "mate"
+  /** Снять с доски все фигуры соперника (docs/MODES.md, режим 3). */
+  | "wipe"
+  /** Скормить сопернику своего короля (docs/MODES.md, режим 11). */
+  | "feed";
+
+/**
+ * Правила режима, которые нужны самой доске.
+ *
+ * Лежат в позиции, а не в комнате, потому что законные ходы считает и клиент:
+ * доска подсказывает ходы тем же `legalMoves` по позиции из снимка
+ * (components/Board.tsx). Положи правило мимо позиции — и клиент подсветит не
+ * то, что примет сервер.
+ */
+export interface PositionRules {
+  readonly goal: Goal;
+  /** Есть чем взять — брать обязательно, как в шашках. */
+  readonly mustCapture: boolean;
+}
+
+/** Правила обычных шахмат: мат и взятие по желанию. */
+export const CLASSIC_RULES: PositionRules = {
+  goal: "mate",
+  mustCapture: false,
+};
+
+/**
+ * Сколько полуходов без взятия останавливают партию там, где цель — снять всё.
+ * Без этого две уцелевшие фигуры бегали бы друг от друга вечно.
+ */
+export const STALL_PLIES = 50;
+
+/**
+ * Король королевский: ходить под шах нельзя, из-под шаха обязан выйти, мат
+ * кончает партию. Где цель другая, шаха нет как понятия — ни в отсеве ходов,
+ * ни в записи, ни в подсветке.
+ */
+export function kingIsRoyal(position: Position): boolean {
+  return position.rules.goal === "mate";
+}
+
+/**
  * Право рокировки: какой король с какой ладьёй и куда они встают.
  *
  * Клетками, а не буквами `KQkq`: так рокировка не привязана ни к углам доски
@@ -41,6 +88,8 @@ export interface EnPassant {
 export interface Position {
   readonly geometry: Geometry;
   readonly sides: readonly SideRules[];
+  /** Правила режима, которые нужны доске: цель партии и обязательное взятие. */
+  readonly rules: PositionRules;
   readonly board: readonly (Piece | null)[];
   readonly turn: Side;
   readonly castling: readonly CastleRight[];
@@ -50,6 +99,11 @@ export interface Position {
    * семидесяти пяти ходов.
    */
   readonly quiet: number;
+  /**
+   * Полуходы без взятий — по ним останавливается партия там, где цель снять
+   * все фигуры. Не то же, что `quiet`: тот сбрасывается и ходом пешки.
+   */
+  readonly sinceCapture: number;
   /**
    * Что забрала каждая сторона, по порядку. По этому списку доска рисует
    * взятые фигуры, а режимы считают убийства, очки и резерв
@@ -93,11 +147,13 @@ export function classicPosition(): Position {
   return {
     geometry,
     sides: TWO_SIDES,
+    rules: CLASSIC_RULES,
     board,
     turn: 0,
     castling: classicCastling(geometry, [0, 1]),
     enPassant: null,
     quiet: 0,
+    sinceCapture: 0,
     taken: [[], []],
   };
 }

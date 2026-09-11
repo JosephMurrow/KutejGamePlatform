@@ -11,6 +11,7 @@ import { TurboGame, type MoveInput, type MoveRejection } from "../engine/game";
 import type { EndReason, Outcome } from "../engine/outcome";
 import type { Side } from "../engine/pieces";
 import type { TurboMode } from "../modes/catalog";
+import { bombReady } from "../modes/nuclear";
 import { startPosition } from "../modes/rules";
 import { GAME_EVENT, type TurboPhase } from "../protocol";
 import {
@@ -228,6 +229,8 @@ export class TurboRoom implements GameRoomState {
         return this.claimDraw(actorId);
       case GAME_EVENT.rematch:
         return this.rematch(actorId);
+      case GAME_EVENT.bomb:
+        return this.dropBomb(actorId);
       default:
         return { accepted: false, reason: "Неизвестное действие" };
     }
@@ -399,6 +402,32 @@ export class TurboRoom implements GameRoomState {
     if (!this.playing()) return { accepted: false, reason: "Партия не идёт" };
 
     this.finish(this.game.resign(side));
+    return { accepted: true };
+  }
+
+  /**
+   * Сбросить бомбу — «Ядерные». Это действие вместо хода, поэтому и проверки
+   * у него ходовые: партия идёт, ты за доской, очередь твоя.
+   *
+   * Набран ли заряд, решает комната, а не фасад: порог лежит в настройках,
+   * которых движок не знает вовсе. Клиенту верить нельзя и здесь — кнопку он
+   * рисует себе сам, а считается всё заново.
+   */
+  private dropBomb(actorId: string): ActionOutcome {
+    const side = this.sideOf(actorId);
+    if (side === null) return { accepted: false, reason: "Ты не за доской" };
+    if (!this.playing()) return { accepted: false, reason: "Партия не идёт" };
+    if (this.settings.mode !== "NUCLEAR") {
+      return { accepted: false, reason: "В этом режиме бомбы нет" };
+    }
+    if (side !== this.game.turn()) {
+      return { accepted: false, reason: "Сейчас не твой ход" };
+    }
+    if (!bombReady(this.game.position(), this.settings.options, side)) {
+      return { accepted: false, reason: "Заряд ещё не набран" };
+    }
+
+    this.finish(this.game.dropBomb(side));
     return { accepted: true };
   }
 

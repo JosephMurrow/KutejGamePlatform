@@ -12,7 +12,7 @@ import { modeOptions } from "../modes/rules";
  * Ручки режима: вид фигур у одновидовых, порог заряда у ядерных и так далее.
  *
  * Только простые значения — они лежат в базе одним полем JSON
- * (prisma/schema/turbochess.prisma). Пока ни у одного режима ручек нет:
+ * (prisma/schema/turbochess.prisma). Ручки есть не у всех режимов, и
  * настройки каждого согласуются в начале его этапа (docs/MODES.md).
  */
 export type ModeOptions = Record<string, string | number | boolean>;
