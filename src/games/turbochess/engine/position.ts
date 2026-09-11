@@ -121,6 +121,27 @@ export function classicCastling(
   });
 }
 
+/**
+ * Права рокировки для расстановки: обычные права, но только там, где король и
+ * ладья и правда стоят на своих местах. Одновидовые шахматы без ладей в углах
+ * рокировки не имеют — так же, как её не даёт FEN без букв `KQkq`.
+ */
+export function castlingFor(
+  geometry: Geometry,
+  board: readonly (Piece | null)[],
+): CastleRight[] {
+  return classicCastling(geometry, [0, 1]).filter((right) => {
+    const king = board[right.king];
+    const rook = board[right.rook];
+    return (
+      king?.kind === "k" &&
+      king.side === right.side &&
+      rook?.kind === "r" &&
+      rook.side === right.side
+    );
+  });
+}
+
 /** Чья очередь после этой стороны. */
 export function nextSide(position: Position, side: Side): Side {
   return (side + 1) % position.sides.length;

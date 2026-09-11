@@ -11,6 +11,7 @@ import type { MoveInput } from "../engine/game";
 import { REASON_TEXT } from "../engine/outcome";
 import type { Side } from "../engine/pieces";
 import { modeInfo } from "../modes/catalog";
+import { rulesOf } from "../modes/rules";
 import { MENU_LINKS } from "../menu";
 import type { TurboPlayerPayload, TurboStatePayload } from "../protocol";
 import { Board } from "./Board";
@@ -139,7 +140,7 @@ export function GameRoom({
           </div>
 
           <aside className="flex w-full flex-col gap-3 lg:w-72">
-            <ModeNote state={state} />
+            <ModeCard state={state} />
 
             <Seat
               state={state}
@@ -218,22 +219,51 @@ export function GameRoom({
 }
 
 /**
- * Какой режим выбран и что с его правилами. Правила режимов встают на свои
- * этапы, и игрок, выбравший «Загул», не должен гадать, почему ничего не
- * случается.
+ * Режим и его правила.
+ *
+ * До первого хода правила развёрнуты: игрок садится за шахматы, а получает не
+ * шахматы, и узнать об этом должен до того, как потерял ферзя. Дальше —
+ * по кнопке, чтобы не занимать место у доски (docs/MODES.md, «Подсказки»).
  */
-function ModeNote({ state }: { state: TurboStatePayload }) {
+function ModeCard({ state }: { state: TurboStatePayload }) {
+  const [open, setOpen] = useState(false);
   if (!state.mode) return null;
+
   const info = modeInfo(state.mode);
+  const rules = rulesOf(state.mode, state.options ?? {});
+  const fresh = state.phase === "waiting" || state.moves.length === 0;
+  const shown = fresh || open;
 
   return (
-    <div className="flex flex-col gap-1 rounded-xl border border-line bg-paper px-4 py-3">
-      <span className="text-sm font-semibold">{info.title}</span>
-      <span className="text-xs leading-relaxed text-muted">
-        {info.hidden
-          ? info.short
-          : "Пока правила обычные: особые правила режима — на его этапе."}
-      </span>
+    <div className="flex flex-col gap-2 rounded-xl border border-line bg-paper px-4 py-3">
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex flex-col">
+          <span className="text-sm font-semibold">{info.title}</span>
+          {rules.variant ? (
+            <span className="text-xs text-muted">{rules.variant}</span>
+          ) : null}
+        </div>
+        {fresh ? null : (
+          <button
+            type="button"
+            onClick={() => setOpen(!open)}
+            aria-expanded={open}
+            className="shrink-0 text-xs font-semibold text-accent transition hover:text-deep"
+          >
+            {open ? "Скрыть" : "Правила"}
+          </button>
+        )}
+      </div>
+
+      {shown ? (
+        <div className="flex flex-col gap-1.5">
+          {rules.lines.map((line) => (
+            <p key={line} className="text-xs leading-relaxed text-muted">
+              {line}
+            </p>
+          ))}
+        </div>
+      ) : null}
     </div>
   );
 }

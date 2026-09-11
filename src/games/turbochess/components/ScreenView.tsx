@@ -3,6 +3,7 @@
 import { Countdown } from "@/components/ui/Countdown";
 import { REASON_TEXT } from "../engine/outcome";
 import { modeInfo } from "../modes/catalog";
+import { rulesOf } from "../modes/rules";
 import { Board } from "./Board";
 import { useTurboRoom } from "./useTurboRoom";
 
@@ -39,7 +40,12 @@ export function ScreenView({
   return (
     <main className="flex flex-1 flex-col items-center justify-center gap-6 p-8">
       {state.mode ? (
-        <div className="text-xl text-muted">{modeInfo(state.mode).title}</div>
+        <div className="text-xl text-muted">
+          {modeInfo(state.mode).title}
+          {rulesOf(state.mode, state.options ?? {}).variant
+            ? ` · ${rulesOf(state.mode, state.options ?? {}).variant}`
+            : ""}
+        </div>
       ) : null}
 
       <div className="flex w-full max-w-[min(80vh,900px)] items-end justify-between gap-6">

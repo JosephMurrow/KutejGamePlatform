@@ -22,6 +22,21 @@ describe("настройки комнаты", () => {
     );
   });
 
+  it("ручки режима читает сам режим, чужие ручки выбрасываются", () => {
+    const field = (name: string) => (name === "oneKind" ? "n" : "мусор");
+
+    assert.deepEqual(
+      normalizeRoomSettings({ mode: "ONE_KIND", timeControl: "SEC_30", field })
+        .options,
+      { kind: "n" },
+    );
+    assert.deepEqual(
+      normalizeRoomSettings({ mode: "MEGA", timeControl: "SEC_30", field })
+        .options,
+      {},
+    );
+  });
+
   it("служебную «Классику» формой не выбрать, даже прислав её руками", () => {
     assert.equal(
       normalizeRoomSettings({ mode: "CLASSIC", timeControl: "SEC_30" }).mode,

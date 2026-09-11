@@ -381,6 +381,42 @@ describe("запись партии", () => {
   });
 });
 
+describe("режим", () => {
+  it("партия встаёт расстановкой режима, и реванш её сохраняет", () => {
+    const settings: TurboRoomSettings = {
+      mode: "ONE_KIND",
+      timeControl: "SEC_30",
+      options: { kind: "n" },
+    };
+    const context: GameRoomContext = {
+      key: "turbo-knights",
+      ownerId: "white",
+      isPrivate: true,
+      settings,
+      connections: () => 2,
+      introduce: () => {},
+      forget: () => {},
+      emitted: () => {},
+      changed: () => {},
+    };
+    const room = new TurboRoom(context, settings);
+    room.join("white");
+    room.join("black");
+
+    const knights = () =>
+      (
+        view(room).position as { board: ({ kind: string } | null)[] }
+      ).board.filter((cell) => cell?.kind === "n").length;
+    assert.equal(knights(), 30);
+    assert.deepEqual(view(room).options, { kind: "n" });
+
+    move(room, "white", "b1", "c3");
+    room.act(GAME_EVENT.resign, "black", {});
+    room.act(GAME_EVENT.rematch, "white", {});
+    assert.equal(knights(), 30, "реванш — те же кони");
+  });
+});
+
 describe("выгнать", () => {
   it("может только хозяин; посреди партии это то же, что уйти", () => {
     const { room } = setup();

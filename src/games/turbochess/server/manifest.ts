@@ -31,6 +31,7 @@ export const TURBOCHESS_SERVER: GameServerManifest = {
       normalizeRoomSettings({
         mode: form.get("mode"),
         timeControl: form.get("timeControl"),
+        field: (name) => form.get(name),
       }),
     );
   },

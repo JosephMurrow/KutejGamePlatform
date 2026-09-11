@@ -11,6 +11,7 @@ import { TurboGame, type MoveInput, type MoveRejection } from "../engine/game";
 import type { EndReason, Outcome } from "../engine/outcome";
 import type { Side } from "../engine/pieces";
 import type { TurboMode } from "../modes/catalog";
+import { startPosition } from "../modes/rules";
 import { GAME_EVENT, type TurboPhase } from "../protocol";
 import {
   MOVE_LIMIT_MS,
@@ -90,7 +91,7 @@ function newSeed(): number {
 }
 
 export class TurboRoom implements GameRoomState {
-  private game = new TurboGame();
+  private game: TurboGame;
   private readonly clock: MoveClock;
   /** Сидящие в порядке посадки: место за столом — это индекс и сторона. */
   private readonly seats: string[] = [];
@@ -118,6 +119,8 @@ export class TurboRoom implements GameRoomState {
     /** Запись партии в базу. Без неё комната работает — просто без истории. */
     private readonly persist?: Persist,
   ) {
+    // Режим встаёт в партию через начальную позицию: движок про режимы не знает.
+    this.game = this.newGame();
     this.clock = new MoveClock(MOVE_LIMIT_MS[settings.timeControl], now);
     this.moveStartedAt = now();
     this.resetOffers();
@@ -292,6 +295,7 @@ export class TurboRoom implements GameRoomState {
     return {
       phase,
       mode: this.settings.mode,
+      options: this.settings.options,
       seats: this.capacity,
       position: this.game.position(),
       moves: this.game.history(),
@@ -339,9 +343,15 @@ export class TurboRoom implements GameRoomState {
     this.clock.restart();
   }
 
+  private newGame(): TurboGame {
+    return new TurboGame(
+      startPosition(this.settings.mode, this.settings.options),
+    );
+  }
+
   /** Чистая партия: новая доска, новая запись, новое зерно. */
   private fresh(): void {
-    this.game = new TurboGame();
+    this.game = this.newGame();
     this.times = [];
     this.matchId = randomUUID();
     this.seed = newSeed();

@@ -3,7 +3,7 @@ import type { Result, EndReason } from "./engine/outcome";
 import type { Side } from "./engine/pieces";
 import type { Position } from "./engine/position";
 import type { TurboMode } from "./modes/catalog";
-import type { TimeControl } from "./rooms/settings";
+import type { ModeOptions, TimeControl } from "./rooms/settings";
 
 /**
  * Протокол турбо-шахмат: код игры, ключ зала, события сокета и форма снимка.
@@ -58,6 +58,8 @@ export interface TurboStatePayload extends RoomStatePayload<TurboPlayerPayload> 
   phase: TurboPhase;
   /** Режим партии; у закрытой двери — null. */
   mode: TurboMode | null;
+  /** Ручки режима: вид фигур у одновидовых и так далее. */
+  options: ModeOptions | null;
   /** Сколько мест за столом. */
   seats: number;
   /**

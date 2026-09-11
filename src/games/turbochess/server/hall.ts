@@ -49,7 +49,7 @@ export class ClosedHall implements GameRoomState {
       phaseDurationMs: null,
       playerCount: 0,
       players: [],
-      extra: { phase: "closed", mode: null, seats: 0 },
+      extra: { phase: "closed", mode: null, options: null, seats: 0 },
     };
   }
 

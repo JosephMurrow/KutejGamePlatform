@@ -1,4 +1,5 @@
 import { PLAYER_MODES, type TurboMode } from "../modes/catalog";
+import { modeOptions } from "../modes/rules";
 
 /**
  * Настройки партии: типы, умолчание и разбор формы.
@@ -53,32 +54,34 @@ export const TIME_CONTROL_LABEL: Record<TimeControl, string> = {
 const TIME_CONTROLS = Object.keys(MOVE_LIMIT_MS) as TimeControl[];
 
 /**
- * Первый режим каталога — с него начинается и сама разработка (этап 6), —
- * и полминуты на ход, как в общем зале шахмат.
+ * Первый режим каталога — с него начинается и сама разработка, — ферзи, как
+ * первые в его постановке, и полминуты на ход, как в общем зале шахмат.
  */
 export function defaultRoomSettings(): TurboRoomSettings {
-  return { mode: "ONE_KIND", timeControl: "SEC_30", options: {} };
+  return { mode: "ONE_KIND", timeControl: "SEC_30", options: { kind: "q" } };
 }
 
 /**
  * Разобрать то, что пришло из формы. Значения приходят от клиента, поэтому
- * режим сверяется со списком, а не приводится типом.
- *
- * Ручки из формы пока не читаются вовсе: их ещё нет ни у одного режима, и
- * всё, что клиент пришлёт сверх режима, выбрасывается.
+ * режим и время сверяются со списком, а не приводятся типом, а ручки читает
+ * сам режим — только свои (modes/rules.ts). Всё, что клиент пришлёт сверх
+ * положенного, выбрасывается.
  */
 export function normalizeRoomSettings(raw: {
   mode: unknown;
   timeControl: unknown;
+  /** Поле формы по имени. Нет формы — нет и ручек. */
+  field?: (name: string) => unknown;
 }): TurboRoomSettings {
   const fallback = defaultRoomSettings();
+  const mode = pickMode(raw.mode);
 
   return {
-    mode: pickMode(raw.mode),
+    mode,
     timeControl: TIME_CONTROLS.includes(raw.timeControl as TimeControl)
       ? (raw.timeControl as TimeControl)
       : fallback.timeControl,
-    options: {},
+    options: modeOptions(mode, raw.field ?? (() => undefined)),
   };
 }
 
