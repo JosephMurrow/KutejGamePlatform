@@ -315,13 +315,24 @@ function castleMoves(position: Position, moves: Move[]): void {
     if (king?.kind !== "k" || king.side !== turn) continue;
     if (rook?.kind !== "r" || rook.side !== turn) continue;
 
-    const y = rankOf(geometry, right.king);
-    const files = [right.king, right.rook, right.kingTo, right.rookTo].map(
-      (square) => fileOf(geometry, square),
+    // Край бывает и горизонтальным, и вертикальным: в королевской битве две
+    // стороны стоят вдоль вертикалей. Считается это одинаково — вдоль той
+    // линии, которую делят король с ладьёй.
+    const flat = rankOf(geometry, right.king) === rankOf(geometry, right.rook);
+    const fixed = flat
+      ? rankOf(geometry, right.king)
+      : fileOf(geometry, right.king);
+    const along = (square: number) =>
+      flat ? fileOf(geometry, square) : rankOf(geometry, square);
+    const squareAlong = (step: number) =>
+      flat ? squareAt(geometry, step, fixed) : squareAt(geometry, fixed, step);
+
+    const line = [right.king, right.rook, right.kingTo, right.rookTo].map(
+      along,
     );
     let blocked = false;
-    for (let x = Math.min(...files); x <= Math.max(...files); x++) {
-      const square = squareAt(geometry, x, y);
+    for (let step = Math.min(...line); step <= Math.max(...line); step++) {
+      const square = squareAlong(step);
       if (square !== right.king && square !== right.rook && at(board, square)) {
         blocked = true;
         break;
@@ -330,16 +341,16 @@ function castleMoves(position: Position, moves: Move[]): void {
     if (blocked) continue;
 
     if (kingIsRoyal(position)) {
-      const from = fileOf(geometry, right.king);
-      const to = fileOf(geometry, right.kingTo);
+      const from = along(right.king);
+      const to = along(right.kingTo);
       const step = Math.sign(to - from);
       let safe = true;
-      for (let x = from; ; x += step) {
-        if (attacked(position, squareAt(geometry, x, y), turn)) {
+      for (let at = from; ; at += step) {
+        if (attacked(position, squareAlong(at), turn)) {
           safe = false;
           break;
         }
-        if (x === to || step === 0) break;
+        if (at === to || step === 0) break;
       }
       if (!safe) continue;
     }

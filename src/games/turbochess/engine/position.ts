@@ -26,7 +26,12 @@ export type Goal =
   /** Снять с доски все фигуры соперника (docs/MODES.md, режим 3). */
   | "wipe"
   /** Скормить сопернику своего короля (docs/MODES.md, режим 11). */
-  | "feed";
+  | "feed"
+  /**
+   * Все против всех: заматованный выбывает и уносит фигуры, побеждает
+   * последний оставшийся (docs/MODES.md, режим 9).
+   */
+  | "battle";
 
 /**
  * Правила режима, которые нужны самой доске.
@@ -102,7 +107,8 @@ export const STALL_PLIES = 50;
  * ни в записи, ни в подсветке.
  */
 export function kingIsRoyal(position: Position): boolean {
-  return position.rules.goal === "mate";
+  const goal = position.rules.goal;
+  return goal === "mate" || goal === "battle";
 }
 
 /**
@@ -193,6 +199,24 @@ export const TWO_SIDES: readonly SideRules[] = [
   { forward: [0, -1] },
 ];
 
+/**
+ * Четыре стороны королевской битвы: юг, запад, север, восток. Порядок хода —
+ * по часовой, как решил хозяин, и он же порядок этого списка.
+ */
+export const FOUR_SIDES: readonly SideRules[] = [
+  { forward: [0, 1] },
+  { forward: [1, 0] },
+  { forward: [0, -1] },
+  { forward: [-1, 0] },
+];
+
+/** Жива ли сторона: выбывшая уносит фигуры, и короля у неё нет. */
+export function alive(position: Position, side: Side): boolean {
+  return position.board.some(
+    (cell) => cell?.kind === "k" && cell.side === side,
+  );
+}
+
 const BACK_RANK: readonly PieceKind[] = [
   "r",
   "n",
@@ -280,7 +304,16 @@ export function castlingFor(
   });
 }
 
-/** Чья очередь после этой стороны. */
+/** Чья очередь после этой стороны — по кругу, мимо выбывших. */
 export function nextSide(position: Position, side: Side): Side {
-  return (side + 1) % position.sides.length;
+  const sides = position.sides.length;
+  if (position.rules.goal !== "battle") return (side + 1) % sides;
+
+  // В битве стол обходится по часовой и перешагивает тех, кто уже выбыл.
+  for (let step = 1; step <= sides; step++) {
+    const next = (side + step) % sides;
+    if (alive(position, next)) return next;
+  }
+
+  return side;
 }

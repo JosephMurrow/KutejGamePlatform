@@ -19,7 +19,7 @@ import {
   pieceType,
   targetsFrom,
 } from "./boardView";
-import { PIECES, colorOf, pieceSrc } from "./pieces";
+import { PIECES, SIDE_RING, colorOf, pieceSrc } from "./pieces";
 import { Promotion, type PromotionChoice } from "./Promotion";
 
 /**
@@ -197,6 +197,10 @@ export function Board({
       const square = squareName(shown.geometry, at);
       if (cell.mega) ring(square, MEGA);
       if (cell.shield) ring(square, SHIELD);
+      // Королевская битва: два набора фигур на четыре стороны, поэтому
+      // вторая светлая и вторая тёмная носят кольцо своей стороны.
+      const own = SIDE_RING[cell.side];
+      if (own && shown.sides.length > 2) ring(square, own);
       if (cell.awake) ring(square, AWAKE);
       else if (cell.agent) ring(square, AGENT);
     });
@@ -371,7 +375,14 @@ export function Board({
         canDragPiece: ({ piece, square }) =>
           arranging
             ? square !== null && own(square)
-            : canMove && piece.pieceType.startsWith(colorOf(shown.turn)),
+            : canMove &&
+              square !== null &&
+              // У четырёх сторон двух наборов фигур мало: тащить можно то,
+              // что и правда своё, а не то, что того же цвета.
+              own(square) &&
+              piece.pieceType.startsWith(
+                colorOf(shown.turn, shown.sides.length),
+              ),
       }}
     >
       <div className="flex flex-col gap-1.5">
@@ -425,6 +436,7 @@ function Shelf({
   /** Что взято с полки прямо сейчас — та подсвечена. */
   dropping: PieceKind | null;
 }) {
+  const sides = position.sides.length;
   const ready = new Map<PieceKind, number>();
   for (const kind of position.reserve[side] ?? []) {
     ready.set(kind, (ready.get(kind) ?? 0) + 1);
@@ -442,7 +454,7 @@ function Shelf({
               : "border-line bg-surface"
           }`}
         >
-          <SparePiece pieceType={pieceType({ kind, side })} />
+          <SparePiece pieceType={pieceType({ kind, side }, sides)} />
           {count > 1 ? (
             <span className="absolute -right-1 -top-1 rounded-full bg-accent px-1 text-[10px] font-semibold text-surface">
               {count}
@@ -459,7 +471,7 @@ function Shelf({
           {/* Правило зовёт `next/image`, но файлы уже нужного размера. */}
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
-            src={pieceSrc(colorOf(side), zombie.kind)}
+            src={pieceSrc(colorOf(side, sides), zombie.kind)}
             alt=""
             width={256}
             height={256}

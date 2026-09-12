@@ -3,6 +3,7 @@ import type { ModeOptions } from "../rooms/settings";
 import { agentPosition, agentRules } from "./agents";
 import { anarchyPosition, anarchyRules } from "./anarchy";
 import { annihilationPosition, annihilationRules } from "./annihilation";
+import { battlePosition, battleRules } from "./battle";
 import { modeInfo, type TurboMode } from "./catalog";
 import { boozePosition, boozeRules } from "./booze";
 import { giveawayPosition, giveawayRules } from "./giveaway";
@@ -53,6 +54,7 @@ const READY: ReadonlySet<TurboMode> = new Set([
   "ANARCHY",
   "BOOZE",
   "BLACK_MARKET",
+  "BATTLE_ROYALE",
 ]);
 
 export function isReady(mode: TurboMode): boolean {
@@ -103,6 +105,8 @@ export function startPosition(
       return boozePosition();
     case "BLACK_MARKET":
       return marketPosition();
+    case "BATTLE_ROYALE":
+      return battlePosition();
     default:
       return classicPosition();
   }
@@ -176,6 +180,8 @@ export function rulesOf(mode: TurboMode, options: ModeOptions): ModeRules {
       return { variant: null, lines: boozeRules(), ready: true };
     case "BLACK_MARKET":
       return { variant: null, lines: marketRules(), ready: true };
+    case "BATTLE_ROYALE":
+      return { variant: null, lines: battleRules(), ready: true };
     default:
       return {
         variant: null,

@@ -12,6 +12,7 @@ import { REASON_TEXT } from "../engine/outcome";
 import type { Side } from "../engine/pieces";
 import type { Position } from "../engine/position";
 import { STALL_WARN, stallLeft, takenCount } from "../modes/annihilation";
+import { BATTLE_SIDE_NAME } from "../modes/battle";
 import { modeInfo } from "../modes/catalog";
 import { chanceReady } from "../modes/lastChance";
 import {
@@ -44,8 +45,10 @@ import { useTurboRoom } from "./useTurboRoom";
 
 const SIDE_NAME = ["белые", "чёрные"] as const;
 
-function sideName(side: Side): string {
-  return SIDE_NAME[side] ?? `сторона ${side + 1}`;
+/** Как зовётся место: у двоих — по цвету, в битве — по краю доски. */
+function sideName(side: Side, seats = 2): string {
+  const name = seats > 2 ? BATTLE_SIDE_NAME[side] : SIDE_NAME[side];
+  return name ?? `сторона ${side + 1}`;
 }
 
 export function GameRoom({
@@ -62,6 +65,8 @@ export function GameRoom({
   const room = useTurboRoom(roomCode);
   const [flipped, setFlipped] = useState<boolean | null>(null);
   const [inviteOpen, setInviteOpen] = useState(false);
+  /** Размер клетки на большой доске: её листают и приближают руками. */
+  const [zoom, setZoom] = useState(36);
   const sound = useSound();
 
   // Ссылка — из адресной строки: снаружи и изнутри сети адрес разный, и
@@ -133,6 +138,8 @@ export function GameRoom({
 
   // Зритель смотрит с белой стороны, игрок — со своей.
   const orientation = flipped ?? mySide === 1;
+  /** Доска больше обычной — её показывают с прокруткой и приближением. */
+  const wide = (state?.position?.geometry.width ?? 8) > 8;
 
   return (
     <div className="mx-auto flex w-full max-w-5xl flex-1 flex-col gap-4 px-4 py-4">
@@ -155,6 +162,28 @@ export function GameRoom({
           >
             <FlipIcon />
           </IconButton>
+
+          {/* Доску 16×16 на телефоне не разглядеть без приближения. */}
+          {wide ? (
+            <div className="flex items-center gap-1">
+              <button
+                type="button"
+                aria-label="Отдалить доску"
+                onClick={() => setZoom(Math.max(20, zoom - 8))}
+                className="size-8 rounded-lg border border-line text-sm font-semibold text-muted transition hover:border-accent hover:text-accent"
+              >
+                −
+              </button>
+              <button
+                type="button"
+                aria-label="Приблизить доску"
+                onClick={() => setZoom(Math.min(72, zoom + 8))}
+                className="size-8 rounded-lg border border-line text-sm font-semibold text-muted transition hover:border-accent hover:text-accent"
+              >
+                +
+              </button>
+            </div>
+          ) : null}
         </div>
 
         <UserMenu nickname={nickname} avatarId={avatarId} links={MENU_LINKS} />
@@ -174,21 +203,35 @@ export function GameRoom({
             телефоне адресная строка то есть, то нет, и по vh доска не
             помещается.
           */}
-          <div className="mx-auto w-full max-w-[min(78svh,560px)]">
-            <Board
-              position={state.position}
-              controls={playing && mySide !== null ? [mySide] : []}
-              lastMove={state.lastMove}
-              flipped={orientation}
-              covered={state.covered}
-              onSwap={
-                arranging ? (from, to) => void room.swap(from, to) : undefined
+          <div
+            className={
+              wide
+                ? "max-h-[78svh] w-full overflow-auto"
+                : "mx-auto w-full max-w-[min(78svh,560px)]"
+            }
+          >
+            <div
+              style={
+                wide
+                  ? { width: (state.position.geometry.width ?? 8) * zoom }
+                  : undefined
               }
-              onPick={order ? pickSquare : undefined}
-              onMove={(input: MoveInput) =>
-                room.move({ ...input, ply: state.moves.length })
-              }
-            />
+            >
+              <Board
+                position={state.position}
+                controls={playing && mySide !== null ? [mySide] : []}
+                lastMove={state.lastMove}
+                flipped={orientation}
+                covered={state.covered}
+                onSwap={
+                  arranging ? (from, to) => void room.swap(from, to) : undefined
+                }
+                onPick={order ? pickSquare : undefined}
+                onMove={(input: MoveInput) =>
+                  room.move({ ...input, ply: state.moves.length })
+                }
+              />
+            </div>
           </div>
 
           <aside className="flex w-full flex-col gap-3 lg:w-72">
@@ -232,19 +275,41 @@ export function GameRoom({
               />
             ) : null}
 
-            <Seat
-              state={state}
-              side={orientation ? 0 : 1}
-              clockOffset={room.clockOffset}
-              you={userId}
-            />
-            <Moves moves={state.moves} vetoed={state.vetoed} />
-            <Seat
-              state={state}
-              side={orientation ? 1 : 0}
-              clockOffset={room.clockOffset}
-              you={userId}
-            />
+            {/* Вчетвером места идут по кругу, вдвоём — соперник сверху. */}
+            {state.seats > 2 ? (
+              <>
+                {Array.from({ length: state.seats }, (_, side) => (
+                  <Seat
+                    key={side}
+                    state={state}
+                    side={side}
+                    clockOffset={room.clockOffset}
+                    you={userId}
+                  />
+                ))}
+                <Moves
+                  moves={state.moves}
+                  vetoed={state.vetoed}
+                  seats={state.seats}
+                />
+              </>
+            ) : (
+              <>
+                <Seat
+                  state={state}
+                  side={orientation ? 0 : 1}
+                  clockOffset={room.clockOffset}
+                  you={userId}
+                />
+                <Moves moves={state.moves} vetoed={state.vetoed} />
+                <Seat
+                  state={state}
+                  side={orientation ? 1 : 0}
+                  clockOffset={room.clockOffset}
+                  you={userId}
+                />
+              </>
+            )}
 
             {state.phase === "waiting" ||
             (state.phase === "over" && state.players.length < state.seats) ? (
@@ -809,7 +874,7 @@ function Seat({
   if (!player) {
     return (
       <div className="rounded-xl border border-dashed border-line px-4 py-3 text-sm text-muted">
-        {sideName(side)}: ждём игрока
+        {sideName(side, state.seats)}: ждём игрока
       </div>
     );
   }
@@ -828,7 +893,7 @@ function Seat({
             {player.id === you ? " (ты)" : ""}
           </div>
           <div className="text-xs text-muted">
-            {sideName(side)}
+            {sideName(side, state.seats)}
             {player.away ? " · вышел" : ""}
             {state.phase === "setup" && state.setupReady[side]
               ? " · готов"
@@ -867,9 +932,12 @@ function Seat({
 function Moves({
   moves,
   vetoed,
+  seats = 2,
 }: {
   moves: string[];
   vetoed: { ply: number; san: string }[];
+  /** Сколько мест за столом: вчетвером в строке четыре хода, а не два. */
+  seats?: number;
 }) {
   /** Что отменили перед этим полуходом. */
   const cancelled = (ply: number) =>
@@ -880,28 +948,33 @@ function Moves({
       {moves.length === 0 ? (
         <p className="text-sm text-muted">Ходов пока нет.</p>
       ) : (
-        <ol className="grid max-h-48 grid-cols-[auto_1fr_1fr] gap-x-3 gap-y-1 overflow-y-auto text-sm">
-          {Array.from({ length: Math.ceil(moves.length / 2) }, (_, index) => (
-            <li key={index} className="contents">
-              <span className="tabular text-muted">{index + 1}.</span>
-              <span className="tabular">
-                {cancelled(index * 2 + 1).map((san) => (
-                  <s key={san} className="mr-1 text-muted">
-                    {san}
-                  </s>
-                ))}
-                {moves[index * 2]}
-              </span>
-              <span className="tabular">
-                {cancelled(index * 2 + 2).map((san) => (
-                  <s key={san} className="mr-1 text-muted">
-                    {san}
-                  </s>
-                ))}
-                {moves[index * 2 + 1] ?? ""}
-              </span>
-            </li>
-          ))}
+        <ol
+          className="grid max-h-48 gap-x-3 gap-y-1 overflow-y-auto text-sm"
+          style={{
+            gridTemplateColumns: `auto repeat(${seats}, minmax(0, 1fr))`,
+          }}
+        >
+          {Array.from(
+            { length: Math.ceil(moves.length / seats) },
+            (_, round) => (
+              <li key={round} className="contents">
+                <span className="tabular text-muted">{round + 1}.</span>
+                {Array.from({ length: seats }, (_, seat) => {
+                  const ply = round * seats + seat;
+                  return (
+                    <span key={seat} className="tabular">
+                      {cancelled(ply + 1).map((san) => (
+                        <s key={san} className="mr-1 text-muted">
+                          {san}
+                        </s>
+                      ))}
+                      {moves[ply] ?? ""}
+                    </span>
+                  );
+                })}
+              </li>
+            ),
+          )}
         </ol>
       )}
     </div>
@@ -1025,7 +1098,7 @@ function Result({
           ? "Победа"
           : mySide !== null
             ? "Поражение"
-            : `Победили ${sideName(result)}`;
+            : `Победа: ${sideName(result, state.seats)}`;
   const full = state.players.length >= state.seats;
 
   return (

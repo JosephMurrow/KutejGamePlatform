@@ -32,12 +32,24 @@ export function pieceSrc(color: PieceColor, kind: PieceKind): string {
 }
 
 /**
- * Цвет фигуры по стороне. Сторон пока две; в королевской битве их четыре, и
- * рисунков для третьей и четвёртой ещё нет (docs/MODES.md, режим 9).
+ * Цвет фигуры по стороне. Рисунков два набора, а в королевской битве сторон
+ * четыре: юг и запад играют светлыми, север и восток — тёмными, а различает
+ * их кольцо стороны на клетке (components/Board.tsx).
  */
-export function colorOf(side: number): PieceColor {
+export function colorOf(side: number, sides = 2): PieceColor {
+  if (sides > 2) return side <= 1 ? "w" : "b";
+
   return side === 0 ? "w" : "b";
 }
+
+/**
+ * Кольцо стороны в королевской битве: им отличаются те, кому достался один
+ * набор фигур. Цвета — из палитры игры, новых не заводим.
+ */
+export const SIDE_RING: Readonly<Record<number, string>> = {
+  1: "#ffe14a",
+  3: "#ff7a3d",
+};
 
 function render(color: PieceColor, kind: PieceKind) {
   return function Piece() {

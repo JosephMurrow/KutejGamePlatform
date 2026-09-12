@@ -2,6 +2,7 @@ import { parseSquare, squareName } from "./geometry";
 import { marked, piece, type Piece, type PieceKind, type Side } from "./pieces";
 import {
   STALL_PLIES,
+  alive,
   classicPosition,
   kingIsRoyal,
   nextSide,
@@ -127,6 +128,21 @@ function bump(
     { length: sides },
     (_, seat) => (counts[seat] ?? 0) + (seat === side ? delta : 0),
   );
+}
+
+/**
+ * Выбыл: фигуры уходят с доски, а очередь — следующему живому
+ * (docs/MODES.md, режим 9).
+ */
+function knockOut(position: Position, side: Side): Position {
+  const board = position.board.map((cell) =>
+    cell?.side === side ? null : cell,
+  );
+  const after: Position = { ...position, board };
+
+  return position.turn === side
+    ? { ...after, turn: nextSide(after, side) }
+    : after;
 }
 
 /** Шаг истории: позиция, её ключ повторений и ход, который к ней привёл. */
@@ -530,8 +546,10 @@ export class TurboGame {
     return gone;
   }
 
-  /** Сдался. */
+  /** Сдался. В битве это не конец партии, а выбывание из-за стола. */
   resign(side: Side): Outcome | null {
+    if (this.top.position.rules.goal === "battle") return this.retire(side);
+
     return this.finish(opponent(side), "resign");
   }
 
@@ -543,6 +561,7 @@ export class TurboGame {
    * матовать» не бывает, и флаг — просто поражение.
    */
   flag(side: Side): Outcome | null {
+    if (this.top.position.rules.goal === "battle") return this.retire(side);
     if (kingIsRoyal(this.top.position) && !this.canMate(opponent(side))) {
       return this.finish("draw", "flagVsInsufficient");
     }
@@ -579,9 +598,10 @@ export class TurboGame {
    */
   claimableDraw(): "threefold" | "fiftyMoves" | null {
     if (this.ended) return null;
-    // «На уничтожение» стоит на своём счёте взятых: ничья по повторению была
-    // бы там лазейкой для того, кто съел меньше.
-    if (this.top.position.rules.goal === "wipe") return null;
+    // «На уничтожение» стоит на своём счёте взятых, а вчетвером ничьих не
+    // бывает вовсе: там выбывают, а не соглашаются.
+    const goal = this.top.position.rules.goal;
+    if (goal === "wipe" || goal === "battle") return null;
     if ((this.seen.get(this.top.key) ?? 0) >= 3) return "threefold";
     if (this.top.position.quiet >= 100) return "fiftyMoves";
 
@@ -594,8 +614,10 @@ export class TurboGame {
     return ground ? this.finish("draw", ground) : null;
   }
 
-  /** Ушёл и не вернулся: партия достаётся сопернику. */
+  /** Ушёл и не вернулся: партия достаётся сопернику, а в битве — выбывание. */
   abandon(side: Side): Outcome | null {
+    if (this.top.position.rules.goal === "battle") return this.retire(side);
+
     return this.finish(opponent(side), "abandoned");
   }
 
@@ -622,6 +644,8 @@ export class TurboGame {
         return this.detectWipe(position);
       case "feed":
         return this.detectFeed(position);
+      case "battle":
+        return this.detectBattle(position);
       default:
         return this.detectMate(position);
     }
@@ -681,6 +705,48 @@ export class TurboGame {
     }
 
     return this.autoDraw(position);
+  }
+
+  /**
+   * «Королевская битва»: заматованный выбывает и уносит фигуры, запертый без
+   * шаха пропускает ход, а когда за столом остаётся один — он и победил.
+   *
+   * Выбывание меняет позицию, поэтому она правится на месте: ходом это не
+   * было, и в счёт ходов не идёт.
+   */
+  private detectBattle(position: Position): Outcome | null {
+    let current = position;
+
+    for (let guard = 0; guard <= current.sides.length; guard++) {
+      if (legalMoves(current).length > 0) break;
+
+      current = inCheck(current, current.turn)
+        ? knockOut(current, current.turn)
+        : { ...current, turn: nextSide(current, current.turn) };
+    }
+    if (current !== position) this.replace(current);
+
+    const standing = current.sides.flatMap((_, side) =>
+      alive(current, side) ? [side] : [],
+    );
+    const winner = standing[0];
+    if (standing.length === 1 && winner !== undefined) {
+      return this.finish(winner, "lastStanding");
+    }
+
+    return null;
+  }
+
+  /**
+   * Уйти из битвы: сдался, не успел с ходом или бросил стол. Фигуры уходят с
+   * доски, партия продолжается без него.
+   */
+  retire(side: Side): Outcome | null {
+    if (this.ended) return null;
+    if (!alive(this.top.position, side)) return null;
+
+    this.replace(knockOut(this.top.position, side));
+    return this.detect();
   }
 
   /**

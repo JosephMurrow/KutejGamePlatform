@@ -781,6 +781,10 @@ export class TurboRoom implements GameRoomState {
     const side = this.sideOf(actorId);
     if (side === null) return { accepted: false, reason: "Ты не за доской" };
     if (!this.playing()) return { accepted: false, reason: "Партия не идёт" };
+    if (this.capacity > 2) {
+      // Вчетвером не соглашаются, а выбывают: ничья тут не с кем.
+      return { accepted: false, reason: "Вчетвером ничьих не бывает" };
+    }
 
     if (this.offer !== null && this.offer !== side) {
       this.offer = null;

@@ -809,6 +809,63 @@ describe("кнопки режимов", () => {
   });
 });
 
+describe("королевская битва", () => {
+  it("стол на четверых: круг хода, выбывание и победа последнего", () => {
+    const settings: TurboRoomSettings = {
+      mode: "BATTLE_ROYALE",
+      timeControl: "SEC_30",
+      options: {},
+    };
+    const drafts: MatchDraft[] = [];
+    const context: GameRoomContext = {
+      key: "turbo-battle",
+      ownerId: "south",
+      isPrivate: true,
+      settings,
+      connections: () => 4,
+      introduce: () => {},
+      forget: () => {},
+      emitted: () => {},
+      changed: () => {},
+    };
+    const room = new TurboRoom(context, settings, undefined, (draft) =>
+      drafts.push(draft),
+    );
+
+    room.join("south");
+    room.join("west");
+    assert.equal(view(room, "south").phase, "waiting", "вдвоём не начинаем");
+
+    room.join("north");
+    room.join("east");
+    assert.equal(view(room, "south").phase, "playing");
+    assert.equal(view(room, "south").seats, 4);
+
+    assert.deepEqual(move(room, "south", "e2", "e4"), { accepted: true });
+    assert.equal(view(room, "south").turn, 1, "ход по часовой");
+    assert.equal(
+      move(room, "north", "e15", "e13").reason,
+      "Сейчас не твой ход",
+    );
+    assert.equal(
+      room.act(GAME_EVENT.offerDraw, "south", {}).reason,
+      "Вчетвером ничьих не бывает",
+    );
+
+    room.act(GAME_EVENT.resign, "west", {});
+    assert.equal(view(room, "south").phase, "playing", "партия идёт втроём");
+    assert.equal(view(room, "south").turn, 2, "запад пропущен");
+
+    room.act(GAME_EVENT.resign, "north", {});
+    room.act(GAME_EVENT.resign, "east", {});
+
+    assert.equal(view(room, "south").phase, "over");
+    assert.equal(view(room, "south").result, 0, "юг остался один");
+    assert.equal(view(room, "south").reason, "lastStanding");
+    assert.equal(drafts.at(-1)?.seats.length, 4, "в записи четыре места");
+  });
+});
+
 describe("двойной агент", () => {
   it("свой агент — секрет от хозяина, чужой виден, зрителю — ни одного", () => {
     const settings: TurboRoomSettings = {

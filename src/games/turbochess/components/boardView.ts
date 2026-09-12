@@ -13,9 +13,12 @@ import { colorOf } from "./pieces";
  * подсветить и когда спрашивать фигуру превращения.
  */
 
-/** Ключ фигуры у библиотеки доски: `wP` — светлая пешка, `bK` — тёмный король. */
-export function pieceType(piece: Piece): string {
-  return `${colorOf(piece.side)}${piece.kind.toUpperCase()}`;
+/**
+ * Ключ фигуры у библиотеки доски: `wP` — светлая пешка, `bK` — тёмный король.
+ * Наборов два, а сторон бывает четыре: тогда светлыми играют первые две.
+ */
+export function pieceType(piece: Piece, sides = 2): string {
+  return `${colorOf(piece.side, sides)}${piece.kind.toUpperCase()}`;
 }
 
 /** Позиция объектом «клетка → фигура», как её ждёт библиотека доски. */
@@ -27,7 +30,7 @@ export function boardPosition(
   position.board.forEach((cell, square) => {
     if (cell) {
       placed[squareName(position.geometry, square)] = {
-        pieceType: pieceType(cell),
+        pieceType: pieceType(cell, position.sides.length),
       };
     }
   });

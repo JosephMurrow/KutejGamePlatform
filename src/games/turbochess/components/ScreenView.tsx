@@ -3,6 +3,7 @@
 import { Countdown } from "@/components/ui/Countdown";
 import { REASON_TEXT } from "../engine/outcome";
 import { takenCount } from "../modes/annihilation";
+import { BATTLE_SIDE_NAME } from "../modes/battle";
 import { modeInfo } from "../modes/catalog";
 import { nuclearCharge, nuclearThreshold } from "../modes/nuclear";
 import { rulesOf } from "../modes/rules";
@@ -79,13 +80,27 @@ export function ScreenView({
       ) : null}
 
       <div className="flex w-full max-w-[min(80vh,900px)] items-end justify-between gap-6">
-        <Name nickname={name(1)} side={SIDE_NAME[1]} score={score(1)} />
-        <Name
-          nickname={name(0)}
-          side={SIDE_NAME[0]}
-          score={score(0)}
-          align="right"
-        />
+        {state.seats > 2 ? (
+          // Вчетвером имена идут по кругу, как и ход: юг, запад, север, восток.
+          Array.from({ length: state.seats }, (_, seat) => (
+            <Name
+              key={seat}
+              nickname={name(seat)}
+              side={BATTLE_SIDE_NAME[seat] ?? ""}
+              score={score(seat)}
+            />
+          ))
+        ) : (
+          <>
+            <Name nickname={name(1)} side={SIDE_NAME[1]} score={score(1)} />
+            <Name
+              nickname={name(0)}
+              side={SIDE_NAME[0]}
+              score={score(0)}
+              align="right"
+            />
+          </>
+        )}
       </div>
 
       <div className="w-full max-w-[min(80vh,900px)]">
@@ -106,7 +121,7 @@ export function ScreenView({
               ? "Ничья"
               : state.result === null
                 ? "Партия кончилась"
-                : `Победили ${SIDE_NAME[state.result] ?? "другие"}`}
+                : `Победа: ${(state.seats > 2 ? BATTLE_SIDE_NAME[state.result] : SIDE_NAME[state.result]) ?? "другие"}`}
             <span className="ml-3 text-xl text-muted">
               {state.reason ? REASON_TEXT[state.reason] : ""}
             </span>
