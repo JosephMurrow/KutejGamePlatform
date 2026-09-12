@@ -4,6 +4,7 @@ import { roller } from "../modes/random";
 import { botAvatarId } from "./avatars";
 import {
   CHARACTER_TRAITS,
+  CHARACTERS,
   type Character,
   type CharacterTraits,
   drawCharacters,
@@ -63,7 +64,7 @@ export function makeBots(
 
 /** Номер лица характера: лицо рисуется под характер, а не под место за столом. */
 function index(character: Character): number {
-  return Object.keys(CHARACTER_TRAITS).indexOf(character);
+  return CHARACTERS.indexOf(character);
 }
 
 /** Как бот записывается в сыгранную партию: места, характеры и уровень. */
