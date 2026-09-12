@@ -145,6 +145,8 @@ async function main() {
     mode: "CLASSIC",
     timeControl: "MIN_3",
     options: {},
+    bots: 0,
+    botLevel: "normal",
   });
 
   console.log(`\nКомната ${room.code}, классика, три минуты на ход\n`);
@@ -313,6 +315,86 @@ async function main() {
   back.disconnect();
   viewer.disconnect();
   await sleep(300);
+
+  console.log("\n[8] Соперник-программа");
+  const botRoom = await createPrivateRoom(
+    white.id,
+    {
+      kind: "private",
+      title: "Смоук с программой",
+      locked: false,
+      maxPlayers: null,
+      twitchChannel: null,
+    },
+    GAME_ID,
+  );
+  await saveRoomSettings(botRoom.id, {
+    mode: "CLASSIC",
+    timeControl: "MIN_3",
+    options: {},
+    bots: 1,
+    botLevel: "easy",
+  });
+
+  const human = new Client("человек");
+  await human.connect(tokens.white, botRoom.code);
+
+  const seatedWithBot = await human.waitState(
+    (state) => state.phase === "playing",
+    "партия с программой",
+  );
+  const bot = seatedWithBot.players.find((player) => player.id !== white.id);
+  check("программа села за стол", bot !== undefined);
+  check("у неё свой ник", (bot?.nickname.length ?? 0) > 0, bot?.nickname ?? "");
+  check(
+    "человек ходит первым",
+    seatedWithBot.players[0]?.id === white.id && seatedWithBot.turn === 0,
+  );
+
+  const opened = await human.emit(GAME_EVENT.move, move("e2", "e4", 0));
+  check("человек сходил", opened.ok === true, opened.error ?? "");
+
+  const answered = await human.waitState(
+    (state) => state.moves.length === 2,
+    "ответ программы",
+  );
+  check(
+    "программа ответила сама",
+    answered.moves.length === 2,
+    answered.moves.join(" "),
+  );
+  check("ход вернулся человеку", answered.turn === 0, String(answered.turn));
+  check("часы идут дальше", (answered.deadline ?? 0) > Date.now());
+
+  const botResign = await human.emit(GAME_EVENT.resign);
+  check("человек сдался", botResign.ok === true, botResign.error ?? "");
+  const botOver = await human.waitState(
+    (state) => state.phase === "over",
+    "конец партии с программой",
+  );
+  check("победа за программой", botOver.result === 1, String(botOver.result));
+
+  await sleep(300);
+  const botMatch = await prisma.turboMatch.findFirst({
+    where: { roomKey: botRoom.id },
+    include: { seats: true },
+  });
+  check("партия с программой записана", botMatch !== null);
+  check(
+    "место программы в запись мест не попало",
+    botMatch?.seats.length === 1 && botMatch.seats[0]?.userId === white.id,
+    `мест записано: ${botMatch?.seats.length ?? 0}`,
+  );
+  const recorded = (botMatch?.bots ?? []) as { seat: number; level: string }[];
+  check(
+    "зато записано, кто был программой",
+    recorded.length === 1 && recorded[0]?.seat === 1,
+    recorded.map((one) => `место ${one.seat}, уровень ${one.level}`).join("; "),
+  );
+
+  human.disconnect();
+  await sleep(200);
+  await deletePrivateRoom(botRoom.id, botRoom.gameId);
 
   await deletePrivateRoom(room.id, room.gameId);
   const leftovers = await prisma.turboRoomSettings.count({

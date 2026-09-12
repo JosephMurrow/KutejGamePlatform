@@ -1,4 +1,5 @@
-import { PLAYER_MODES, type TurboMode } from "../modes/catalog";
+import { modeInfo, PLAYER_MODES, type TurboMode } from "../modes/catalog";
+import { LEVEL_IDS, type LevelId } from "../bots/levels";
 import { modeOptions } from "../modes/rules";
 
 /**
@@ -28,6 +29,35 @@ export interface TurboRoomSettings {
   mode: TurboMode;
   timeControl: TimeControl;
   options: ModeOptions;
+  /**
+   * Сколько ботов сажать за стол. Ноль — ждём живых; больше одного бывает
+   * только в королевской битве, где мест четыре, и последнее место всё равно
+   * остаётся человеку (docs/BOTS.md, А6 и А8).
+   */
+  bots: number;
+  /** Уровень всех ботов комнаты: выбирает человек, различают характеры. */
+  botLevel: LevelId;
+}
+
+/** Сколько мест в этом режиме можно отдать программе: одно всегда за человеком. */
+export function botRoom(mode: TurboMode): number {
+  return Math.max(0, modeInfo(mode).seats - 1);
+}
+
+/** Сколько ботов просили и сколько из них поместится за стол этого режима. */
+export function pickBots(value: unknown, mode: TurboMode): number {
+  const asked =
+    typeof value === "number"
+      ? value
+      : Number.parseInt(String(value ?? ""), 10);
+  if (!Number.isFinite(asked) || asked <= 0) return 0;
+
+  return Math.min(Math.trunc(asked), botRoom(mode));
+}
+
+/** Уровень из формы; незнакомое значение — «Нормальный», а не падение. */
+export function pickLevel(value: unknown): LevelId {
+  return LEVEL_IDS.includes(value as LevelId) ? (value as LevelId) : "normal";
 }
 
 /**
@@ -58,7 +88,13 @@ const TIME_CONTROLS = Object.keys(MOVE_LIMIT_MS) as TimeControl[];
  * первые в его постановке, и полминуты на ход, как в общем зале шахмат.
  */
 export function defaultRoomSettings(): TurboRoomSettings {
-  return { mode: "ONE_KIND", timeControl: "SEC_30", options: { kind: "q" } };
+  return {
+    mode: "ONE_KIND",
+    timeControl: "SEC_30",
+    options: { kind: "q" },
+    bots: 0,
+    botLevel: "normal",
+  };
 }
 
 /**
@@ -72,6 +108,10 @@ export function normalizeRoomSettings(raw: {
   timeControl: unknown;
   /** Поле формы по имени. Нет формы — нет и ручек. */
   field?: (name: string) => unknown;
+  /** Сколько мест отдать программе. */
+  bots?: unknown;
+  /** Уровень этих программ. */
+  botLevel?: unknown;
 }): TurboRoomSettings {
   const fallback = defaultRoomSettings();
   const mode = pickMode(raw.mode);
@@ -82,6 +122,8 @@ export function normalizeRoomSettings(raw: {
       ? (raw.timeControl as TimeControl)
       : fallback.timeControl,
     options: modeOptions(mode, raw.field ?? (() => undefined)),
+    bots: pickBots(raw.bots, mode),
+    botLevel: pickLevel(raw.botLevel),
   };
 }
 

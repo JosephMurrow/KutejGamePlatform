@@ -1,6 +1,8 @@
 import { prisma } from "@/lib/prisma";
 import {
   defaultRoomSettings,
+  pickBots,
+  pickLevel,
   readOptions,
   type TurboRoomSettings,
 } from "./settings";
@@ -17,10 +19,17 @@ export async function saveRoomSettings(
   roomId: string,
   settings: TurboRoomSettings,
 ): Promise<void> {
+  // Уровень в базе перечислением в верхнем регистре, у нас — строчными: одно
+  // и то же значение, разные соглашения, и перевод держится в одном месте.
+  const row = {
+    ...settings,
+    botLevel: settings.botLevel.toUpperCase() as never,
+  };
+
   await prisma.turboRoomSettings.upsert({
     where: { roomId },
-    create: { roomId, ...settings },
-    update: settings,
+    create: { roomId, ...row },
+    update: row,
   });
 }
 
@@ -38,6 +47,8 @@ export async function loadRoomSettings(
     mode: row.mode,
     timeControl: row.timeControl,
     options: readOptions(row.options),
+    bots: pickBots(row.bots, row.mode),
+    botLevel: pickLevel(row.botLevel.toLowerCase()),
   };
 }
 

@@ -7,7 +7,10 @@ import type { Position } from "../engine/position";
 import { TurboGame } from "../engine/game";
 import { PIECE_VALUE, nuclearCharge } from "../modes/nuclear";
 import { TOAST_MS } from "../modes/booze";
-import type { TurboMode } from "../modes/catalog";
+import { modeInfo, type TurboMode } from "../modes/catalog";
+import { BOT_AVATAR_OFFSET } from "../bots/avatars";
+import type { LevelId } from "../bots/levels";
+import { makeBots } from "../bots/seat";
 import { SHOWDOWN_SETUP_MS } from "../modes/showdown";
 import type {
   ModeOptions,
@@ -34,6 +37,8 @@ function setup(timeControl: TimeControl = "SEC_30") {
     mode: "CLASSIC",
     timeControl,
     options: {},
+    bots: 0,
+    botLevel: "normal",
   };
   const context: GameRoomContext = {
     key: "turbo-test",
@@ -399,6 +404,8 @@ describe("режим", () => {
       mode: "ONE_KIND",
       timeControl: "SEC_30",
       options: { kind: "n" },
+      bots: 0,
+      botLevel: "normal",
     };
     const context: GameRoomContext = {
       key: "turbo-knights",
@@ -435,6 +442,8 @@ describe("подкрепление", () => {
       mode: "REINFORCEMENTS",
       timeControl: "SEC_30",
       options: {},
+      bots: 0,
+      botLevel: "normal",
     };
     const context: GameRoomContext = {
       key: "turbo-reserve",
@@ -488,6 +497,8 @@ describe("вскрываемся", () => {
       mode: "SHOWDOWN",
       timeControl: "SEC_30",
       options: {},
+      bots: 0,
+      botLevel: "normal",
     };
     const drafts: MatchDraft[] = [];
     const context: GameRoomContext = {
@@ -632,6 +643,8 @@ describe("кнопки режимов", () => {
       mode,
       timeControl: "SEC_30",
       options: {},
+      bots: 0,
+      botLevel: "normal",
     };
     const drafts: MatchDraft[] = [];
     const context: GameRoomContext = {
@@ -815,6 +828,8 @@ describe("королевская битва", () => {
       mode: "BATTLE_ROYALE",
       timeControl: "SEC_30",
       options: {},
+      bots: 0,
+      botLevel: "normal",
     };
     const drafts: MatchDraft[] = [];
     const context: GameRoomContext = {
@@ -872,6 +887,8 @@ describe("двойной агент", () => {
       mode: "DOUBLE_AGENT",
       timeControl: "SEC_30",
       options: {},
+      bots: 0,
+      botLevel: "normal",
     };
     const context: GameRoomContext = {
       key: "turbo-agent",
@@ -913,6 +930,8 @@ describe("бомба", () => {
       mode: "NUCLEAR",
       timeControl: "SEC_30",
       options,
+      bots: 0,
+      botLevel: "normal",
     };
     const drafts: MatchDraft[] = [];
     const events: GameRoomEvent[] = [];
@@ -1085,5 +1104,190 @@ describe("закрытая дверь вместо общего зала", () =>
       "комната без настроек играет умолчанием",
     );
     server.stop();
+  });
+});
+
+describe("бот за столом", () => {
+  /**
+   * Стол с ботами: режим, сколько программ сажать и какого уровня.
+   *
+   * Комната ботов не выдумывает — их приносит серверная часть, и здесь это тот
+   * же запас, только собранный руками, чтобы тест знал их номера.
+   */
+  function withBots(
+    count: number,
+    mode: TurboMode = "CLASSIC",
+    level: LevelId = "easy",
+  ) {
+    let at = 1000;
+    const changes: number[] = [];
+    const drafts: MatchDraft[] = [];
+    const introduced: { id: string; nickname: string }[] = [];
+    const settings: TurboRoomSettings = {
+      mode,
+      timeControl: "SEC_30",
+      options: {},
+      bots: count,
+      botLevel: level,
+    };
+    const context: GameRoomContext = {
+      key: "turbo-bots",
+      ownerId: "host",
+      isPrivate: true,
+      settings,
+      connections: () => 1,
+      introduce: (player) =>
+        introduced.push({ id: player.id, nickname: player.nickname }),
+      forget: () => {},
+      emitted: () => {},
+      changed: () => changes.push(at),
+    };
+    const pool = makeBots(modeInfo(mode).seats - 1, level, 12345);
+    const room = new TurboRoom(
+      context,
+      settings,
+      () => at,
+      (draft) => drafts.push(draft),
+      pool,
+    );
+
+    return {
+      room,
+      pool,
+      introduced,
+      drafts,
+      changes,
+      pass: (ms: number) => {
+        at += ms;
+      },
+    };
+  }
+
+  it("бот садится после человека: первый ход остаётся людям", () => {
+    const { room, introduced } = withBots(1);
+    room.join("human");
+
+    const seats = room.seated();
+    assert.equal(seats.length, 2);
+    assert.equal(seats[0], "human");
+    assert.ok(seats[1]?.startsWith("bot:"), "второе место — за программой");
+    // Платформа знает бота как игрока: ник и лицо она допишет в снимок сама.
+    assert.equal(introduced.length, 1);
+    assert.ok((introduced[0]?.nickname.length ?? 0) > 0);
+    assert.equal(view(room, "human").phase, "playing");
+  });
+
+  it("без просьбы бот не садится, но приходит по зову", () => {
+    const { room } = withBots(0);
+    room.join("human");
+
+    assert.deepEqual(room.seated(), ["human"]);
+    assert.equal(view(room, "human").phase, "waiting");
+
+    const called = room.act(GAME_EVENT.bot, "human", {});
+    assert.equal(called.accepted, true);
+    assert.equal(room.seated().length, 2);
+    assert.equal(view(room, "human").phase, "playing");
+  });
+
+  it("зовёт тот, кто за столом или завёл комнату; посреди партии — никто", () => {
+    const { room } = withBots(0);
+    room.join("human");
+
+    assert.equal(room.act(GAME_EVENT.bot, "чужой", {}).accepted, false);
+    assert.equal(room.act(GAME_EVENT.bot, "host", {}).accepted, true);
+    // Стол полон, звать некуда.
+    assert.equal(room.act(GAME_EVENT.bot, "human", {}).accepted, false);
+  });
+
+  it("бот думает и ходит сам — по будильнику комнаты, а не по таймеру", () => {
+    const { room, pass } = withBots(1);
+    room.join("human");
+
+    // Ход человека: бота ждать незачем.
+    assert.equal(move(room, "human", "e2", "e4").accepted, true);
+
+    const before = (view(room, "human").moves as string[]).length;
+    const wait = room.deadline();
+    assert.ok(wait !== null, "комната просит себя разбудить");
+
+    // Раньше срока бот не ходит.
+    pass(200);
+    room.tick();
+    assert.equal((view(room, "human").moves as string[]).length, before);
+
+    pass(7_000);
+    room.tick();
+    const moves = view(room, "human").moves as string[];
+    assert.equal(moves.length, before + 1, "бот сходил");
+    assert.equal(view(room, "human").turn, 0, "очередь вернулась человеку");
+  });
+
+  it("ход бота законный: его принимает тот же движок, что и человека", () => {
+    const { room, pass } = withBots(1);
+    room.join("human");
+
+    for (let half = 0; half < 6; half++) {
+      const before = (view(room, "human").moves as string[]).length;
+      if (view(room, "human").turn === 0) {
+        const legal = new TurboGame(
+          view(room, "human").position as Position,
+        ).legal()[0];
+        assert.ok(legal);
+        assert.equal(
+          room.act(GAME_EVENT.move, "human", { ...legal, ply: before })
+            .accepted,
+          true,
+        );
+      } else {
+        pass(8_000);
+        room.tick();
+      }
+      assert.equal(
+        (view(room, "human").moves as string[]).length,
+        before + 1,
+        `полуход ${half}`,
+      );
+    }
+  });
+
+  it("в королевской битве стол добирают трое, четвёртое место человеку", () => {
+    const { room } = withBots(3, "BATTLE_ROYALE");
+    room.join("human");
+
+    const seats = room.seated();
+    assert.equal(seats.length, 4);
+    assert.equal(seats.filter((id) => id.startsWith("bot:")).length, 3);
+    assert.equal(view(room, "human").phase, "playing");
+  });
+
+  it("характеры за столом разные, а лица берутся из своего диапазона", () => {
+    const { pool } = withBots(3, "BATTLE_ROYALE");
+
+    assert.equal(pool.length, 3);
+    assert.equal(new Set(pool.map((bot) => bot.character)).size, 3);
+    assert.equal(new Set(pool.map((bot) => bot.nickname)).size, 3);
+    for (const bot of pool) {
+      assert.ok(bot.avatarId >= BOT_AVATAR_OFFSET, "лицо из своего диапазона");
+      assert.ok(bot.id.startsWith("bot:"));
+    }
+  });
+
+  it("в записи партии бот не место, а отдельная строчка", () => {
+    const { room, pass, drafts } = withBots(1);
+    room.join("human");
+
+    // Детский мат людям недоступен — сдаёмся, чтобы партия кончилась быстро.
+    assert.equal(move(room, "human", "e2", "e4").accepted, true);
+    pass(8_000);
+    room.tick();
+    assert.equal(room.act(GAME_EVENT.resign, "human", {}).accepted, true);
+
+    const draft = drafts.at(-1);
+    assert.ok(draft, "партия записана");
+    assert.equal(draft.bots.length, 1);
+    assert.equal(draft.bots[0]?.seat, 1);
+    assert.equal(draft.bots[0]?.level, "easy");
+    assert.ok(draft.seats[1]?.startsWith("bot:"));
   });
 });

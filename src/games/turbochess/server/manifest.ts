@@ -32,6 +32,8 @@ export const TURBOCHESS_SERVER: GameServerManifest = {
         mode: form.get("mode"),
         timeControl: form.get("timeControl"),
         field: (name) => form.get(name),
+        bots: form.get("bots"),
+        botLevel: form.get("botLevel"),
       }),
     );
   },

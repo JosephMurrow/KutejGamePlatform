@@ -6,6 +6,9 @@ import type {
   GameRoomState,
   GameViewer,
 } from "@/lib/games/engine";
+import type { BotRecord, BotSeat } from "../bots/seat";
+import { think } from "../bots/mind";
+import { pauseMs } from "../bots/tempo";
 import { MoveClock, type Ticker } from "../engine/clock";
 import { parseSquare, squareName } from "../engine/geometry";
 import {
@@ -47,8 +50,8 @@ import {
  * Платформа держит соединения, состав и рассылку; отсюда она получает только
  * дедлайн и снимок, а внутрь не смотрит. Устроено по образцу шахматной
  * комнаты (src/games/chess/server/room.ts) — копией, а не импортом: игра не
- * импортирует игру. Ботов, задержки для зрителей и общего зала здесь нет:
- * бот придёт на этапе 11, а зала у турбо-шахмат нет вовсе.
+ * импортирует игру. Задержки для зрителей и общего зала здесь нет: зала у
+ * турбо-шахмат нет вовсе.
  */
 
 /**
@@ -97,6 +100,8 @@ export interface MatchDraft {
   winner: Side | null;
   reason: EndReason;
   startedAt: Date;
+  /** Кто из сидевших был программой: у бота учётной записи нет. */
+  bots: BotRecord[];
 }
 
 /** Куда комната отдаёт партию. База — снаружи: комната про неё не знает. */
@@ -150,6 +155,20 @@ export class TurboRoom implements GameRoomState {
   private drinks: number[] = [];
   /** «Анархия»: отменённые ходы — их показывают перечёркнутыми. */
   private vetoed: { ply: number; san: string }[] = [];
+  /** Боты за столом по их номеру игрока. Пустая — за столом одни живые. */
+  private readonly bots = new Map<string, BotSeat>();
+  /**
+   * Когда бот доиграет свою паузу и сходит, по монотонным часам; `null` — ждать
+   * некого.
+   *
+   * Ход бота не таймер, а тот же дедлайн, которым живёт комната: платформа
+   * будит её по `deadline()`, и ход случается в `tick()`. Иначе в комнате
+   * появился бы второй источник времени, невидимый тестам и не переживающий
+   * выключение процесса.
+   */
+  private botAt: number | null = null;
+  /** На каком полуходе назначена эта пауза. */
+  private botPly = -1;
 
   constructor(
     private readonly context: GameRoomContext,
@@ -157,12 +176,43 @@ export class TurboRoom implements GameRoomState {
     private readonly now: Ticker = () => performance.now(),
     /** Запись партии в базу. Без неё комната работает — просто без истории. */
     private readonly persist?: Persist,
+    /**
+     * Кого сажать, если позовут: готовые боты с разными характерами. Комната их
+     * не выдумывает — кого именно, решает серверная часть по настройкам
+     * комнаты (docs/BOTS.md, А6).
+     */
+    private readonly pool: readonly BotSeat[] = [],
   ) {
     // Режим встаёт в партию через начальную позицию: движок про режимы не знает.
     this.game = this.newGame();
     this.clock = new MoveClock(MOVE_LIMIT_MS[settings.timeControl], now);
     this.moveStartedAt = now();
     this.resetOffers();
+  }
+
+  /**
+   * Посадить бота: он такой же игрок платформы, только без учётной записи.
+   *
+   * Платформа запоминает, как его звать и каким лицом рисовать, и дальше
+   * дописывает его в снимок сама — комнате отдельного кода на показ бота не
+   * нужно.
+   */
+  private seatBot(bot: BotSeat): boolean {
+    if (this.seats.length >= this.capacity || this.seats.includes(bot.id)) {
+      return false;
+    }
+
+    this.context.introduce({
+      id: bot.id,
+      nickname: bot.nickname,
+      avatarId: bot.avatarId,
+      isGuest: false,
+    });
+    this.bots.set(bot.id, bot);
+    this.seats.push(bot.id);
+    if (this.seats.length === this.capacity) this.start();
+
+    return true;
   }
 
   /** Мест столько, сколько сторон в позиции: двое, в королевской битве — четверо. */
@@ -176,11 +226,50 @@ export class TurboRoom implements GameRoomState {
 
     if (!this.seats.includes(playerId) && this.seats.length < this.capacity) {
       this.seats.push(playerId);
+      // Боты добирают стол после человека, а не до него: сядь они первыми,
+      // человеку всегда доставалось бы последнее место, а первый ход — машине.
+      this.fillWithBots(this.settings.bots);
       // Лишние остаются зрителями: за столом их нет, но партию видят целиком.
       if (this.seats.length === this.capacity) this.start();
     }
 
     this.context.changed();
+  }
+
+  /** Досадить ботов из запаса — столько, сколько просили, и не больше мест. */
+  private fillWithBots(count: number): number {
+    let seated = 0;
+
+    for (const bot of this.pool) {
+      if (seated >= count || this.seats.length >= this.capacity) break;
+      if (this.seatBot(bot)) seated++;
+    }
+
+    return seated;
+  }
+
+  /**
+   * «Позвать бота»: посадить программу на свободное место руками.
+   *
+   * Иначе королевскую битву на четверых не набрать — троих живых надо ещё
+   * найти, — а ждать друга с автоподсадкой по таймеру обидно (docs/BOTS.md, А6).
+   */
+  private callBot(actorId: string): ActionOutcome {
+    if (!this.seats.includes(actorId) && this.context.ownerId !== actorId) {
+      return { accepted: false, reason: "Звать может тот, кто за столом" };
+    }
+    if (this.seats.length >= this.capacity) {
+      return { accepted: false, reason: "Свободных мест нет" };
+    }
+    if (this.playing()) {
+      return { accepted: false, reason: "Партия уже идёт" };
+    }
+    if (this.fillWithBots(1) === 0) {
+      return { accepted: false, reason: "Больше программ нет" };
+    }
+
+    this.context.changed();
+    return { accepted: true };
   }
 
   /**
@@ -235,6 +324,10 @@ export class TurboRoom implements GameRoomState {
     if (this.absence) {
       waits.push(Math.max(0, ABANDON_MS - (this.now() - this.absence.since)));
     }
+    // Ход бота — такой же срок, как часы: комната будится по нему и ходит в
+    // `tick`, а не по своему таймеру.
+    const bot = this.botWait();
+    if (bot !== null) waits.push(bot);
 
     return waits.length === 0 ? null : Math.min(...waits);
   }
@@ -272,6 +365,12 @@ export class TurboRoom implements GameRoomState {
       return;
     }
 
+    // Бот додумал — ходит. Ход идёт обычной дверью и сам зовёт `changed`.
+    if (this.botWait() === 0) {
+      this.playBot();
+      return;
+    }
+
     // Разбудили раньше срока. `changed` обязателен и тут: будильник платформа
     // заводит только на него, и молчаливый тик оставил бы комнату без часов.
     this.context.changed();
@@ -291,6 +390,8 @@ export class TurboRoom implements GameRoomState {
         return this.claimDraw(actorId);
       case GAME_EVENT.rematch:
         return this.rematch(actorId);
+      case GAME_EVENT.bot:
+        return this.callBot(actorId);
       case GAME_EVENT.bomb:
         return this.dropBomb(actorId);
       case GAME_EVENT.chance:
@@ -432,6 +533,78 @@ export class TurboRoom implements GameRoomState {
   }
 
   /** Партия идёт: началась и не кончилась. */
+  /** Бот, чья сейчас очередь; `null` — ход человека или партия стоит. */
+  private botToMove(): BotSeat | null {
+    if (!this.playing() || this.toast || this.setupUntil !== null) return null;
+
+    const at = this.game.turn();
+    const id = this.seats[at];
+    return id === undefined ? null : (this.bots.get(id) ?? null);
+  }
+
+  /**
+   * Сколько боту осталось «думать»; `null` — ждать некого.
+   *
+   * Пауза назначается на первый вопрос об этом полуходе и держится до тех пор,
+   * пока полуход не сменится: спрашивают об этом и будильник, и тик, и они
+   * должны получить один и тот же ответ.
+   */
+  private botWait(): number | null {
+    const bot = this.botToMove();
+    if (!bot) {
+      this.botAt = null;
+      return null;
+    }
+
+    const ply = this.game.ply();
+    if (this.botAt === null || this.botPly !== ply) {
+      this.botPly = ply;
+      this.botAt = this.now() + this.botPause(bot);
+    }
+
+    return Math.max(0, this.botAt - this.now());
+  }
+
+  /** Пауза перед ходом: считается один раз на полуход и по зерну партии. */
+  private botPause(bot: BotSeat): number {
+    const left = this.clock.left();
+    const roll = this.rolls(1, 5)[0] ?? 0.5;
+    // Тот же расчёт, что и в голове бота, но без перебора: сколько кандидатов,
+    // тут неизвестно, и берётся оценка по числу фигур на доске.
+    const width = this.game.position().board.filter(Boolean).length;
+
+    return pauseMs(bot.level, bot.traits, width, () => roll, left);
+  }
+
+  /**
+   * Ход бота. Идёт через ту же дверь, что и ход человека: `makeMove` проверит
+   * очередь, номер полухода и законность — у бота нет никаких поблажек, кроме
+   * тех, что записаны в его уровне.
+   */
+  private playBot(): void {
+    const bot = this.botToMove();
+    if (!bot) return;
+
+    const seat = this.game.turn();
+    const thought = think({
+      position: this.game.position(),
+      seat,
+      level: bot.level,
+      traits: bot.traits,
+      ply: this.game.ply(),
+      drinks: this.drinks[seat] ?? 0,
+      roll: roller(this.seed, this.game.ply() * 8 + 9),
+      limitMs: this.clock.left(),
+    });
+
+    // Думать нечем — значит ходов нет, и это уже не забота бота: партию
+    // разберёт движок на ближайшем тике.
+    if (!thought) return;
+
+    this.botAt = null;
+    this.makeMove(bot.id, { ...thought.input, ply: this.game.ply() });
+  }
+
   private playing(): boolean {
     return this.startedAt !== null && !this.game.isOver();
   }
@@ -887,6 +1060,19 @@ export class TurboRoom implements GameRoomState {
       winner: outcome.result === "draw" ? null : outcome.result,
       reason: outcome.reason,
       startedAt: this.startedWall,
+      bots: this.seats.flatMap((id, seat) => {
+        const bot = this.bots.get(id);
+        return bot
+          ? [
+              {
+                seat,
+                character: bot.character,
+                level: bot.level.id,
+                nickname: bot.nickname,
+              },
+            ]
+          : [];
+      }),
     };
   }
 

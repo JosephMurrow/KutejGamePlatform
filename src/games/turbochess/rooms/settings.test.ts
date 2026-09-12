@@ -2,8 +2,11 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { MODES, PLAYER_MODES } from "../modes/catalog";
 import {
+  botRoom,
   defaultRoomSettings,
   normalizeRoomSettings,
+  pickBots,
+  pickLevel,
   readOptions,
 } from "./settings";
 
@@ -101,5 +104,50 @@ describe("каталог режимов", () => {
     for (const mode of MODES) {
       assert.equal(mode.seats, mode.id === "BATTLE_ROYALE" ? 4 : 2, mode.id);
     }
+  });
+});
+
+describe("соперник-программа в настройках", () => {
+  it("по умолчанию за столом ждут живых", () => {
+    const defaults = defaultRoomSettings();
+
+    assert.equal(defaults.bots, 0);
+    assert.equal(defaults.botLevel, "normal");
+  });
+
+  it("мест под программу на одно меньше, чем за столом: одно всегда человеку", () => {
+    assert.equal(botRoom("CLASSIC"), 1);
+    assert.equal(botRoom("BATTLE_ROYALE"), 3);
+  });
+
+  it("больше, чем есть мест, не просят: лишнее срезается", () => {
+    assert.equal(pickBots(3, "CLASSIC"), 1);
+    assert.equal(pickBots(3, "BATTLE_ROYALE"), 3);
+    assert.equal(pickBots(9, "BATTLE_ROYALE"), 3);
+  });
+
+  it("мусор из формы — это ноль программ, а не падение", () => {
+    assert.equal(pickBots("два", "CLASSIC"), 0);
+    assert.equal(pickBots(-1, "CLASSIC"), 0);
+    assert.equal(pickBots(null, "CLASSIC"), 0);
+    assert.equal(pickBots("1", "CLASSIC"), 1);
+  });
+
+  it("незнакомый уровень — «Нормальный»", () => {
+    assert.equal(pickLevel("expert"), "expert");
+    assert.equal(pickLevel("магнус"), "normal");
+    assert.equal(pickLevel(undefined), "normal");
+  });
+
+  it("форма отдаёт и соперника: сколько программ и какого уровня", () => {
+    const settings = normalizeRoomSettings({
+      mode: "BATTLE_ROYALE",
+      timeControl: "MIN_1",
+      bots: "2",
+      botLevel: "hard",
+    });
+
+    assert.equal(settings.bots, 2);
+    assert.equal(settings.botLevel, "hard");
   });
 });

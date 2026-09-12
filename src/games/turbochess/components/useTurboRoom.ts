@@ -62,6 +62,8 @@ export interface TurboRoomHandle {
   declineDraw: () => Promise<void>;
   /** Ещё партия в той же комнате: места меняются. */
   rematch: () => Promise<void>;
+  /** Позвать программу на свободное место. */
+  callBot: () => Promise<void>;
   /** «Ядерные»: сбросить бомбу вместо хода. */
   bomb: () => Promise<void>;
   /** «Вскрываемся»: поменять две свои фигуры местами во время расстановки. */
@@ -204,6 +206,10 @@ export function useTurboRoom(
     await act(GAME_EVENT.declineDraw);
   }, [act]);
 
+  const callBot = useCallback(async () => {
+    await act(GAME_EVENT.bot);
+  }, [act]);
+
   const rematch = useCallback(async () => {
     await act(GAME_EVENT.rematch);
   }, [act]);
@@ -256,6 +262,7 @@ export function useTurboRoom(
     offerDraw,
     declineDraw,
     rematch,
+    callBot,
     bomb,
     swap,
     ready,

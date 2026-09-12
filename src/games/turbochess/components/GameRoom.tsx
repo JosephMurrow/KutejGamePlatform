@@ -285,6 +285,7 @@ export function GameRoom({
                     side={side}
                     clockOffset={room.clockOffset}
                     you={userId}
+                    onCallBot={room.callBot}
                   />
                 ))}
                 <Moves
@@ -300,6 +301,7 @@ export function GameRoom({
                   side={orientation ? 0 : 1}
                   clockOffset={room.clockOffset}
                   you={userId}
+                  onCallBot={room.callBot}
                 />
                 <Moves moves={state.moves} vetoed={state.vetoed} />
                 <Seat
@@ -307,6 +309,7 @@ export function GameRoom({
                   side={orientation ? 1 : 0}
                   clockOffset={room.clockOffset}
                   you={userId}
+                  onCallBot={room.callBot}
                 />
               </>
             )}
@@ -861,11 +864,14 @@ function Seat({
   side,
   clockOffset,
   you,
+  onCallBot,
 }: {
   state: TurboStatePayload;
   side: Side;
   clockOffset: number;
   you: string;
+  /** Позвать программу на это место; нет — звать некому. */
+  onCallBot?: () => Promise<void>;
 }) {
   const player: TurboPlayerPayload | undefined = state.players.find(
     (candidate) => candidate.seat === side,
@@ -873,8 +879,19 @@ function Seat({
 
   if (!player) {
     return (
-      <div className="rounded-xl border border-dashed border-line px-4 py-3 text-sm text-muted">
-        {sideName(side, state.seats)}: ждём игрока
+      <div className="flex items-center justify-between gap-3 rounded-xl border border-dashed border-line px-4 py-3 text-sm text-muted">
+        <span>{sideName(side, state.seats)}: ждём игрока</span>
+        {/* Звать бота имеет смысл, только пока партия не началась: садится он
+            на свободное место, а посреди партии свободных мест не бывает. */}
+        {onCallBot && state.phase === "waiting" ? (
+          <button
+            type="button"
+            onClick={() => void onCallBot()}
+            className="rounded-lg border border-line px-2 py-1 text-xs font-semibold text-accent hover:bg-tint"
+          >
+            Позвать бота
+          </button>
+        ) : null}
       </div>
     );
   }

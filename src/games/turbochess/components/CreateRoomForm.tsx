@@ -24,7 +24,9 @@ import {
   TIME_CONTROL_LABEL,
   defaultRoomSettings,
   type TimeControl,
+  botRoom,
 } from "../rooms/settings";
+import { LEVEL_IDS, LEVELS, type LevelId } from "../bots/levels";
 
 /**
  * Форма своей партии.
@@ -60,11 +62,31 @@ const KNOBS: Partial<Record<TurboMode, ComponentType>> = {
   NUCLEAR: NuclearPicker,
 };
 
+/** Как уровень бота объясняется человеку: не числом, а тем, что он видит. */
+const LEVEL_HINT: Record<LevelId, string> = {
+  easy: LEVELS.easy.hint,
+  normal: LEVELS.normal.hint,
+  hard: LEVELS.hard.hint,
+  expert: LEVELS.expert.hint,
+};
+
+/** «Одна программа», «две программы», «три программы» — без числа цифрой. */
+function botsLabel(count: number): string {
+  const word = count === 1 ? "программа" : "программы";
+  const many = ["", "Одна", "Две", "Три"][count] ?? String(count);
+  return `${many} ${word}`;
+}
+
 export function CreateRoomForm() {
   const [state, formAction] = useActionState(createRoomAction, {});
   const [kind, setKind] = useState<RoomKind>("private");
   const defaults = defaultRoomSettings();
   const [mode, setMode] = useState<TurboMode>(defaults.mode);
+  // Сколько мест отдать программе. Ноль — ждём живых; в королевской битве мест
+  // четыре, и до трёх можно занять ботами, чтобы четвёртым сел человек.
+  const [bots, setBots] = useState(defaults.bots);
+  const room = botRoom(mode);
+  const seated = Math.min(bots, room);
 
   return (
     <form action={formAction} className="flex flex-col gap-6">
@@ -133,6 +155,64 @@ export function CreateRoomForm() {
             </label>
           ))}
         </div>
+      </fieldset>
+
+      <fieldset>
+        <legend className="mb-2 text-sm font-medium">Соперник</legend>
+        <div className="flex flex-col gap-2.5">
+          {Array.from({ length: room + 1 }, (_, count) => (
+            <label
+              key={count}
+              className="flex cursor-pointer items-start gap-2.5"
+            >
+              <input
+                type="radio"
+                name="bots"
+                value={count}
+                checked={seated === count}
+                onChange={() => setBots(count)}
+                className="mt-0.5 size-4 shrink-0 accent-accent"
+              />
+              <span className="text-sm">
+                {count === 0 ? "Живые" : botsLabel(count)}
+                <span className="block text-xs text-muted">
+                  {count === 0
+                    ? "ждём людей; программу можно позвать и потом, кнопкой у свободного места"
+                    : "характеры выпадают сами и за столом не повторяются"}
+                </span>
+              </span>
+            </label>
+          ))}
+        </div>
+
+        {/* Уровень один на всех ботов стола: различать их будут характеры. */}
+        {seated > 0 ? (
+          <fieldset className="mt-3 ml-6.5">
+            <legend className="sr-only">Насколько сильная программа</legend>
+            <div className="flex flex-col gap-2">
+              {LEVEL_IDS.map((id) => (
+                <label
+                  key={id}
+                  className="flex cursor-pointer items-start gap-2.5"
+                >
+                  <input
+                    type="radio"
+                    name="botLevel"
+                    value={id}
+                    defaultChecked={id === defaults.botLevel}
+                    className="mt-0.5 size-4 shrink-0 accent-accent"
+                  />
+                  <span className="text-sm">
+                    {LEVELS[id].title}
+                    <span className="block text-xs text-muted">
+                      {LEVEL_HINT[id]}
+                    </span>
+                  </span>
+                </label>
+              ))}
+            </div>
+          </fieldset>
+        ) : null}
       </fieldset>
 
       <RoomKindPicker value={kind} onChange={setKind} />

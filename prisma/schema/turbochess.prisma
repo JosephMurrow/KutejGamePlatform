@@ -66,6 +66,22 @@ enum TurboTimeControl {
   @@schema("turbochess")
 }
 
+/// Уровень соперника-программы. Четыре, и сила режется глубиной перебора и
+/// вероятностью зевка: узлы были ручкой Стокфиша, а перебор у нас свой
+/// (src/games/turbochess/docs/BOTS.md).
+enum TurboBotLevel {
+  /// Смотрит только на свой ход.
+  EASY
+  /// Видит ответ.
+  NORMAL
+  /// То же, но почти не ошибается.
+  HARD
+  /// Видит ответ на ответ, знает чужие секреты и водит альянсы в битве.
+  EXPERT
+
+  @@schema("turbochess")
+}
+
 /// Настройки партии в приватной комнате. Общего зала у игры нет.
 model TurboRoomSettings {
   /// Строкой без внешнего ключа — так на комнату ссылаются все игры
@@ -78,6 +94,13 @@ model TurboRoomSettings {
   /// миграция живой базы на каждую ручку стоила бы дороже, чем проверка формы
   /// в коде. Разбирает и сверяет их src/games/turbochess/rooms/settings.ts.
   options     Json             @default("{}")
+  /// Сколько ботов сажать за стол: ноль — ждём живых. Больше одного бывает в
+  /// королевской битве, где мест четыре; последнее место всегда остаётся
+  /// человеку (src/games/turbochess/docs/BOTS.md, А6 и А8).
+  bots        Int              @default(0)
+  /// Уровень всех ботов этой комнаты: человек выбирает его один раз, а
+  /// различать ботов будут характеры.
+  botLevel    TurboBotLevel    @default(NORMAL)
 
   @@map("room_settings")
   @@schema("turbochess")
@@ -107,6 +130,10 @@ model TurboMatch {
   winner      Int?
   /// Почему кончилась (src/games/turbochess/engine/outcome.ts).
   reason      String
+  /// Кто из сидевших был программой: место, характер, уровень и ник. Отдельным
+  /// полем, а не строкой в `match_seats`: там у места внешний ключ на живого
+  /// пользователя, а у бота учётной записи нет и быть не должно.
+  bots        Json             @default("[]")
   startedAt   DateTime
   endedAt     DateTime
   seats       TurboMatchSeat[]
