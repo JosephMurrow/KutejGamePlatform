@@ -13,6 +13,8 @@ import type { EndReason, Outcome } from "../engine/outcome";
 import type { PieceKind, Side } from "../engine/pieces";
 import type { Position } from "../engine/position";
 import { hideAgents } from "../modes/agents";
+import { TOAST_MS } from "../modes/booze";
+import { roller } from "../modes/random";
 import type { TurboMode } from "../modes/catalog";
 import { bombReady } from "../modes/nuclear";
 import { startPosition } from "../modes/rules";
@@ -132,6 +134,15 @@ export class TurboRoom implements GameRoomState {
   private arrangement: PieceKind[][] = [];
   /** Кто уже нажал «готов». */
   private setupReady: boolean[] = [];
+  /**
+   * «Алко»: висит окно после взятия. Часы хода на это время стоят — пить и
+   * думать одновременно нечестно (docs/MODES.md, режим 5).
+   */
+  private toast: { drinker: Side; pourer: Side; until: number } | null = null;
+  /** Сколько выпито каждым. */
+  private drinks: number[] = [];
+  /** «Анархия»: отменённые ходы — их показывают перечёркнутыми. */
+  private vetoed: { ply: number; san: string }[] = [];
 
   constructor(
     private readonly context: GameRoomContext,
@@ -206,7 +217,9 @@ export class TurboRoom implements GameRoomState {
     if (!this.playing()) return null;
 
     const waits: number[] = [];
-    if (this.setupUntil !== null) {
+    if (this.toast) {
+      waits.push(Math.max(0, this.toast.until - this.now()));
+    } else if (this.setupUntil !== null) {
       waits.push(Math.max(0, this.setupUntil - this.now()));
     } else {
       const left = this.clock.left();
@@ -226,6 +239,17 @@ export class TurboRoom implements GameRoomState {
     if (this.absence && this.now() - this.absence.since >= ABANDON_MS) {
       const gone = this.sideOf(this.absence.id);
       if (gone !== null) this.finish(this.game.abandon(gone));
+      return;
+    }
+
+    // Молчание за окном — «не подтвердил»: штраф обоим.
+    if (this.toast) {
+      if (this.now() >= this.toast.until) {
+        this.finish(this.game.punish(this.rolls(this.capacity, 1)));
+        this.closeToast();
+      } else {
+        this.context.changed();
+      }
       return;
     }
 
@@ -262,6 +286,12 @@ export class TurboRoom implements GameRoomState {
         return this.rematch(actorId);
       case GAME_EVENT.bomb:
         return this.dropBomb(actorId);
+      case GAME_EVENT.chance:
+        return this.useChance(actorId);
+      case GAME_EVENT.veto:
+        return this.veto(actorId);
+      case GAME_EVENT.toast:
+        return this.confirmToast(actorId);
       case GAME_EVENT.swap:
         return this.swap(actorId, payload);
       case GAME_EVENT.ready:
@@ -302,8 +332,9 @@ export class TurboRoom implements GameRoomState {
       deadline: showing === null ? null : Date.now() + showing,
       // Во время расстановки отсчёт идёт по её девяноста секундам, а не по
       // лимиту на ход: полоса времени должна показывать то, что идёт.
-      phaseDurationMs:
-        this.setupUntil === null
+      phaseDurationMs: this.toast
+        ? TOAST_MS
+        : this.setupUntil === null
           ? MOVE_LIMIT_MS[this.settings.timeControl]
           : SHOWDOWN_SETUP_MS,
       playerCount: this.seats.length,
@@ -352,6 +383,11 @@ export class TurboRoom implements GameRoomState {
         : hideAgents(this.game.position(), seat),
       covered: setup ? this.coveredZones(seat) : [],
       setupReady: setup ? [...this.setupReady] : [],
+      toast: this.toast
+        ? { drinker: this.toast.drinker, pourer: this.toast.pourer }
+        : null,
+      drinks: [...this.drinks],
+      vetoed: [...this.vetoed],
       moves: this.game.history(),
       lastMove: this.game.lastMove(),
       turn: phase === "playing" ? this.game.turn() : null,
@@ -418,6 +454,9 @@ export class TurboRoom implements GameRoomState {
     this.startedAt = this.now();
     this.startedWall = new Date();
     this.moveStartedAt = this.startedAt;
+    this.drinks = Array.from({ length: this.capacity }, () => 0);
+    this.vetoed = [];
+    this.toast = null;
 
     // «Вскрываемся» начинается не с хода, а с расстановки вслепую: часы хода
     // пойдут после вскрытия.
@@ -481,6 +520,7 @@ export class TurboRoom implements GameRoomState {
     if (this.setupUntil !== null) {
       return { accepted: false, reason: "Ещё расставляемся" };
     }
+    if (this.toast) return { accepted: false, reason: "Сначала выпейте" };
     if (side !== this.game.turn()) {
       return { accepted: false, reason: "Сейчас не твой ход" };
     }
@@ -498,7 +538,19 @@ export class TurboRoom implements GameRoomState {
     this.moveStartedAt = spentAt;
     // Предложение живёт до ответа или до следующего хода — что раньше.
     this.offer = null;
-    this.clock.restart();
+
+    // Алко-шахматы: после взятия висит окно, и часы хода на это время стоят.
+    if (this.settings.mode === "BOOZE" && result.move.captured) {
+      this.toast = {
+        drinker: (side + 1) % this.capacity,
+        pourer: side,
+        until: spentAt + TOAST_MS,
+      };
+      this.clock.stop();
+    } else {
+      this.clock.restart();
+    }
+
     this.finish(result.outcome ?? this.capIfTooLong());
     // Без этого дедлайн сдвинулся бы, а будильник звонил бы по старому времени.
     this.context.changed();
@@ -512,6 +564,97 @@ export class TurboRoom implements GameRoomState {
     if (!this.playing()) return { accepted: false, reason: "Партия не идёт" };
 
     this.finish(this.game.resign(side));
+    return { accepted: true };
+  }
+
+  /** Броски партии: одно зерно, разная соль — и партия воспроизводится. */
+  private rolls(count: number, salt: number): number[] {
+    const roll = roller(this.seed, this.game.ply() * 8 + salt);
+    return Array.from({ length: count }, () => roll());
+  }
+
+  /** Окно закрылось: часы хода пошли снова. */
+  private closeToast(): void {
+    this.toast = null;
+    this.moveStartedAt = this.now();
+    this.clock.restart();
+    this.context.changed();
+  }
+
+  /**
+   * «Алко»: срубивший подтверждает, что соперник выпил. Молчание разбирает
+   * будильник — там же и штраф.
+   */
+  private confirmToast(actorId: string): ActionOutcome {
+    const side = this.sideOf(actorId);
+    if (side === null) return { accepted: false, reason: "Ты не за доской" };
+    if (!this.toast) return { accepted: false, reason: "Наливать некому" };
+    if (this.toast.pourer !== side) {
+      return { accepted: false, reason: "Подтверждает тот, кто срубил" };
+    }
+
+    const drinker = this.toast.drinker;
+    this.drinks[drinker] = (this.drinks[drinker] ?? 0) + 1;
+    this.closeToast();
+
+    return { accepted: true };
+  }
+
+  /**
+   * «Последний шанс»: король прыгает в случайную клетку. Бросок делает
+   * комната по зерну партии — клиент не бросает никогда.
+   */
+  private useChance(actorId: string): ActionOutcome {
+    const side = this.sideOf(actorId);
+    if (side === null) return { accepted: false, reason: "Ты не за доской" };
+    if (!this.playing()) return { accepted: false, reason: "Партия не идёт" };
+    if (this.settings.mode !== "LAST_CHANCE") {
+      return { accepted: false, reason: "В этом режиме шансов нет" };
+    }
+    if (this.toast) return { accepted: false, reason: "Сначала выпейте" };
+
+    const spentAt = this.now();
+    const result = this.game.useChance(side, this.rolls(1, 3)[0] ?? 0);
+    if (!result.ok) {
+      return { accepted: false, reason: REJECTION_TEXT[result.reason] };
+    }
+
+    this.times.push(Math.round(spentAt - this.moveStartedAt));
+    this.moveStartedAt = spentAt;
+    this.offer = null;
+    this.clock.restart();
+    this.finish(result.outcome ?? this.capIfTooLong());
+    this.context.changed();
+
+    return { accepted: true };
+  }
+
+  /**
+   * «Анархия»: отменить последний ход соперника. Потраченное на него время
+   * возвращается — иначе кнопка была бы способом сжечь чужие часы.
+   */
+  private veto(actorId: string): ActionOutcome {
+    const side = this.sideOf(actorId);
+    if (side === null) return { accepted: false, reason: "Ты не за доской" };
+    if (!this.playing()) return { accepted: false, reason: "Партия не идёт" };
+    if (this.settings.mode !== "ANARCHY") {
+      return { accepted: false, reason: "В этом режиме «НЕТ» не говорят" };
+    }
+    if (this.toast) return { accepted: false, reason: "Сначала выпейте" };
+    if ((this.game.position().vetoes[side] ?? 0) <= 0) {
+      return { accepted: false, reason: "«НЕТ» кончились" };
+    }
+
+    const gone = this.game.veto(side);
+    if (!gone) return { accepted: false, reason: "Отменять нечего" };
+
+    this.times.pop();
+    this.vetoed.push({ ply: gone.ply, san: gone.san });
+    this.offer = null;
+    this.moveStartedAt = this.now();
+    this.clock.restart();
+    this.context.changed();
+
     return { accepted: true };
   }
 

@@ -54,6 +54,12 @@ export const GAME_EVENT = {
    * заряд проверяет комната (docs/MODES.md, режим 8).
    */
   bomb: "game:bomb",
+  /** «Последний шанс»: прыгнуть королём в случайную клетку вместо хода. */
+  chance: "game:chance",
+  /** «Анархия»: отменить последний ход соперника. */
+  veto: "game:veto",
+  /** «Алко»: подтвердить, что соперник выпил. */
+  toast: "game:toast",
 } as const;
 
 /** Где стол: ждёт игроков, партия идёт, кончилась — или это закрытая дверь зала. */
@@ -98,6 +104,12 @@ export interface TurboStatePayload extends RoomStatePayload<TurboPlayerPayload> 
   covered: string[];
   /** Кто уже нажал «готов». Вне расстановки — пусто. */
   setupReady: boolean[];
+  /** «Алко»: висит окно — кто пьёт и кто подтверждает. */
+  toast: { drinker: Side; pourer: Side } | null;
+  /** «Алко»: сколько выпито каждым. */
+  drinks: number[];
+  /** «Анархия»: отменённые ходы — их показывают перечёркнутыми. */
+  vetoed: { ply: number; san: string }[];
   /** Есть ли прямо сейчас основание требовать ничью. */
   claimable: "threefold" | "fiftyMoves" | null;
   /** Кто предложил ничью и ждёт ответа. Видят только сидящие за столом. */

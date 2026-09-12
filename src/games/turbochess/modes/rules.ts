@@ -1,9 +1,12 @@
 import { classicPosition, type Position } from "../engine/position";
 import type { ModeOptions } from "../rooms/settings";
 import { agentPosition, agentRules } from "./agents";
+import { anarchyPosition, anarchyRules } from "./anarchy";
 import { annihilationPosition, annihilationRules } from "./annihilation";
 import { modeInfo, type TurboMode } from "./catalog";
+import { boozePosition, boozeRules } from "./booze";
 import { giveawayPosition, giveawayRules } from "./giveaway";
+import { lastChancePosition, lastChanceRules } from "./lastChance";
 import { megaPosition, megaRules } from "./mega";
 import { noRetreatPosition, noRetreatRules } from "./noRetreat";
 import { nuclearOptions, nuclearRules, nuclearThreshold } from "./nuclear";
@@ -45,6 +48,9 @@ const READY: ReadonlySet<TurboMode> = new Set([
   "NO_RETREAT",
   "MEGA",
   "DOUBLE_AGENT",
+  "LAST_CHANCE",
+  "ANARCHY",
+  "BOOZE",
 ]);
 
 export function isReady(mode: TurboMode): boolean {
@@ -87,6 +93,12 @@ export function startPosition(
       return megaPosition();
     case "DOUBLE_AGENT":
       return agentPosition(seed);
+    case "LAST_CHANCE":
+      return lastChancePosition();
+    case "ANARCHY":
+      return anarchyPosition();
+    case "BOOZE":
+      return boozePosition();
     default:
       return classicPosition();
   }
@@ -152,6 +164,12 @@ export function rulesOf(mode: TurboMode, options: ModeOptions): ModeRules {
       return { variant: null, lines: megaRules(), ready: true };
     case "DOUBLE_AGENT":
       return { variant: null, lines: agentRules(), ready: true };
+    case "LAST_CHANCE":
+      return { variant: null, lines: lastChanceRules(), ready: true };
+    case "ANARCHY":
+      return { variant: null, lines: anarchyRules(), ready: true };
+    case "BOOZE":
+      return { variant: null, lines: boozeRules(), ready: true };
     default:
       return {
         variant: null,

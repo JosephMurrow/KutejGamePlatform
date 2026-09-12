@@ -67,6 +67,12 @@ export interface TurboRoomHandle {
   swap: (from: string, to: string) => Promise<void>;
   /** «Вскрываемся»: расстановка готова. */
   ready: () => Promise<void>;
+  /** «Последний шанс»: прыгнуть королём в случайную клетку. */
+  chance: () => Promise<void>;
+  /** «Анархия»: отменить последний ход соперника. */
+  veto: () => Promise<void>;
+  /** «Алко»: подтвердить, что соперник выпил. */
+  toast: () => Promise<void>;
 }
 
 function connectionQuery(
@@ -214,6 +220,18 @@ export function useTurboRoom(
     await act(GAME_EVENT.ready);
   }, [act]);
 
+  const chance = useCallback(async () => {
+    await act(GAME_EVENT.chance);
+  }, [act]);
+
+  const veto = useCallback(async () => {
+    await act(GAME_EVENT.veto);
+  }, [act]);
+
+  const toast = useCallback(async () => {
+    await act(GAME_EVENT.toast);
+  }, [act]);
+
   return {
     state,
     connected,
@@ -231,5 +249,8 @@ export function useTurboRoom(
     bomb,
     swap,
     ready,
+    chance,
+    veto,
+    toast,
   };
 }

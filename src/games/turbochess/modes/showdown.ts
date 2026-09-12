@@ -129,6 +129,9 @@ export function showdownPosition(
     taken: [[], []],
     reserve: [[], []],
     pending: [],
+    chances: [],
+    vetoes: [],
+    banned: null,
   };
 }
 

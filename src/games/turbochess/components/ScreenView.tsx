@@ -51,6 +51,9 @@ export function ScreenView({
     if (state.mode === "ANNIHILATION") {
       return `снял фигур: ${takenCount(state.position, seat)}`;
     }
+    if (state.mode === "BOOZE") {
+      return `выпито: ${state.drinks[seat] ?? 0}`;
+    }
     if (state.mode === "NUCLEAR") {
       const options = state.options ?? {};
       return `заряд ${nuclearCharge(state.position, seat)} из ${nuclearThreshold(options)}`;

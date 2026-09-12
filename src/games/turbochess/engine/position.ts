@@ -54,6 +54,16 @@ export interface PositionRules {
    * (docs/MODES.md, режим 14).
    */
   readonly zombies: boolean;
+  /**
+   * Мат не кончает партию, пока у заматованного есть неистраченный шанс:
+   * он жмёт кнопку и телепортирует короля (docs/MODES.md, режим 7).
+   */
+  readonly lastChance: boolean;
+  /**
+   * Мат не кончает партию, пока есть чем сказать «НЕТ»: отменил ход —
+   * играешь дальше (docs/MODES.md, режим 15).
+   */
+  readonly anarchy: boolean;
 }
 
 /** Правила обычных шахмат: мат, взятие по желанию, мёртвые не встают. */
@@ -64,6 +74,8 @@ export const CLASSIC_RULES: PositionRules = {
   stalemate: "draw",
   mega: false,
   zombies: false,
+  lastChance: false,
+  anarchy: false,
 };
 
 /** Сколько своих ходов хозяину ждать, прежде чем зомби встанет в резерв. */
@@ -147,6 +159,25 @@ export interface Position {
   readonly reserve: readonly (readonly PieceKind[])[];
   /** Зомби, которым до резерва ещё несколько ходов их нового хозяина. */
   readonly pending: readonly Zombie[];
+  /**
+   * Сколько последних шансов осталось каждой стороне. Пусто — их нет вовсе
+   * (docs/MODES.md, режим 7).
+   */
+  readonly chances: readonly number[];
+  /** Сколько «НЕТ» осталось каждой стороне; пусто — их нет вовсе. */
+  readonly vetoes: readonly number[];
+  /**
+   * Ход, который только что отменили: повторить его нельзя, соперник обязан
+   * сходить иначе (docs/MODES.md, режим 15).
+   */
+  readonly banned: BannedMove | null;
+}
+
+/** Отменённый ход: те же клетки и та же фигура превращения. */
+export interface BannedMove {
+  readonly from: number;
+  readonly to: number;
+  readonly promotion: PieceKind | null;
 }
 
 /** Белые ходят вверх, чёрные вниз. */
@@ -194,6 +225,9 @@ export function classicPosition(): Position {
     taken: [[], []],
     reserve: [[], []],
     pending: [],
+    chances: [],
+    vetoes: [],
+    banned: null,
   };
 }
 

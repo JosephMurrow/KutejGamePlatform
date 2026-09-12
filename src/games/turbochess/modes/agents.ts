@@ -1,5 +1,6 @@
 import { marked, piece, type Piece, type Side } from "../engine/pieces";
 import { classicPosition, type Position } from "../engine/position";
+import { roller } from "./random";
 
 /**
  * Режим 10, «Двойной агент» (docs/MODES.md): у каждого одна фигура тайно
@@ -11,25 +12,13 @@ import { classicPosition, type Position } from "../engine/position";
  * агент хозяину не виден.
  */
 
-/** Тот же ГПСЧ, что в сверке движка: одно зерно — одна и та же партия. */
-function mulberry32(seed: number): () => number {
-  let state = seed >>> 0;
-
-  return () => {
-    state = (state + 0x6d2b79f5) >>> 0;
-    let value = Math.imul(state ^ (state >>> 15), 1 | state);
-    value = (value + Math.imul(value ^ (value >>> 7), 61 | value)) ^ value;
-    return ((value ^ (value >>> 14)) >>> 0) / 4294967296;
-  };
-}
-
 /**
  * Начальная позиция: у каждой стороны одна случайная фигура, кроме короля,
  * становится двойным агентом.
  */
 export function agentPosition(seed: number): Position {
   const start = classicPosition();
-  const roll = mulberry32(seed);
+  const roll = roller(seed);
   const board = [...start.board];
 
   start.sides.forEach((_, side) => {

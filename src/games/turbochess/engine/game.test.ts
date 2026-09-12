@@ -437,7 +437,7 @@ describe("ход назад", () => {
       ["e7", "e5"],
     ]);
 
-    assert.equal(party.undo(), true);
+    assert.equal(party.undo()?.san, "e5", "вернулся отменённый ход");
     assert.equal(party.ply(), 1);
     assert.equal(party.turn(), 1);
     assert.equal(party.pieceAt("e5"), null);
@@ -474,14 +474,29 @@ describe("ход назад", () => {
   });
 
   it("до первого хода отматывать нечего", () => {
-    assert.equal(game().undo(), false);
+    assert.equal(game().undo(), null);
+  });
+
+  it("с запретом отменённый ход повторить нельзя", () => {
+    const party = game();
+    play(party, [["e2", "e4"]]);
+
+    assert.equal(party.undo(true)?.san, "e4");
+    assert.ok(
+      !party.legal().some((move) => move.from === "e2" && move.to === "e4"),
+      "тот же ход больше не предлагают",
+    );
+    assert.ok(
+      party.legal().some((move) => move.from === "e2" && move.to === "e3"),
+      "а другой — пожалуйста",
+    );
   });
 
   it("кончившуюся партию не воскрешает", () => {
     const party = game("7k/5Q2/6K1/8/8/8/8/8 w - - 0 1");
     party.move({ from: "f7", to: "g7" }, 0);
 
-    assert.equal(party.undo(), false);
+    assert.equal(party.undo(), null);
     assert.equal(party.outcome()?.reason, "checkmate");
   });
 });

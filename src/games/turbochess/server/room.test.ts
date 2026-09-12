@@ -6,6 +6,8 @@ import { legalMoves, play, type Move } from "../engine/moves";
 import type { Position } from "../engine/position";
 import { TurboGame } from "../engine/game";
 import { PIECE_VALUE, nuclearCharge } from "../modes/nuclear";
+import { TOAST_MS } from "../modes/booze";
+import type { TurboMode } from "../modes/catalog";
 import { SHOWDOWN_SETUP_MS } from "../modes/showdown";
 import type {
   ModeOptions,
@@ -619,6 +621,148 @@ describe("вскрываемся", () => {
     assert.equal(
       drafts.at(-1)?.options.setup,
       "nrbqkbnrpppppppp/rnbqkbnrpppppppp",
+    );
+  });
+});
+
+describe("кнопки режимов", () => {
+  function table(mode: TurboMode) {
+    let at = 1000;
+    const settings: TurboRoomSettings = {
+      mode,
+      timeControl: "SEC_30",
+      options: {},
+    };
+    const drafts: MatchDraft[] = [];
+    const context: GameRoomContext = {
+      key: `turbo-${mode}`,
+      ownerId: "white",
+      isPrivate: true,
+      settings,
+      connections: () => 2,
+      introduce: () => {},
+      forget: () => {},
+      emitted: () => {},
+      changed: () => {},
+    };
+    const room = new TurboRoom(
+      context,
+      settings,
+      () => at,
+      (draft) => drafts.push(draft),
+    );
+    room.join("white");
+    room.join("black");
+
+    return {
+      room,
+      drafts,
+      pass: (ms: number) => {
+        at += ms;
+      },
+    };
+  }
+
+  const pieces = (room: TurboRoom) =>
+    (view(room).position as Position).board.filter(Boolean).length;
+
+  it("алко: после взятия висит окно, а подтверждение считает выпитое", () => {
+    const { room } = table("BOOZE");
+    move(room, "white", "e2", "e4");
+    move(room, "black", "d7", "d5");
+    move(room, "white", "e4", "d5");
+
+    assert.deepEqual(view(room).toast, { drinker: 1, pourer: 0 });
+    assert.equal(
+      move(room, "black", "d8", "d5").reason,
+      "Сначала выпейте",
+      "ходить, пока не выпили, нельзя",
+    );
+    assert.equal(
+      room.act(GAME_EVENT.toast, "black", {}).reason,
+      "Подтверждает тот, кто срубил",
+    );
+
+    assert.equal(room.act(GAME_EVENT.toast, "white", {}).accepted, true);
+    assert.equal(view(room).toast, null);
+    assert.deepEqual(view(room).drinks, [0, 1]);
+    assert.deepEqual(move(room, "black", "d8", "d5"), { accepted: true });
+  });
+
+  it("алко: молчание — штраф обоим", () => {
+    const { room, pass } = table("BOOZE");
+    move(room, "white", "e2", "e4");
+    move(room, "black", "d7", "d5");
+    move(room, "white", "e4", "d5");
+    const before = pieces(room);
+
+    pass(TOAST_MS);
+    room.tick();
+
+    assert.equal(view(room).toast, null);
+    assert.equal(pieces(room), before - 2, "сняли по фигуре у обоих");
+    assert.deepEqual(view(room).drinks, [0, 0], "выпитым это не считается");
+  });
+
+  it("последний шанс: под шахом король прыгает, и шанс тратится", () => {
+    const { room } = table("LAST_CHANCE");
+    move(room, "white", "e2", "e4");
+    move(room, "black", "d7", "d5");
+    move(room, "white", "f1", "b5");
+
+    assert.equal(
+      room.act(GAME_EVENT.chance, "white", {}).reason,
+      "Сейчас не твой ход",
+    );
+    assert.equal(room.act(GAME_EVENT.chance, "black", {}).accepted, true);
+
+    assert.equal(view(room).turn, 0, "ход перешёл белым");
+    assert.equal((view(room).position as Position).chances[1], 0);
+    assert.match((view(room).moves as string[]).at(-1) ?? "", /^K\*/);
+  });
+
+  it("анархия: «НЕТ» отменяет ход и возвращает время", () => {
+    const { room, drafts, pass } = table("ANARCHY");
+    pass(1000);
+    move(room, "white", "e2", "e4");
+    pass(2000);
+    move(room, "black", "e7", "e5");
+
+    assert.equal(room.act(GAME_EVENT.veto, "white", {}).accepted, true);
+    assert.deepEqual(view(room).moves, ["e4"], "ход снят с записи");
+    assert.deepEqual(view(room).vetoed, [{ ply: 2, san: "e5" }]);
+    assert.equal(view(room).turn, 1, "ходить снова чёрным");
+    assert.equal(
+      move(room, "black", "e7", "e5").reason,
+      "Так не ходят",
+      "повторить отменённое нельзя",
+    );
+
+    pass(3000);
+    assert.deepEqual(move(room, "black", "e7", "e6"), { accepted: true });
+    room.act(GAME_EVENT.resign, "white", {});
+    assert.deepEqual(
+      drafts.at(-1)?.times,
+      [1000, 3000],
+      "за отменённый ход время вернулось",
+    );
+  });
+
+  it("чужие кнопки в чужом режиме не работают", () => {
+    const { room } = table("ANARCHY");
+
+    assert.equal(
+      room.act(GAME_EVENT.chance, "white", {}).reason,
+      "В этом режиме шансов нет",
+    );
+    assert.equal(
+      room.act(GAME_EVENT.toast, "white", {}).reason,
+      "Наливать некому",
+    );
+    assert.equal(
+      room.act(GAME_EVENT.veto, "white", {}).reason,
+      "Отменять нечего",
+      "первого хода ещё не было",
     );
   });
 });

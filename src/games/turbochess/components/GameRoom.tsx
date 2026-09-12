@@ -13,6 +13,8 @@ import type { Side } from "../engine/pieces";
 import type { Position } from "../engine/position";
 import { STALL_WARN, stallLeft, takenCount } from "../modes/annihilation";
 import { modeInfo } from "../modes/catalog";
+import { chanceReady } from "../modes/lastChance";
+import { VETOES } from "../modes/anarchy";
 import { nuclearCharge, nuclearThreshold } from "../modes/nuclear";
 import { rulesOf } from "../modes/rules";
 import type { ModeOptions } from "../rooms/settings";
@@ -151,7 +153,13 @@ export function GameRoom({
 
           <aside className="flex w-full flex-col gap-3 lg:w-72">
             <ModeCard state={state} />
-            <ModeStatus state={state} mySide={mySide} onBomb={room.bomb} />
+            <ModeStatus
+              state={state}
+              mySide={mySide}
+              onBomb={room.bomb}
+              onChance={room.chance}
+              onVeto={room.veto}
+            />
             {state.phase === "setup" ? (
               <Setup
                 state={state}
@@ -167,7 +175,7 @@ export function GameRoom({
               clockOffset={room.clockOffset}
               you={userId}
             />
-            <Moves moves={state.moves} />
+            <Moves moves={state.moves} vetoed={state.vetoed} />
             <Seat
               state={state}
               side={orientation ? 1 : 0}
@@ -227,6 +235,15 @@ export function GameRoom({
         </main>
       )}
 
+      {state?.toast ? (
+        <Toast
+          state={state}
+          mySide={mySide}
+          clockOffset={room.clockOffset}
+          onConfirm={room.toast}
+        />
+      ) : null}
+
       <InviteModal
         open={inviteOpen}
         onClose={() => setInviteOpen(false)}
@@ -283,6 +300,63 @@ function ModeCard({ state }: { state: TurboStatePayload }) {
           ))}
         </div>
       ) : null}
+    </div>
+  );
+}
+
+/**
+ * Окно алко-шахмат: одному пить, другому подтверждать. Часы на это время
+ * стоят, а молчание считается отказом — и штраф прилетает обоим.
+ */
+function Toast({
+  state,
+  mySide,
+  clockOffset,
+  onConfirm,
+}: {
+  state: TurboStatePayload;
+  mySide: Side | null;
+  clockOffset: number;
+  onConfirm: () => void;
+}) {
+  const toast = state.toast;
+  if (!toast) return null;
+
+  const drinking = mySide === toast.drinker;
+  const pouring = mySide === toast.pourer;
+
+  return (
+    <div className="fixed inset-0 z-40 flex items-center justify-center bg-ink/60 px-4">
+      <div className="flex w-full max-w-sm flex-col gap-3 rounded-2xl border border-accent bg-paper px-5 py-5 text-center">
+        <span className="text-lg font-semibold">
+          {drinking
+            ? "Тебе необходимо выпить стопку"
+            : pouring
+              ? "Подтвердите, что игрок выпил"
+              : "Игрок пьёт стопку"}
+        </span>
+
+        <Countdown
+          deadline={state.deadline}
+          durationMs={state.phaseDurationMs}
+          clockOffset={clockOffset}
+        />
+
+        {pouring ? (
+          <button
+            type="button"
+            onClick={onConfirm}
+            className="rounded-lg bg-accent px-3 py-2 text-sm font-semibold text-surface transition hover:bg-deep"
+          >
+            Выпил, подтверждаю
+          </button>
+        ) : null}
+
+        <p className="text-xs text-muted">
+          Не подтвердил за полминуты — штраф обоим: с доски снимется по
+          случайной фигуре.
+        </p>
+      </div>
     </div>
   );
 }
@@ -355,12 +429,65 @@ function ModeStatus({
   state,
   mySide,
   onBomb,
+  onChance,
+  onVeto,
 }: {
   state: TurboStatePayload;
   mySide: Side | null;
   onBomb: () => void;
+  onChance: () => void;
+  onVeto: () => void;
 }) {
   if (!state.position || state.phase !== "playing") return null;
+
+  // «Последний шанс»: кнопка появляется под шахом, в том числе под матом.
+  if (state.mode === "LAST_CHANCE" && mySide !== null) {
+    if (!chanceReady(state.position, mySide)) return null;
+
+    return (
+      <button
+        type="button"
+        onClick={onChance}
+        className="rounded-xl bg-[#c8281e] px-3 py-3 text-sm font-extrabold uppercase tracking-wide text-surface transition hover:bg-[#a71f16]"
+      >
+        Попробывать не умереть
+      </button>
+    );
+  }
+
+  // «Анархия»: отменить можно только новый чужой ход.
+  if (state.mode === "ANARCHY" && mySide !== null) {
+    const left = state.position.vetoes[mySide] ?? 0;
+    const can =
+      state.turn === mySide &&
+      left > 0 &&
+      state.moves.length > 0 &&
+      state.position.banned === null;
+
+    return (
+      <div className="flex flex-col gap-2">
+        <button
+          type="button"
+          onClick={onVeto}
+          disabled={!can}
+          className="rounded-xl bg-[#c8281e] px-3 py-3 text-lg font-extrabold text-surface transition hover:bg-[#a71f16] disabled:opacity-40"
+        >
+          НЕТ
+        </button>
+        <div className="flex items-center gap-1.5">
+          {Array.from({ length: VETOES }, (_, at) => (
+            <span
+              key={at}
+              className={`size-2.5 rounded-full ${at < left ? "bg-accent" : "bg-line"}`}
+            />
+          ))}
+          <span className="ml-1 text-xs text-muted">
+            осталось «НЕТ»: {left}
+          </span>
+        </div>
+      </div>
+    );
+  }
 
   if (state.mode === "ANNIHILATION") {
     const left = stallLeft(state.position);
@@ -518,6 +645,14 @@ function Seat({
             {state.mode === "ANNIHILATION" && state.position
               ? ` · снял фигур: ${takenCount(state.position, side)}`
               : ""}
+            {state.mode === "BOOZE"
+              ? ` · выпито: ${state.drinks[side] ?? 0}`
+              : ""}
+            {state.mode === "LAST_CHANCE" && state.position
+              ? (state.position.chances[side] ?? 0) > 0
+                ? " · шанс есть"
+                : " · шанс истрачен"
+              : ""}
           </div>
         </div>
       </div>
@@ -533,8 +668,18 @@ function Seat({
   );
 }
 
-/** Ходы парами: белые слева, чёрные справа. */
-function Moves({ moves }: { moves: string[] }) {
+/** Ходы парами: белые слева, чёрные справа. Отменённые — перечёркнуты. */
+function Moves({
+  moves,
+  vetoed,
+}: {
+  moves: string[];
+  vetoed: { ply: number; san: string }[];
+}) {
+  /** Что отменили перед этим полуходом. */
+  const cancelled = (ply: number) =>
+    vetoed.filter((one) => one.ply === ply).map((one) => one.san);
+
   return (
     <div className="rounded-xl border border-line bg-paper px-4 py-3">
       {moves.length === 0 ? (
@@ -544,8 +689,22 @@ function Moves({ moves }: { moves: string[] }) {
           {Array.from({ length: Math.ceil(moves.length / 2) }, (_, index) => (
             <li key={index} className="contents">
               <span className="tabular text-muted">{index + 1}.</span>
-              <span className="tabular">{moves[index * 2]}</span>
-              <span className="tabular">{moves[index * 2 + 1] ?? ""}</span>
+              <span className="tabular">
+                {cancelled(index * 2 + 1).map((san) => (
+                  <s key={san} className="mr-1 text-muted">
+                    {san}
+                  </s>
+                ))}
+                {moves[index * 2]}
+              </span>
+              <span className="tabular">
+                {cancelled(index * 2 + 2).map((san) => (
+                  <s key={san} className="mr-1 text-muted">
+                    {san}
+                  </s>
+                ))}
+                {moves[index * 2 + 1] ?? ""}
+              </span>
             </li>
           ))}
         </ol>

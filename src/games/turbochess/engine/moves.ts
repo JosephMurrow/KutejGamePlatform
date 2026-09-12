@@ -567,8 +567,18 @@ function boardAfter(position: Position, move: Move): (Piece | null)[] {
  * (docs/MODES.md, режим 11).
  */
 export function legalMoves(position: Position): Move[] {
+  const banned = position.banned;
   const moves = pseudoMoves(position).filter(
-    (move) => !inCheck(position, position.turn, boardAfter(position, move)),
+    (move) =>
+      !inCheck(position, position.turn, boardAfter(position, move)) &&
+      // Отменённый «НЕТ» ход повторять нельзя: соперник обязан сходить иначе
+      // (docs/MODES.md, режим 15).
+      !(
+        banned !== null &&
+        banned.from === move.from &&
+        banned.to === move.to &&
+        banned.promotion === move.promotion
+      ),
   );
   if (!position.rules.mustCapture) return moves;
 
@@ -642,6 +652,8 @@ export function play(position: Position, move: Move): Position {
         : null,
     quiet: move.piece.kind === "p" || move.captured ? 0 : position.quiet + 1,
     sinceCapture: move.captured ? 0 : position.sinceCapture + 1,
+    // Запрет живёт ровно один ход: сходили иначе — и он снят.
+    banned: null,
     taken: move.captured
       ? position.taken.map((list, side) =>
           side === mover && move.captured ? [...list, move.captured] : list,

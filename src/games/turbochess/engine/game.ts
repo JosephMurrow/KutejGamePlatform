@@ -4,6 +4,7 @@ import {
   STALL_PLIES,
   classicPosition,
   kingIsRoyal,
+  nextSide,
   type Position,
 } from "./position";
 import {
@@ -233,20 +234,161 @@ export class TurboGame {
   }
 
   /**
-   * Взять последний ход назад.
-   *
-   * Правилами обычных шахмат такого нет, но у турбо-шахмат есть режим, где это
-   * и есть правило, — «Анархия», большая красная кнопка «НЕТ»
+   * Взять последний ход назад и вернуть его — это «НЕТ» анархии
    * (docs/MODES.md, режим 15). Кончившуюся партию не воскрешает.
+   *
+   * С `ban` отменённый ход запоминается в позиции запретом: повторить его
+   * нельзя, соперник обязан сходить иначе — это правило анархии, а не самого
+   * отката. Запрет в ключ повторений не входит: он живёт один ход.
    */
-  undo(): boolean {
-    if (this.ended || this.steps.length <= 1) return false;
+  undo(ban = false): MoveRecord | null {
+    if (this.ended || this.steps.length <= 1) return null;
 
     const gone = this.steps.pop();
-    if (gone) this.count(gone.key, -1);
-    this.top = this.steps[this.steps.length - 1] ?? this.top;
+    if (!gone) return null;
+    this.count(gone.key, -1);
 
-    return true;
+    const back = this.steps[this.steps.length - 1];
+    if (!back) return null;
+    this.top = back;
+
+    if (ban && gone.record) {
+      const { geometry } = back.position;
+      const from = parseSquare(geometry, gone.record.from);
+      const to = parseSquare(geometry, gone.record.to);
+      if (from !== null && to !== null) {
+        back.position = {
+          ...back.position,
+          banned: { from, to, promotion: gone.record.promotion ?? null },
+        };
+      }
+    }
+
+    return gone.record;
+  }
+
+  /**
+   * «Последний шанс»: король прыгает в случайную свободную клетку, и ход
+   * переходит сопернику (docs/MODES.md, режим 7). Шанс один на партию, и
+   * жать кнопку можно только под шахом — в том числе под матом.
+   *
+   * Куда прыгать, решает бросок: его делает комната по зерну партии, чтобы
+   * партия воспроизводилась. Клетка берётся любая свободная, даже битая —
+   * кнопка называется «попробовать», а не «спастись».
+   */
+  useChance(side: Side, roll: number): MoveResult {
+    if (this.ended) return { ok: false, reason: "gameOver" };
+
+    const position = this.top.position;
+    if (position.turn !== side) return { ok: false, reason: "notYourTurn" };
+    if ((position.chances[side] ?? 0) <= 0) {
+      return { ok: false, reason: "illegal" };
+    }
+    if (!inCheck(position, side)) return { ok: false, reason: "illegal" };
+
+    const { geometry } = position;
+    const at = position.board.findIndex(
+      (cell) => cell?.kind === "k" && cell.side === side,
+    );
+    const king = at < 0 ? null : position.board[at];
+    const free = position.board.flatMap((cell, square) =>
+      cell ? [] : [square],
+    );
+    const to = free[Math.floor(roll * free.length)];
+    if (!king || to === undefined) return { ok: false, reason: "illegal" };
+
+    const board = position.board.slice();
+    board[at] = null;
+    board[to] = king;
+
+    const after: Position = {
+      ...position,
+      board,
+      turn: nextSide(position, side),
+      // Король сходил — права рокировки его стороны сгорают, как от хода.
+      castling: position.castling.filter((right) => right.side !== side),
+      enPassant: null,
+      quiet: position.quiet + 1,
+      sinceCapture: position.sinceCapture + 1,
+      chances: position.chances.map((left, seat) =>
+        seat === side ? left - 1 : left,
+      ),
+      banned: null,
+    };
+
+    const record: MoveRecord = {
+      from: squareName(geometry, at),
+      to: squareName(geometry, to),
+      // Звёздочка — прыжок: обычной записи у него нет.
+      san: `K*${squareName(geometry, to)}`,
+      ply: this.ply() + 1,
+      check: inCheck(after, after.turn),
+    };
+
+    this.top = { position: after, key: repetitionKey(after), record };
+    this.steps.push(this.top);
+    this.count(this.top.key, 1);
+
+    return { ok: true, move: record, outcome: this.detect() };
+  }
+
+  /**
+   * Штраф алко-шахмат: у каждой стороны снимается с доски случайная фигура,
+   * кроме короля (docs/MODES.md, режим 5). Ходом это не считается — очередь и
+   * счёт ходов не меняются, поэтому позиция правится на месте.
+   */
+  punish(rolls: readonly number[]): Outcome | null {
+    if (this.ended) return null;
+
+    const position = this.top.position;
+    const board = position.board.slice();
+    let hit = false;
+
+    position.sides.forEach((_, side) => {
+      const mine = position.board.flatMap((cell, square) =>
+        cell && cell.side === side && cell.kind !== "k" ? [square] : [],
+      );
+      const at = mine[Math.floor((rolls[side] ?? 0) * mine.length)];
+      if (at === undefined) return;
+
+      board[at] = null;
+      hit = true;
+    });
+    if (!hit) return null;
+
+    const after: Position = { ...position, board };
+    this.count(this.top.key, -1);
+    this.top.position = after;
+    this.top.key = repetitionKey(after);
+    this.count(this.top.key, 1);
+
+    return this.detect();
+  }
+
+  /**
+   * «НЕТ»: отменить последний ход соперника (docs/MODES.md, режим 15).
+   * Счётчик «НЕТ» лежит в позиции, и отмена его тратит.
+   *
+   * Отменить можно только новый чужой ход: два «НЕТ» подряд на один ход не
+   * бывает, и своего хода отменить нельзя.
+   */
+  veto(side: Side): MoveRecord | null {
+    const position = this.top.position;
+    if ((position.vetoes[side] ?? 0) <= 0) return null;
+    if (position.turn !== side) return null;
+    if (position.banned) return null;
+
+    const gone = this.undo(true);
+    if (!gone) return null;
+
+    this.top.position = {
+      ...this.top.position,
+      vetoes: this.top.position.vetoes.map((left, seat) =>
+        seat === side ? left - 1 : left,
+      ),
+    };
+
+    return gone;
   }
 
   /** Сдался. */
@@ -361,10 +503,34 @@ export class TurboGame {
       }
     }
 
+    // Короля съели: так бывает после телепорта последнего шанса, когда он
+    // приземлился под бой.
+    const kingless = position.sides.findIndex(
+      (_, side) =>
+        !position.board.some(
+          (cell) => cell?.kind === "k" && cell.side === side,
+        ),
+    );
+    if (kingless >= 0) return this.finish(opponent(kingless), "kingTaken");
+
     if (legalMoves(position).length === 0) {
       // Ходить нечем тому, чья очередь: под шахом — мат, без шаха — пат. В
       // пацанских шахматах пата нет: некуда ходить — проиграл.
       if (inCheck(position, position.turn)) {
+        // Мат не кончает партию, пока у заматованного есть чем ответить:
+        // неистраченный шанс или невыжатое «НЕТ».
+        if (
+          position.rules.lastChance &&
+          (position.chances[position.turn] ?? 0) > 0
+        ) {
+          return null;
+        }
+        if (
+          position.rules.anarchy &&
+          (position.vetoes[position.turn] ?? 0) > 0
+        ) {
+          return null;
+        }
         return this.finish(opponent(position.turn), "checkmate");
       }
       return position.rules.stalemate === "loss"
