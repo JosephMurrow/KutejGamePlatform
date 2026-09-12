@@ -96,59 +96,109 @@ describe("настроение", () => {
   });
 });
 
-describe("колода Пьянчуги", () => {
-  const deck = linesOf("drunk");
+describe("написанные колоды", () => {
+  /** Кто уже заговорил: проверяем каждого, кого написали. */
+  const written = Object.entries(LINES).flatMap(([character, deck]) =>
+    deck && Object.keys(deck).length > 0 ? [[character, deck] as const] : [],
+  );
 
-  it("на каждый базовый момент полсотни реплик", () => {
-    for (const moment of BASE_MOMENTS) {
-      const lines = deck[moment] ?? [];
+  it("написан хотя бы один характер, и все они из общего списка", () => {
+    assert.ok(written.length >= 2, `написано колод: ${written.length}`);
+    for (const [character] of written) {
       assert.ok(
-        lines.length >= deckSize(moment),
-        `${moment}: ${lines.length} вместо ${deckSize(moment)}`,
+        (CHARACTERS as readonly string[]).includes(character),
+        `лишний характер: ${character}`,
       );
     }
   });
 
-  it("на режимные моменты — по дюжине", () => {
-    for (const moments of Object.values(MODE_MOMENTS)) {
-      for (const moment of moments ?? []) {
+  it("на каждый базовый момент полсотни реплик", () => {
+    for (const [character, deck] of written) {
+      for (const moment of BASE_MOMENTS) {
         const lines = deck[moment] ?? [];
         assert.ok(
           lines.length >= deckSize(moment),
-          `${moment}: ${lines.length} вместо ${deckSize(moment)}`,
+          `${character}/${moment}: ${lines.length} вместо ${deckSize(moment)}`,
         );
       }
     }
   });
 
-  it("реплики не повторяются — ни внутри момента, ни между ними", () => {
-    const all: string[] = [];
-    for (const lines of Object.values(deck)) all.push(...(lines ?? []));
-
-    const seen = new Set(all);
-    assert.equal(seen.size, all.length, "нашлись одинаковые реплики");
-    assert.ok(all.length > 1_300, `реплик всего: ${all.length}`);
-  });
-
-  it("реплики короткие: чат — это чат, а не письмо", () => {
-    for (const [moment, lines] of Object.entries(deck)) {
-      for (const line of lines ?? []) {
-        assert.ok(line.length <= 70, `${moment}: длинная реплика «${line}»`);
-        assert.ok(line.trim().length > 0, `${moment}: пустая реплика`);
+  it("на режимные моменты — по дюжине", () => {
+    for (const [character, deck] of written) {
+      for (const moments of Object.values(MODE_MOMENTS)) {
+        for (const moment of moments ?? []) {
+          const lines = deck[moment] ?? [];
+          assert.ok(
+            lines.length >= deckSize(moment),
+            `${character}/${moment}: ${lines.length} вместо ${deckSize(moment)}`,
+          );
+        }
       }
     }
   });
 
-  it("в любом режиме ему есть что сказать на каждый момент", () => {
-    for (const moment of momentsOf("BOOZE")) {
-      assert.ok((deck[moment] ?? []).length > 0, `молчит на ${moment}`);
+  it("внутри характера реплики не повторяются", () => {
+    for (const [character, deck] of written) {
+      const all: string[] = [];
+      for (const lines of Object.values(deck)) all.push(...(lines ?? []));
+
+      assert.equal(
+        new Set(all).size,
+        all.length,
+        `${character}: нашлись одинаковые реплики`,
+      );
+      assert.ok(all.length > 1_300, `${character}: реплик всего ${all.length}`);
     }
   });
 
-  it("остальные характеры пока молчат — и это не поломка", () => {
+  it("характеры говорят по-разному: чужих реплик друг у друга нет", () => {
+    const seen = new Map<string, string>();
+
+    for (const [character, deck] of written) {
+      for (const lines of Object.values(deck)) {
+        for (const line of lines ?? []) {
+          const owner = seen.get(line);
+          assert.equal(
+            owner,
+            undefined,
+            `«${line}» есть и у ${owner}, и у ${character}`,
+          );
+          seen.set(line, character);
+        }
+      }
+    }
+  });
+
+  it("реплики короткие: чат — это чат, а не письмо", () => {
+    for (const [character, deck] of written) {
+      for (const [moment, lines] of Object.entries(deck)) {
+        for (const line of lines ?? []) {
+          assert.ok(
+            line.length <= 70,
+            `${character}/${moment}: длинная реплика «${line}»`,
+          );
+          assert.ok(line.trim().length > 0, `${character}/${moment}: пустая`);
+        }
+      }
+    }
+  });
+
+  it("в любом режиме написанному характеру есть что сказать", () => {
+    for (const [character, deck] of written) {
+      for (const moment of momentsOf("BOOZE")) {
+        assert.ok(
+          (deck[moment] ?? []).length > 0,
+          `${character} молчит на ${moment}`,
+        );
+      }
+    }
+  });
+
+  it("ненаписанные характеры молчат — и это не поломка", () => {
     const quiet = CHARACTERS.filter((one) => !(one in LINES));
 
-    assert.equal(quiet.length, CHARACTERS.length - 1);
+    assert.equal(quiet.length, CHARACTERS.length - written.length);
     for (const character of quiet) {
       assert.deepEqual(linesOf(character), {});
     }
