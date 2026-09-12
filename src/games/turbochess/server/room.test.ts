@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { GameRoomContext, GameRoomEvent } from "@/lib/games/engine";
-import { squareName } from "../engine/geometry";
+import { parseSquare, squareName } from "../engine/geometry";
 import { legalMoves, play, type Move } from "../engine/moves";
 import type { Position } from "../engine/position";
 import { TurboGame } from "../engine/game";
@@ -1359,7 +1359,10 @@ describe("бот жмёт кнопки режимов", () => {
         table.let(20_000);
       }
 
-      const after = view(room, "human").toast as typeof toast;
+      const after = view(room, "human").toast as {
+        drinker: number;
+        pourer: number;
+      } | null;
       if (after) toast = after;
     }
 
@@ -1447,5 +1450,157 @@ describe("бот жмёт кнопки режимов", () => {
     } else {
       assert.equal(state.phase, "playing");
     }
+  });
+});
+
+describe("бот разговаривает", () => {
+  /** Стол с одним говорящим ботом: реплики складываем в список. */
+  function talkingTable(mode: TurboMode = "CLASSIC") {
+    let at = 1000;
+    const said: { moment: string; ply: number }[] = [];
+    const settings: TurboRoomSettings = {
+      mode,
+      timeControl: "MIN_3",
+      options: {},
+      bots: 1,
+      botLevel: "easy",
+    };
+    const context: GameRoomContext = {
+      key: "turbo-talk",
+      ownerId: "human",
+      isPrivate: true,
+      settings,
+      connections: () => 1,
+      introduce: () => {},
+      forget: () => {},
+      emitted: () => {},
+      changed: () => {},
+    };
+    const pool = makeBots(1, "easy", 2024).map((bot) => ({
+      ...bot,
+      speak: (moment: string, ply: number) => said.push({ moment, ply }),
+      restart: () => said.push({ moment: "restart", ply: -1 }),
+    }));
+    const room = new TurboRoom(
+      context,
+      settings,
+      () => at,
+      undefined,
+      pool as never,
+    );
+
+    return {
+      room,
+      said,
+      moments: () => said.map((one) => one.moment),
+      pass: (ms: number) => {
+        at += ms;
+      },
+      let: (ms = 30_000) => {
+        at += ms;
+        room.tick();
+      },
+    };
+  }
+
+  it("сел за стол — поздоровался", () => {
+    const table = talkingTable();
+    table.room.join("human");
+
+    // Перед приветствием бот забывает прошлую партию: колода снова полная.
+    assert.deepEqual(table.moments(), ["restart", "greeting"]);
+  });
+
+  it("забрал фигуру — сказал про взятие, потерял — про потерю", () => {
+    const table = talkingTable();
+    const { room } = table;
+    room.join("human");
+
+    // Играем, пока бот не срубит и пока у него не срубят.
+    for (let half = 0; half < 40; half++) {
+      const state = view(room, "human");
+      if (state.phase !== "playing") break;
+
+      if (state.turn === 0) {
+        const legal = new TurboGame(state.position as Position).legal();
+        const grab = legal.find((one) => {
+          const board = (state.position as Position).board;
+          const geometry = (state.position as Position).geometry;
+          const target = parseSquare(geometry, one.to);
+          return target !== null && board[target];
+        });
+        const pick = grab ?? legal[0];
+        assert.ok(pick);
+        room.act(GAME_EVENT.move, "human", {
+          ...pick,
+          ply: (state.moves as string[]).length,
+        });
+      } else {
+        table.let(20_000);
+      }
+
+      const moments = table.moments();
+      if (
+        moments.includes("botCapture") &&
+        (moments.includes("botLosesPiece") || moments.includes("botLosesQueen"))
+      ) {
+        break;
+      }
+    }
+
+    const moments = table.moments();
+    assert.ok(
+      moments.includes("botCapture"),
+      `сказанное: ${moments.join(", ")}`,
+    );
+    assert.ok(
+      moments.includes("botLosesPiece") || moments.includes("botLosesQueen"),
+      `сказанное: ${moments.join(", ")}`,
+    );
+  });
+
+  it("в начале партии говорит про дебют, а не про настроение", () => {
+    const table = talkingTable();
+    const { room } = table;
+    room.join("human");
+
+    assert.equal(move(room, "human", "d2", "d4").accepted, true);
+    table.let(20_000);
+
+    assert.ok(table.moments().includes("opening"));
+  });
+
+  it("проиграл — сказал про поражение, а не про мат", () => {
+    const table = talkingTable();
+    const { room } = table;
+    room.join("human");
+
+    assert.equal(move(room, "human", "e2", "e4").accepted, true);
+    table.let(20_000);
+    assert.equal(room.act(GAME_EVENT.resign, "human", {}).accepted, true);
+
+    const moments = table.moments();
+    assert.ok(moments.includes("botWins"), moments.join(", "));
+    assert.equal(moments.includes("botMates"), false, "матом тут не пахло");
+  });
+
+  it("новая партия — бот забывает сказанное и здоровается заново", () => {
+    const table = talkingTable();
+    const { room } = table;
+    room.join("human");
+
+    assert.equal(move(room, "human", "e2", "e4").accepted, true);
+    table.let(20_000);
+    assert.equal(room.act(GAME_EVENT.resign, "human", {}).accepted, true);
+    assert.equal(room.act(GAME_EVENT.rematch, "human", {}).accepted, true);
+
+    const moments = table.moments();
+    assert.ok(moments.includes("restart"), "колода сброшена");
+    assert.ok(moments.includes("rematch"));
+    assert.equal(
+      moments.filter((one) => one === "greeting").length,
+      2,
+      "поздоровался в обеих партиях",
+    );
   });
 });

@@ -9,6 +9,8 @@ import {
   type RoomStatePayload,
 } from "@/shared/protocol";
 import { createPrivateRoom, deletePrivateRoom } from "@/lib/rooms/private";
+import { CHARACTER_TRAITS } from "../bots/characters";
+import { LINES } from "../bots/lines";
 import { GAME_EVENT, GAME_ID } from "../protocol";
 import { saveRoomSettings } from "../rooms/store";
 
@@ -51,6 +53,8 @@ interface TurboState extends RoomStatePayload {
 
 class Client {
   readonly states: TurboState[] = [];
+  /** Что сказали в чате: по этому видно, что бот заговорил. */
+  readonly chat: { playerId: string; nickname: string; text: string }[] = [];
   private socket!: Socket;
 
   constructor(readonly name: string) {}
@@ -66,6 +70,13 @@ class Client {
     this.socket.on(SERVER_EVENT.state, (state: TurboState) => {
       this.states.push(state);
     });
+
+    this.socket.on(
+      SERVER_EVENT.chatMessage,
+      (message: { playerId: string; nickname: string; text: string }) => {
+        this.chat.push(message);
+      },
+    );
 
     await new Promise<void>((resolve, reject) => {
       this.socket.once("connect", () => resolve());
@@ -88,6 +99,31 @@ class Client {
 
   disconnect(): void {
     this.socket.disconnect();
+  }
+
+  /** Дождаться, пока в чате наберётся столько реплик; реплики «печатаются». */
+  async waitChatAtLeast(count: number, ms = 8000): Promise<boolean> {
+    const deadline = Date.now() + ms;
+    while (Date.now() < deadline) {
+      if (this.chat.length >= count) return true;
+      await sleep(100);
+    }
+    return false;
+  }
+
+  /** Дождаться реплики в чате; пусто — значит бот промолчал. */
+  async waitChat(
+    label: string,
+    ms = 8000,
+  ): Promise<(typeof this.chat)[number] | null> {
+    const deadline = Date.now() + ms;
+    while (Date.now() < deadline) {
+      const found = this.chat.at(-1);
+      if (found) return found;
+      await sleep(100);
+    }
+    console.log(`  … ${label}: чат молчит`);
+    return null;
   }
 
   async waitState(
@@ -317,84 +353,142 @@ async function main() {
   await sleep(300);
 
   console.log("\n[8] Соперник-программа");
-  const botRoom = await createPrivateRoom(
-    white.id,
-    {
-      kind: "private",
-      title: "Смоук с программой",
-      locked: false,
-      maxPlayers: null,
-      twitchChannel: null,
-    },
-    GAME_ID,
-  );
-  await saveRoomSettings(botRoom.id, {
-    mode: "CLASSIC",
-    timeControl: "MIN_3",
-    options: {},
-    bots: 1,
-    botLevel: "easy",
-  });
 
-  const human = new Client("человек");
-  await human.connect(tokens.white, botRoom.code);
-
-  const seatedWithBot = await human.waitState(
-    (state) => state.phase === "playing",
-    "партия с программой",
+  /**
+   * Характеры за столом выпадают по ключу комнаты, а колоды реплик пишутся по
+   * одному характеру за раз — значит бот с готовой колодой попадается не сразу.
+   * Заводим комнаты, пока не сядет говорящий: молчащий бот проверку речи не
+   * проверит, а проверить её надо.
+   */
+  const talkative = new Set(
+    Object.entries(LINES).flatMap(([character, lines]) =>
+      lines && Object.keys(lines).length > 0 ? [character] : [],
+    ),
   );
-  const bot = seatedWithBot.players.find((player) => player.id !== white.id);
-  check("программа села за стол", bot !== undefined);
-  check("у неё свой ник", (bot?.nickname.length ?? 0) > 0, bot?.nickname ?? "");
-  check(
-    "человек ходит первым",
-    seatedWithBot.players[0]?.id === white.id && seatedWithBot.turn === 0,
+  const nicknames = new Map(
+    Object.values(CHARACTER_TRAITS).flatMap((traits) =>
+      traits.nicknames.map((nick) => [nick, traits.id] as const),
+    ),
   );
 
-  const opened = await human.emit(GAME_EVENT.move, move("e2", "e4", 0));
-  check("человек сходил", opened.ok === true, opened.error ?? "");
+  let botRoom = null as Awaited<ReturnType<typeof createPrivateRoom>> | null;
+  let human = null as Client | null;
+  let bot: { id: string; nickname: string } | undefined;
 
-  const answered = await human.waitState(
-    (state) => state.moves.length === 2,
-    "ответ программы",
-  );
-  check(
-    "программа ответила сама",
-    answered.moves.length === 2,
-    answered.moves.join(" "),
-  );
-  check("ход вернулся человеку", answered.turn === 0, String(answered.turn));
-  check("часы идут дальше", (answered.deadline ?? 0) > Date.now());
+  for (let attempt = 0; attempt < 16 && !bot; attempt++) {
+    const candidate = await createPrivateRoom(
+      white.id,
+      {
+        kind: "private",
+        title: "Смоук с программой",
+        locked: false,
+        maxPlayers: null,
+        twitchChannel: null,
+      },
+      GAME_ID,
+    );
+    await saveRoomSettings(candidate.id, {
+      mode: "CLASSIC",
+      timeControl: "MIN_3",
+      options: {},
+      bots: 1,
+      botLevel: "easy",
+    });
 
-  const botResign = await human.emit(GAME_EVENT.resign);
-  check("человек сдался", botResign.ok === true, botResign.error ?? "");
-  const botOver = await human.waitState(
-    (state) => state.phase === "over",
-    "конец партии с программой",
-  );
-  check("победа за программой", botOver.result === 1, String(botOver.result));
+    const client = new Client("человек");
+    await client.connect(tokens.white, candidate.code);
+    const seatedWithBot = await client.waitState(
+      (state) => state.phase === "playing",
+      "партия с программой",
+    );
+    const seatedBot = seatedWithBot.players.find(
+      (player) => player.id !== white.id,
+    );
+    const character = nicknames.get(seatedBot?.nickname ?? "");
 
-  await sleep(300);
-  const botMatch = await prisma.turboMatch.findFirst({
-    where: { roomKey: botRoom.id },
-    include: { seats: true },
-  });
-  check("партия с программой записана", botMatch !== null);
-  check(
-    "место программы в запись мест не попало",
-    botMatch?.seats.length === 1 && botMatch.seats[0]?.userId === white.id,
-    `мест записано: ${botMatch?.seats.length ?? 0}`,
-  );
-  const recorded = (botMatch?.bots ?? []) as { seat: number; level: string }[];
-  check(
-    "зато записано, кто был программой",
-    recorded.length === 1 && recorded[0]?.seat === 1,
-    recorded.map((one) => `место ${one.seat}, уровень ${one.level}`).join("; "),
-  );
+    if (seatedBot && character && talkative.has(character)) {
+      botRoom = candidate;
+      human = client;
+      bot = seatedBot;
+      break;
+    }
 
-  human.disconnect();
-  await sleep(200);
-  await deletePrivateRoom(botRoom.id, botRoom.gameId);
+    client.disconnect();
+    await sleep(150);
+    await deletePrivateRoom(candidate.id, candidate.gameId);
+  }
+
+  check("программа села за стол", bot !== undefined && human !== null);
+  if (!bot || !human || !botRoom) {
+    console.log("  … говорящего характера не выпало за шестнадцать попыток");
+  } else {
+    check("у неё свой ник", bot.nickname.length > 0, bot.nickname);
+
+    const hello = await human.waitChat("приветствие программы");
+    check("программа поздоровалась в чате", hello !== null, hello?.text ?? "");
+    check(
+      "реплика от её имени, а не от игры",
+      hello?.playerId === bot.id && hello?.nickname === bot.nickname,
+      hello?.nickname ?? "",
+    );
+
+    const opened = await human.emit(GAME_EVENT.move, move("e2", "e4", 0));
+    check("человек сходил", opened.ok === true, opened.error ?? "");
+
+    const answered = await human.waitState(
+      (state) => state.moves.length === 2,
+      "ответ программы",
+    );
+    check(
+      "программа ответила сама",
+      answered.moves.length === 2,
+      answered.moves.join(" "),
+    );
+    check("ход вернулся человеку", answered.turn === 0, String(answered.turn));
+    check("часы идут дальше", (answered.deadline ?? 0) > Date.now());
+
+    const botResign = await human.emit(GAME_EVENT.resign);
+    check("человек сдался", botResign.ok === true, botResign.error ?? "");
+    const botOver = await human.waitState(
+      (state) => state.phase === "over",
+      "конец партии с программой",
+    );
+    check("победа за программой", botOver.result === 1, String(botOver.result));
+    // Реплики не мгновенные: их «печатают», и последнюю надо дождаться.
+    const spokeAgain = await human.waitChatAtLeast(2);
+    check(
+      "на прощание программа что-то сказала",
+      spokeAgain,
+      human.chat.at(-1)?.text ?? "",
+    );
+
+    await sleep(300);
+    const botMatch = await prisma.turboMatch.findFirst({
+      where: { roomKey: botRoom.id },
+      include: { seats: true },
+    });
+    check("партия с программой записана", botMatch !== null);
+    check(
+      "место программы в запись мест не попало",
+      botMatch?.seats.length === 1 && botMatch.seats[0]?.userId === white.id,
+      `мест записано: ${botMatch?.seats.length ?? 0}`,
+    );
+    const recorded = (botMatch?.bots ?? []) as {
+      seat: number;
+      level: string;
+    }[];
+    check(
+      "зато записано, кто был программой",
+      recorded.length === 1 && recorded[0]?.seat === 1,
+      recorded
+        .map((one) => `место ${one.seat}, уровень ${one.level}`)
+        .join("; "),
+    );
+
+    human.disconnect();
+    await sleep(200);
+    await deletePrivateRoom(botRoom.id, botRoom.gameId);
+  }
 
   await deletePrivateRoom(room.id, room.gameId);
   const leftovers = await prisma.turboRoomSettings.count({

@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { fromFen } from "../engine/fen";
+import { piece } from "../engine/pieces";
+import type { Position } from "../engine/position";
 import { marketPosition } from "../modes/market";
 import { CHARACTER_TRAITS } from "./characters";
 import { LEVELS } from "./levels";
@@ -297,9 +299,9 @@ describe("чёрный рынок", () => {
   });
 
   it("терпеливый характер проходит мимо прилавка чаще", () => {
-    const position = {
+    const position: Position = {
       ...fromFen("4k3/8/8/8/8/8/3q4/3RK3 w - - 0 1", marketPosition().rules),
-      taken: [[{ kind: "q", side: 1 }], []],
+      taken: [[piece("q", 1)], []],
     };
     const ask = (who: keyof typeof CHARACTER_TRAITS, roll: number) =>
       marketCall({

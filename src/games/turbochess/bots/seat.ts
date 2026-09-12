@@ -11,6 +11,7 @@ import {
   nicknameOf,
 } from "./characters";
 import { LEVELS, type Level, type LevelId } from "./levels";
+import type { Moment } from "./moments";
 
 /**
  * Бот за столом: кто он такой с точки зрения комнаты.
@@ -26,6 +27,16 @@ export interface BotSeat {
   level: Level;
   character: Character;
   traits: CharacterTraits;
+  /**
+   * Сказать что-нибудь по случаю.
+   *
+   * Комната рассказывает боту, что случилось по правилам; говорить или молчать,
+   * решает он сам — у него память на сказанное и своя пауза (`talk.ts`). Нет
+   * говорилки — бот играет молча, и это рабочее состояние.
+   */
+  speak?: (moment: Moment, ply: number) => void;
+  /** Новая партия: забыть сказанное. */
+  restart?: () => void;
 }
 
 /** Признак бота по номеру игрока: комната по нему решает, чей сейчас ход. */
