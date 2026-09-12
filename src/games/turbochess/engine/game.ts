@@ -13,6 +13,7 @@ import {
   insufficientMaterial,
   legalMoves,
   play,
+  reachedThrone,
   repetitionKey,
   san,
   type Move,
@@ -347,10 +348,27 @@ export class TurboGame {
 
   /** Обычная цель: мат, пат, недостаток материала, повторения. */
   private detectMate(position: Position): Outcome | null {
+    // Мега-шахматы: король на первой горизонтали соперника кончает партию
+    // сразу, и мат при этом никуда не девается (docs/MODES.md, режим 4).
+    if (position.rules.mega) {
+      const throne = position.board.findIndex(
+        (cell, square) =>
+          cell?.kind === "k" && reachedThrone(position, cell.side, square),
+      );
+      if (throne >= 0) {
+        const king = position.board[throne];
+        if (king) return this.finish(king.side, "throne");
+      }
+    }
+
     if (legalMoves(position).length === 0) {
-      // Ходить нечем тому, чья очередь: под шахом — мат, без шаха — пат.
-      return inCheck(position, position.turn)
-        ? this.finish(opponent(position.turn), "checkmate")
+      // Ходить нечем тому, чья очередь: под шахом — мат, без шаха — пат. В
+      // пацанских шахматах пата нет: некуда ходить — проиграл.
+      if (inCheck(position, position.turn)) {
+        return this.finish(opponent(position.turn), "checkmate");
+      }
+      return position.rules.stalemate === "loss"
+        ? this.finish(opponent(position.turn), "noMoves")
         : this.finish("draw", "stalemate");
     }
     if (insufficientMaterial(position)) {

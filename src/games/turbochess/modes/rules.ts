@@ -1,8 +1,11 @@
 import { classicPosition, type Position } from "../engine/position";
 import type { ModeOptions } from "../rooms/settings";
+import { agentPosition, agentRules } from "./agents";
 import { annihilationPosition, annihilationRules } from "./annihilation";
 import { modeInfo, type TurboMode } from "./catalog";
 import { giveawayPosition, giveawayRules } from "./giveaway";
+import { megaPosition, megaRules } from "./mega";
+import { noRetreatPosition, noRetreatRules } from "./noRetreat";
 import { nuclearOptions, nuclearRules, nuclearThreshold } from "./nuclear";
 import {
   ONE_KIND_LABEL,
@@ -39,6 +42,9 @@ const READY: ReadonlySet<TurboMode> = new Set([
   "REINFORCEMENTS",
   "ZOMBIE",
   "SHOWDOWN",
+  "NO_RETREAT",
+  "MEGA",
+  "DOUBLE_AGENT",
 ]);
 
 export function isReady(mode: TurboMode): boolean {
@@ -53,7 +59,12 @@ export function isReady(mode: TurboMode): boolean {
  * меняет цель, а не доску, тоже приходит сюда: у «ядерных» расстановка
  * обычная, и они остаются с умолчанием.
  */
-export function startPosition(mode: TurboMode, options: ModeOptions): Position {
+export function startPosition(
+  mode: TurboMode,
+  options: ModeOptions,
+  /** Зерно случайности партии: по нему выбираются двойные агенты. */
+  seed = 0,
+): Position {
   switch (mode) {
     case "ONE_KIND":
       return oneKindPosition(oneKindOf(options));
@@ -70,6 +81,12 @@ export function startPosition(mode: TurboMode, options: ModeOptions): Position {
     // будут готовы.
     case "SHOWDOWN":
       return showdownPosition([showdownStart(), showdownStart()]);
+    case "NO_RETREAT":
+      return noRetreatPosition();
+    case "MEGA":
+      return megaPosition();
+    case "DOUBLE_AGENT":
+      return agentPosition(seed);
     default:
       return classicPosition();
   }
@@ -129,6 +146,12 @@ export function rulesOf(mode: TurboMode, options: ModeOptions): ModeRules {
       return { variant: null, lines: zombieRules(), ready: true };
     case "SHOWDOWN":
       return { variant: null, lines: showdownRules(), ready: true };
+    case "NO_RETREAT":
+      return { variant: null, lines: noRetreatRules(), ready: true };
+    case "MEGA":
+      return { variant: null, lines: megaRules(), ready: true };
+    case "DOUBLE_AGENT":
+      return { variant: null, lines: agentRules(), ready: true };
     default:
       return {
         variant: null,

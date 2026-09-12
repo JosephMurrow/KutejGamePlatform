@@ -1,4 +1,4 @@
-import { squareName } from "../engine/geometry";
+import { fileOf, parseSquare, rankOf, squareName } from "../engine/geometry";
 import { DROP, inCheck, type Move } from "../engine/moves";
 import type { Piece, PieceKind } from "../engine/pieces";
 import type { Position } from "../engine/position";
@@ -86,6 +86,33 @@ export function movesBetween(
       move.castle !== null && squareName(geometry, move.castle.rook) === to
     );
   });
+}
+
+/**
+ * Клетки позади выбранной фигуры: в пацанских шахматах ей туда уже нельзя, и
+ * доска их затемняет (docs/MODES.md, режим 6). «Позади» считается от того,
+ * куда смотрит её сторона.
+ */
+export function behindSquares(position: Position, from: string): string[] {
+  const { geometry } = position;
+  const at = parseSquare(geometry, from);
+  const mover = at === null ? null : position.board[at];
+  const forward = mover ? position.sides[mover.side]?.forward : null;
+  if (at === null || !forward) return [];
+
+  const file = fileOf(geometry, at);
+  const rank = rankOf(geometry, at);
+  const behind: string[] = [];
+
+  position.board.forEach((_, square) => {
+    const dx = fileOf(geometry, square) - file;
+    const dy = rankOf(geometry, square) - rank;
+    if (dx * forward[0] + dy * forward[1] < 0) {
+      behind.push(squareName(geometry, square));
+    }
+  });
+
+  return behind;
 }
 
 /** Куда можно выставить фигуру этого вида из резерва. */

@@ -9,8 +9,10 @@ import {
   type Vec,
 } from "./geometry";
 import {
-  PATTERNS,
   PROMOTIONS,
+  markKey,
+  marked,
+  patternOf,
   piece,
   type Piece,
   type PieceKind,
@@ -80,6 +82,33 @@ function pawnLines(geometry: Geometry, [dx, dy]: Vec) {
   };
 }
 
+/**
+ * Ходит ли фигура по этому вектору. В пацанских шахматах назад не ходят: из
+ * восьми направлений остаются пять, и это одно правило на всю таблицу
+ * (docs/MODES.md, режим 6).
+ */
+function allowed(position: Position, mover: Piece, [vx, vy]: Vec): boolean {
+  if (!position.rules.forwardOnly) return true;
+
+  const forward = position.sides[mover.side]?.forward;
+  if (!forward) return true;
+
+  return vx * forward[0] + vy * forward[1] >= 0;
+}
+
+/** Клетка на первой горизонтали соперника — там же, где превращается пешка. */
+export function reachedThrone(
+  position: Position,
+  side: Side,
+  square: number,
+): boolean {
+  const forward = position.sides[side]?.forward;
+  if (!forward) return false;
+
+  const lines = pawnLines(position.geometry, forward);
+  return lines.coordinate(square) === lines.last;
+}
+
 /** Куда пешка бьёт вбок от своего хода вперёд. */
 function sideways([dx]: Vec): readonly Vec[] {
   return dx !== 0
@@ -126,7 +155,8 @@ function pawnMoves(
   const lines = pawnLines(geometry, forward);
 
   const push = (to: number, captured: Piece | null, extra: Partial<Move>) => {
-    if (lines.coordinate(to) === lines.last) {
+    // В мега-шахматах превращения нет вовсе: дойдя, пешка станет мега-пешкой.
+    if (!position.rules.mega && lines.coordinate(to) === lines.last) {
       for (const promotion of PROMOTIONS) {
         moves.push(basic(from, to, pawn, captured, { ...extra, promotion }));
       }
@@ -173,6 +203,42 @@ function pawnMoves(
   }
 }
 
+/**
+ * Мега-пешка: ходит на одну клетку вперёд и назад, бьёт по диагонали в обе
+ * стороны (docs/MODES.md, режим 4). Ни двойного шага, ни взятия на проходе,
+ * ни превращения у неё нет — она уже дошла.
+ */
+function megaPawnMoves(
+  position: Position,
+  from: number,
+  pawn: Piece,
+  moves: Move[],
+): void {
+  const { geometry, board } = position;
+  const forward = position.sides[pawn.side]?.forward;
+  if (!forward) return;
+  const back: Vec = [-forward[0], -forward[1]];
+
+  for (const straight of [forward, back]) {
+    const to = offset(geometry, from, straight);
+    if (to !== null && !at(board, to) && allowed(position, pawn, straight)) {
+      moves.push(basic(from, to, pawn, null));
+    }
+
+    for (const [sx, sy] of sideways(straight)) {
+      const vec: Vec = [straight[0] + sx, straight[1] + sy];
+      if (!allowed(position, pawn, vec)) continue;
+
+      const beat = offset(geometry, from, vec);
+      if (beat === null) continue;
+      const target = at(board, beat);
+      if (target && target.side !== pawn.side) {
+        moves.push(basic(from, beat, pawn, target));
+      }
+    }
+  }
+}
+
 function pieceMoves(
   position: Position,
   from: number,
@@ -181,9 +247,10 @@ function pieceMoves(
 ): void {
   if (mover.kind === "p") return;
   const { geometry, board } = position;
-  const pattern = PATTERNS[mover.kind];
+  const pattern = patternOf(mover);
 
   for (const vec of pattern.leaps) {
+    if (!allowed(position, mover, vec)) continue;
     const to = offset(geometry, from, vec);
     if (to === null) continue;
     const target = at(board, to);
@@ -192,6 +259,7 @@ function pieceMoves(
   }
 
   for (const vec of pattern.slides) {
+    if (!allowed(position, mover, vec)) continue;
     for (let times = 1; ; times++) {
       const to = offset(geometry, from, vec, times);
       if (to === null) break;
@@ -199,6 +267,30 @@ function pieceMoves(
       if (target?.side === mover.side) break;
       moves.push(basic(from, to, mover, target));
       if (target) break;
+    }
+  }
+
+  // Пушка: то же направление, но с правом перепрыгнуть ровно одну фигуру.
+  // До преграды клетки уже дал обычный луч, здесь — то, что за ней.
+  for (const vec of pattern.hops ?? []) {
+    if (!allowed(position, mover, vec)) continue;
+    let jumped = false;
+    for (let times = 1; ; times++) {
+      const to = offset(geometry, from, vec, times);
+      if (to === null) break;
+
+      const target = at(board, to);
+      if (!target) {
+        if (jumped) moves.push(basic(from, to, mover, null));
+        continue;
+      }
+      if (jumped) {
+        if (target.side !== mover.side) {
+          moves.push(basic(from, to, mover, target));
+        }
+        break;
+      }
+      jumped = true;
     }
   }
 }
@@ -288,9 +380,14 @@ export function pseudoMoves(position: Position): Move[] {
   const moves: Move[] = [];
 
   position.board.forEach((mover, from) => {
-    if (!mover || mover.side !== position.turn) return;
-    if (mover.kind === "p") pawnMoves(position, from, mover, moves);
-    else pieceMoves(position, from, mover, moves);
+    if (!mover) return;
+    // Свои фигуры — и чужой двойной агент: им ходит соперник, и это его ход
+    // (docs/MODES.md, режим 10).
+    if (mover.side !== position.turn && !mover.agent) return;
+
+    if (mover.kind !== "p") pieceMoves(position, from, mover, moves);
+    else if (mover.mega) megaPawnMoves(position, from, mover, moves);
+    else pawnMoves(position, from, mover, moves);
   });
   castleMoves(position, moves);
   dropMoves(position, moves);
@@ -320,15 +417,34 @@ function hits(
   if (attacker.kind === "p") {
     const forward = position.sides[attacker.side]?.forward;
     if (!forward) return false;
-    return sideways(forward).some(
-      ([sx, sy]) => dx === forward[0] + sx && dy === forward[1] + sy,
+
+    // Мега-пешка бьёт и назад: у неё четыре диагонали вместо двух.
+    const ways: Vec[] = attacker.mega
+      ? [forward, [-forward[0], -forward[1]]]
+      : [forward];
+
+    return ways.some((way) =>
+      sideways(way).some(
+        ([sx, sy]) =>
+          dx === way[0] + sx &&
+          dy === way[1] + sy &&
+          allowed(position, attacker, [dx, dy]),
+      ),
     );
   }
 
-  const pattern = PATTERNS[attacker.kind];
-  if (pattern.leaps.some(([vx, vy]) => dx === vx && dy === vy)) return true;
+  const pattern = patternOf(attacker);
+  if (
+    pattern.leaps.some(
+      ([vx, vy]) =>
+        dx === vx && dy === vy && allowed(position, attacker, [vx, vy]),
+    )
+  ) {
+    return true;
+  }
 
   for (const vec of pattern.slides) {
+    if (!allowed(position, attacker, vec)) continue;
     const times = stepsAlong(dx, dy, vec);
     if (times === 0) continue;
 
@@ -341,6 +457,20 @@ function hits(
       }
     }
     if (clear) return true;
+  }
+
+  // Пушка бьёт через ровно одну фигуру — не больше и не меньше.
+  for (const vec of pattern.hops ?? []) {
+    if (!allowed(position, attacker, vec)) continue;
+    const times = stepsAlong(dx, dy, vec);
+    if (times === 0) continue;
+
+    let blockers = 0;
+    for (let step = 1; step < times; step++) {
+      const between = offset(geometry, from, vec, step);
+      if (between !== null && at(board, between)) blockers++;
+    }
+    if (blockers === 1) return true;
   }
 
   return false;
@@ -384,6 +514,35 @@ export function inCheck(
   return false;
 }
 
+/**
+ * Чем фигура встаёт на клетку: превращённой, пробуждённым агентом или
+ * мега-формой. Метки едут вместе с фигурой, так что дальше о них никто не
+ * думает.
+ */
+function landing(position: Position, move: Move): Piece {
+  let mover = move.promotion
+    ? piece(move.promotion, move.piece.side)
+    : move.piece;
+
+  // Агент, которым сходил соперник, просыпается: дальше его видят все.
+  if (mover.agent && !mover.awake && move.piece.side !== position.turn) {
+    mover = marked(mover, { awake: true });
+  }
+
+  // Дошёл до первой горизонтали соперника — получил мега-форму. Король её не
+  // получает: ему доходить незачем, он этим выигрывает (game.ts).
+  if (
+    position.rules.mega &&
+    !mover.mega &&
+    mover.kind !== "k" &&
+    reachedThrone(position, mover.side, move.to)
+  ) {
+    mover = marked(mover, { mega: true });
+  }
+
+  return mover;
+}
+
 /** Доска после хода. */
 function boardAfter(position: Position, move: Move): (Piece | null)[] {
   const board = position.board.slice();
@@ -394,9 +553,7 @@ function boardAfter(position: Position, move: Move): (Piece | null)[] {
     board[move.castle.rook] = null;
     board[move.castle.rookTo] = piece("r", move.piece.side);
   }
-  board[move.to] = move.promotion
-    ? piece(move.promotion, move.piece.side)
-    : move.piece;
+  board[move.to] = landing(position, move);
 
   return board;
 }
@@ -427,7 +584,7 @@ export function legalMoves(position: Position): Move[] {
  * после взятия съедал бы у неё ход ожидания.
  */
 function reserveAfter(position: Position, move: Move) {
-  const mover = move.piece.side;
+  const mover = position.turn;
   const reserve = position.reserve.map((list) => [...list]);
   const pending: Zombie[] = [];
 
@@ -458,8 +615,10 @@ function reserveAfter(position: Position, move: Move) {
 
 /** Позиция после хода. Ход должен быть из `legalMoves`. */
 export function play(position: Position, move: Move): Position {
-  const mover = move.piece.side;
-  const forward = position.sides[mover]?.forward;
+  // Ходит сторона, чья очередь: чужим двойным агентом ходит соперник, и
+  // очередь после этого всё равно переходит к хозяину агента.
+  const mover = position.turn;
+  const forward = position.sides[move.piece.side]?.forward;
 
   return {
     ...position,
@@ -470,7 +629,7 @@ export function play(position: Position, move: Move): Position {
     // забрали — сгорает право с этой ладьёй.
     castling: position.castling.filter(
       (right) =>
-        !(move.piece.kind === "k" && right.side === mover) &&
+        !(move.piece.kind === "k" && right.side === move.piece.side) &&
         right.rook !== move.from &&
         right.rook !== move.to,
     ),
@@ -568,7 +727,7 @@ export function san(
  */
 export function repetitionKey(position: Position): string {
   const board = position.board
-    .map((cell) => (cell ? `${cell.kind}${cell.side}` : "."))
+    .map((cell) => (cell ? `${cell.kind}${cell.side}${markKey(cell)}` : "."))
     .join("");
   const castling = position.castling
     .map((right) => `${right.king}>${right.rook}`)

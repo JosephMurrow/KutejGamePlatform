@@ -3,12 +3,13 @@
 import { useMemo, useState, type CSSProperties } from "react";
 import { Chessboard, ChessboardProvider, SparePiece } from "react-chessboard";
 import type { DropKind, MoveInput } from "../engine/game";
-import { fileOf, parseSquare, rankOf } from "../engine/geometry";
+import { fileOf, parseSquare, rankOf, squareName } from "../engine/geometry";
 import { legalMoves, play } from "../engine/moves";
 import type { PieceKind, Side } from "../engine/pieces";
 import { nextSide, type Position } from "../engine/position";
 import { zombieQueue, zombieWait } from "../modes/zombies";
 import {
+  behindSquares,
   boardPosition,
   checkedKing,
   dropTargets,
@@ -45,6 +46,14 @@ const ACCENT = "#c2410c";
 const SOFT = "#ff7a3d";
 /** Нотация на светлом поле; на тёмном она цвета светлого поля. */
 const INK = "#7a3a1a";
+/** Мега-форма: рамка цвета светлого поля (docs/MODES.md, режим 4). */
+const MEGA = "#f6dcc4";
+/** Двойной агент: пока спит — его видит только тот, кто может разбудить. */
+const AGENT = "#ff7a3d";
+/** Пробуждённый агент — красная рамка, и её видят все. */
+const AWAKE = "#c8281e";
+/** Куда выбранной фигуре уже нельзя: назад в пацанских шахматах. */
+const BEHIND = "rgba(43, 18, 6, 0.34)";
 
 /**
  * Рубашка: чем закрыта чужая половина доски, пока идёт расстановка
@@ -127,6 +136,15 @@ export function Board({
   const styles = useMemo(() => {
     const marks: Record<string, CSSProperties> = {};
 
+    /** Рамка поверх клетки: ложится первой, иначе её закроет заливка. */
+    const ring = (square: string, color: string) => {
+      const was = marks[square]?.boxShadow;
+      marks[square] = {
+        ...marks[square],
+        boxShadow: `inset 0 0 0 3px ${color}${was ? `, ${was}` : ""}`,
+      };
+    };
+
     if (lastMove) {
       for (const square of [lastMove.from, lastMove.to]) {
         marks[square] = { boxShadow: `inset 0 0 0 999px ${SOFT}55` };
@@ -152,6 +170,26 @@ export function Board({
             };
       }
     }
+
+    // Куда выбранной фигуре уже нельзя: назад пацанские шахматы не пускают.
+    if (picked && shown.rules.forwardOnly) {
+      for (const square of behindSquares(shown, picked)) {
+        marks[square] = {
+          ...marks[square],
+          boxShadow: `inset 0 0 0 999px ${BEHIND}`,
+        };
+      }
+    }
+
+    // Мега-формы и двойные агенты: рамка вокруг клетки. Чужого спящего агента
+    // сервер показывает только тому, кто может его разбудить.
+    shown.board.forEach((cell, at) => {
+      if (!cell) return;
+      const square = squareName(shown.geometry, at);
+      if (cell.mega) ring(square, MEGA);
+      if (cell.awake) ring(square, AWAKE);
+      else if (cell.agent) ring(square, AGENT);
+    });
 
     // Закрытые клетки: своей позиции у них нет, поэтому и подсветок нет.
     for (const square of covered ?? []) {

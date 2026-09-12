@@ -40,6 +40,15 @@ export interface PositionRules {
   readonly goal: Goal;
   /** Есть чем взять — брать обязательно, как в шашках. */
   readonly mustCapture: boolean;
+  /** Назад не ходят: из восьми направлений остаются пять (режим 6). */
+  readonly forwardOnly: boolean;
+  /** Ходов нет: ничья по пату или поражение тому, кому ходить нечем. */
+  readonly stalemate: "draw" | "loss";
+  /**
+   * Дошёл до первой горизонтали соперника — получил мега-форму, а король
+   * этим выигрывает. Превращения пешки в таких правилах нет (режим 4).
+   */
+  readonly mega: boolean;
   /**
    * Взятая фигура через три хода переходит срубившему в резерв
    * (docs/MODES.md, режим 14).
@@ -51,6 +60,9 @@ export interface PositionRules {
 export const CLASSIC_RULES: PositionRules = {
   goal: "mate",
   mustCapture: false,
+  forwardOnly: false,
+  stalemate: "draw",
+  mega: false,
   zombies: false,
 };
 

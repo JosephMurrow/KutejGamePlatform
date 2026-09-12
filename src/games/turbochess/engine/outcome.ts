@@ -51,7 +51,9 @@ export type EndReason =
   /** «Поддавки»: ходов не осталось — отдавать больше нечего, это победа. */
   | "noMoves"
   /** «Ядерные»: заряд набран и бомба сброшена. */
-  | "nuke";
+  | "nuke"
+  /** «Мега-шахматы»: король дошёл до трона соперника. */
+  | "throne";
 
 export interface Outcome {
   result: Result;
@@ -79,4 +81,5 @@ export const REASON_TEXT: Record<EndReason, string> = {
   kingTaken: "короля съели",
   noMoves: "ходов не осталось",
   nuke: "сброшена бомба",
+  throne: "король дошёл до трона",
 };

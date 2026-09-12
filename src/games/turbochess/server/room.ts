@@ -12,6 +12,7 @@ import { TurboGame, type MoveInput, type MoveRejection } from "../engine/game";
 import type { EndReason, Outcome } from "../engine/outcome";
 import type { PieceKind, Side } from "../engine/pieces";
 import type { Position } from "../engine/position";
+import { hideAgents } from "../modes/agents";
 import type { TurboMode } from "../modes/catalog";
 import { bombReady } from "../modes/nuclear";
 import { startPosition } from "../modes/rules";
@@ -344,7 +345,11 @@ export class TurboRoom implements GameRoomState {
       mode: this.settings.mode,
       options: this.settings.options,
       seats: this.capacity,
-      position: setup ? this.setupBoard(seat) : this.game.position(),
+      // Свой двойной агент — секрет от хозяина, поэтому снимок собирается для
+      // каждого места свой (docs/MODES.md, режим 10).
+      position: setup
+        ? this.setupBoard(seat)
+        : hideAgents(this.game.position(), seat),
       covered: setup ? this.coveredZones(seat) : [],
       setupReady: setup ? [...this.setupReady] : [],
       moves: this.game.history(),
@@ -443,20 +448,23 @@ export class TurboRoom implements GameRoomState {
   }
 
   private newGame(): TurboGame {
+    // Зерно уходит в правила: по нему выбираются двойные агенты, и по нему же
+    // партия воспроизводится из записи.
     return new TurboGame(
-      startPosition(this.settings.mode, this.settings.options),
+      startPosition(this.settings.mode, this.settings.options, this.seed),
     );
   }
 
   /** Чистая партия: новая доска, новая запись, новое зерно. */
   private fresh(): void {
+    // Зерно меняется раньше доски: по нему она и собирается.
+    this.matchId = randomUUID();
+    this.seed = newSeed();
     this.game = this.newGame();
     this.setupUntil = null;
     this.arrangement = [];
     this.setupReady = [];
     this.times = [];
-    this.matchId = randomUUID();
-    this.seed = newSeed();
     this.absence = null;
     this.resetOffers();
   }

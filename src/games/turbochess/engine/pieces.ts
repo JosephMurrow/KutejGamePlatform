@@ -21,15 +21,32 @@ export type PieceKind = "p" | "n" | "b" | "r" | "q" | "k";
  */
 export type Side = number;
 
-export interface Piece {
+/**
+ * Метки фигуры сверх вида и стороны — их ставят режимы, и ездят они вместе с
+ * фигурой: мега-форма остаётся мега-формой, куда бы фигура ни пошла.
+ */
+export interface PieceMarks {
+  /** Мега-форма: фигура дошла до первой горизонтали соперника (режим 4). */
+  readonly mega?: boolean;
+  /** Двойной агент: ею ходит и соперник (режим 10). */
+  readonly agent?: boolean;
+  /** Агент пробуждён: соперник им сходил, и теперь его видят все. */
+  readonly awake?: boolean;
+}
+
+export interface Piece extends PieceMarks {
   readonly kind: PieceKind;
   readonly side: Side;
 }
 
-/** Как ходит фигура: прыжки на один вектор и лучи до первой преграды. */
+/**
+ * Как ходит фигура: прыжки на один вектор, лучи до первой преграды и лучи с
+ * правом перепрыгнуть ровно одну фигуру — это пушка мега-шахмат.
+ */
 export interface Pattern {
   readonly leaps: readonly Vec[];
   readonly slides: readonly Vec[];
+  readonly hops?: readonly Vec[];
 }
 
 const ORTHOGONAL: readonly Vec[] = [
@@ -55,6 +72,18 @@ const KNIGHT: readonly Vec[] = [
   [-1, 2],
 ];
 
+/** Большая буква Г — прыжок мега-коня (docs/MODES.md, режим 4). */
+const BIG_KNIGHT: readonly Vec[] = [
+  [2, 3],
+  [3, 2],
+  [3, -2],
+  [2, -3],
+  [-2, -3],
+  [-3, -2],
+  [-3, 2],
+  [-2, 3],
+];
+
 export const PATTERNS: Readonly<Record<Exclude<PieceKind, "p">, Pattern>> = {
   n: { leaps: KNIGHT, slides: [] },
   b: { leaps: [], slides: DIAGONAL },
@@ -63,22 +92,66 @@ export const PATTERNS: Readonly<Record<Exclude<PieceKind, "p">, Pattern>> = {
   k: { leaps: [...ORTHOGONAL, ...DIAGONAL], slides: [] },
 };
 
+/**
+ * Мега-формы: что фигура получает, дойдя до первой горизонтали соперника
+ * (docs/MODES.md, режим 4). Король мега-формы не получает — дойдя, он просто
+ * выигрывает, и это правило партии, а не таблица ходов.
+ */
+export const MEGA_PATTERNS: Readonly<Record<Exclude<PieceKind, "p">, Pattern>> =
+  {
+    n: { leaps: [...KNIGHT, ...BIG_KNIGHT], slides: [] },
+    b: { leaps: ORTHOGONAL, slides: DIAGONAL },
+    r: { leaps: [], slides: ORTHOGONAL, hops: ORTHOGONAL },
+    q: { leaps: KNIGHT, slides: [...ORTHOGONAL, ...DIAGONAL] },
+    k: PATTERNS.k,
+  };
+
+/** Как ходит эта фигура: по обычной таблице или по мега-форме. */
+export function patternOf(mover: Piece): Pattern {
+  if (mover.kind === "p") return { leaps: [], slides: [] };
+  return mover.mega ? MEGA_PATTERNS[mover.kind] : PATTERNS[mover.kind];
+}
+
 /** Во что превращается пешка. */
 export const PROMOTIONS: readonly PieceKind[] = ["q", "r", "b", "n"];
 
 const CACHE = new Map<string, Piece>();
 
+/** Метки строкой — ими фигуры различаются в кэше и в ключе повторений. */
+export function markKey(marks: PieceMarks): string {
+  return `${marks.mega ? "m" : ""}${marks.agent ? "a" : ""}${marks.awake ? "w" : ""}`;
+}
+
 /**
- * Фигура этого вида и этой стороны. Один объект на пару: позиции делят
- * фигуры между собой, и менять фигуру на месте нельзя — превращение ставит
- * новую.
+ * Фигура этого вида, этой стороны и с этими метками. Один объект на набор:
+ * позиции делят фигуры между собой, и менять фигуру на месте нельзя —
+ * превращение и мега-форма ставят новую.
  */
-export function piece(kind: PieceKind, side: Side): Piece {
-  const key = `${kind}${side}`;
+export function piece(
+  kind: PieceKind,
+  side: Side,
+  marks: PieceMarks = {},
+): Piece {
+  const key = `${kind}${side}${markKey(marks)}`;
   let found = CACHE.get(key);
   if (!found) {
-    found = Object.freeze({ kind, side });
+    found = Object.freeze({
+      kind,
+      side,
+      ...(marks.mega ? { mega: true } : {}),
+      ...(marks.agent ? { agent: true } : {}),
+      ...(marks.awake ? { awake: true } : {}),
+    });
     CACHE.set(key, found);
   }
   return found;
+}
+
+/** Та же фигура с добавленными метками. */
+export function marked(mover: Piece, marks: PieceMarks): Piece {
+  return piece(mover.kind, mover.side, {
+    mega: mover.mega || marks.mega,
+    agent: mover.agent || marks.agent,
+    awake: mover.awake || marks.awake,
+  });
 }

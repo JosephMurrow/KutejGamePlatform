@@ -623,6 +623,47 @@ describe("вскрываемся", () => {
   });
 });
 
+describe("двойной агент", () => {
+  it("свой агент — секрет от хозяина, чужой виден, зрителю — ни одного", () => {
+    const settings: TurboRoomSettings = {
+      mode: "DOUBLE_AGENT",
+      timeControl: "SEC_30",
+      options: {},
+    };
+    const context: GameRoomContext = {
+      key: "turbo-agent",
+      ownerId: "white",
+      isPrivate: true,
+      settings,
+      connections: () => 2,
+      introduce: () => {},
+      forget: () => {},
+      emitted: () => {},
+      changed: () => {},
+    };
+    const room = new TurboRoom(context, settings);
+    room.join("white");
+    room.join("black");
+
+    const seen = (viewer: string) =>
+      (
+        (view(room, viewer).position as Position).board.filter(
+          (cell) => cell?.agent,
+        ) as { side: number }[]
+      ).map((cell) => cell.side);
+
+    assert.deepEqual(seen("white"), [1], "белым виден только чёрный агент");
+    assert.deepEqual(seen("black"), [0], "чёрным — только белый");
+    assert.deepEqual(
+      (
+        room.snapshot({ kind: "screen" }).extra.position as Position
+      ).board.filter((cell) => cell?.agent),
+      [],
+      "экрану — ни одного",
+    );
+  });
+});
+
 describe("бомба", () => {
   function nuclearTable(options: ModeOptions = { threshold: 20 }) {
     const settings: TurboRoomSettings = {
