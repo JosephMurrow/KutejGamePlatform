@@ -96,6 +96,8 @@ export function oneKindPosition(kind: OneKind): Position {
     pending: [],
     chances: [],
     vetoes: [],
+    spent: [],
+    extra: [],
     banned: null,
   };
 }

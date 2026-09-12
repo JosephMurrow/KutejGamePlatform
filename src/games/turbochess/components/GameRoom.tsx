@@ -7,13 +7,21 @@ import { Chat } from "@/components/room/Chat";
 import { InviteModal } from "@/components/rooms/InviteModal";
 import { Countdown } from "@/components/ui/Countdown";
 import { useExitWarning } from "@/components/games/ExitToShelf";
-import type { MoveInput } from "../engine/game";
+import type { DropKind, MarketItem, MoveInput } from "../engine/game";
 import { REASON_TEXT } from "../engine/outcome";
 import type { Side } from "../engine/pieces";
 import type { Position } from "../engine/position";
 import { STALL_WARN, stallLeft, takenCount } from "../modes/annihilation";
 import { modeInfo } from "../modes/catalog";
 import { chanceReady } from "../modes/lastChance";
+import {
+  MARKET_HINT,
+  MARKET_ITEMS,
+  MARKET_LABEL,
+  marketPrice,
+  pointsLeft,
+  revivable,
+} from "../modes/market";
 import { VETOES } from "../modes/anarchy";
 import { nuclearCharge, nuclearThreshold } from "../modes/nuclear";
 import { rulesOf } from "../modes/rules";
@@ -21,6 +29,7 @@ import type { ModeOptions } from "../rooms/settings";
 import { MENU_LINKS } from "../menu";
 import type { TurboPlayerPayload, TurboStatePayload } from "../protocol";
 import { Board } from "./Board";
+import { PIECE_NAME } from "./pieces";
 import { FlipIcon, IconButton, SoundIcon } from "./icons";
 import { useSound } from "./sound";
 import { useTurboRoom } from "./useTurboRoom";
@@ -68,6 +77,36 @@ export function GameRoom({
   const playing = state?.phase === "playing";
   /** «Вскрываемся»: до вскрытия ходов нет, фигуры меняются местами. */
   const arranging = state?.phase === "setup" && mySide !== null;
+  /** «Чёрный рынок»: открыт магазин или покупка ждёт клетку. */
+  const [shopOpen, setShopOpen] = useState(false);
+  const [order, setOrder] = useState<{
+    item: MarketItem;
+    from?: string;
+    kind?: DropKind;
+  } | null>(null);
+
+  /** Покупка ждёт клетку: доска отдаёт нажатую сюда. */
+  function pickSquare(square: string) {
+    if (!order) return;
+
+    if (order.item === "shield") {
+      void room.buy({ item: "shield", from: square });
+      setOrder(null);
+      return;
+    }
+    if (order.item === "revive") {
+      void room.buy({ item: "revive", kind: order.kind, to: square });
+      setOrder(null);
+      return;
+    }
+    if (!order.from) {
+      setOrder({ ...order, from: square });
+      return;
+    }
+
+    void room.buy({ item: order.item, from: order.from, to: square });
+    setOrder(null);
+  }
 
   // Звук по свежему ходу: щелчок, взятие, шах или конец партии.
   const heard = useRef(0);
@@ -145,6 +184,7 @@ export function GameRoom({
               onSwap={
                 arranging ? (from, to) => void room.swap(from, to) : undefined
               }
+              onPick={order ? pickSquare : undefined}
               onMove={(input: MoveInput) =>
                 room.move({ ...input, ply: state.moves.length })
               }
@@ -160,6 +200,29 @@ export function GameRoom({
               onChance={room.chance}
               onVeto={room.veto}
             />
+            {state.mode === "BLACK_MARKET" &&
+            mySide !== null &&
+            state.position &&
+            state.phase === "playing" ? (
+              <Market
+                position={state.position}
+                side={mySide}
+                open={shopOpen}
+                order={order}
+                onOpen={() => setShopOpen(true)}
+                onClose={() => setShopOpen(false)}
+                onChoose={(item, kind) => {
+                  setShopOpen(false);
+                  if (item === "extra") {
+                    void room.buy({ item });
+                    return;
+                  }
+                  setOrder({ item, ...(kind ? { kind } : {}) });
+                }}
+                onCancel={() => setOrder(null)}
+              />
+            ) : null}
+
             {state.phase === "setup" ? (
               <Setup
                 state={state}
@@ -298,6 +361,138 @@ function ModeCard({ state }: { state: TurboStatePayload }) {
               {line}
             </p>
           ))}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+/**
+ * Чёрный рынок: кнопка со счётом очков, окно с карточками и строка наведения,
+ * когда покупка ждёт клетку (docs/MODES.md, режим 13).
+ */
+function Market({
+  position,
+  side,
+  open,
+  order,
+  onOpen,
+  onClose,
+  onChoose,
+  onCancel,
+}: {
+  position: Position;
+  side: Side;
+  open: boolean;
+  order: { item: MarketItem; from?: string; kind?: DropKind } | null;
+  onOpen: () => void;
+  onClose: () => void;
+  onChoose: (item: MarketItem, kind?: DropKind) => void;
+  onCancel: () => void;
+}) {
+  const left = pointsLeft(position, side);
+  const dead = revivable(position, side);
+
+  const hint = !order
+    ? null
+    : order.item === "shield"
+      ? "Выбери свою фигуру — она переживёт одно взятие"
+      : order.item === "revive"
+        ? "Выбери клетку на своих двух горизонталях"
+        : order.from
+          ? "Теперь выбери вторую клетку"
+          : "Выбери свою фигуру";
+
+  return (
+    <div className="flex flex-col gap-2">
+      <button
+        type="button"
+        onClick={onOpen}
+        className="flex items-center justify-between rounded-xl border border-accent bg-tint px-3 py-2 text-sm font-semibold text-accent transition hover:bg-accent-soft/20"
+      >
+        Чёрный рынок
+        <span className="tabular text-xs">очков: {left}</span>
+      </button>
+
+      {hint ? (
+        <div className="flex items-center justify-between gap-2 rounded-lg bg-tint px-3 py-2 text-xs text-accent">
+          {hint}
+          <button
+            type="button"
+            onClick={onCancel}
+            className="shrink-0 font-semibold underline"
+          >
+            отмена
+          </button>
+        </div>
+      ) : null}
+
+      {open ? (
+        <div className="fixed inset-0 z-40 flex items-center justify-center bg-ink/60 px-4">
+          <div className="flex w-full max-w-sm flex-col gap-2 rounded-2xl border border-accent bg-paper px-4 py-4">
+            <div className="flex items-baseline justify-between">
+              <span className="text-base font-semibold">Чёрный рынок</span>
+              <span className="tabular text-xs text-muted">очков: {left}</span>
+            </div>
+
+            {MARKET_ITEMS.filter((item) => item !== "revive").map((item) => {
+              const price = marketPrice(item);
+              return (
+                <button
+                  key={item}
+                  type="button"
+                  disabled={price > left}
+                  onClick={() => onChoose(item)}
+                  className="flex items-start justify-between gap-3 rounded-lg border border-line px-3 py-2 text-left transition hover:border-accent disabled:opacity-40"
+                >
+                  <span className="text-sm">
+                    {MARKET_LABEL[item]}
+                    <span className="block text-xs text-muted">
+                      {MARKET_HINT[item]}
+                    </span>
+                  </span>
+                  <span className="tabular text-sm font-semibold">{price}</span>
+                </button>
+              );
+            })}
+
+            {dead.length === 0 ? (
+              <p className="text-xs text-muted">
+                Воскрешать пока некого: соперник у вас ничего не забирал.
+              </p>
+            ) : (
+              dead.map((kind) => {
+                const price = marketPrice("revive", kind);
+                return (
+                  <button
+                    key={kind}
+                    type="button"
+                    disabled={price > left}
+                    onClick={() => onChoose("revive", kind as DropKind)}
+                    className="flex items-start justify-between gap-3 rounded-lg border border-line px-3 py-2 text-left transition hover:border-accent disabled:opacity-40"
+                  >
+                    <span className="text-sm">
+                      Воскресить: {PIECE_NAME[kind]}
+                      <span className="block text-xs text-muted">
+                        {MARKET_HINT.revive}
+                      </span>
+                    </span>
+                    <span className="tabular text-sm font-semibold">
+                      {price}
+                    </span>
+                  </button>
+                );
+              })
+            )}
+
+            <button
+              type="button"
+              onClick={onClose}
+              className="mt-1 rounded-lg border border-line px-3 py-2 text-sm font-semibold text-muted transition hover:text-ink"
+            >
+              Закрыть
+            </button>
+          </div>
         </div>
       ) : null}
     </div>

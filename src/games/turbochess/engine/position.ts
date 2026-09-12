@@ -167,6 +167,13 @@ export interface Position {
   /** Сколько «НЕТ» осталось каждой стороне; пусто — их нет вовсе. */
   readonly vetoes: readonly number[];
   /**
+   * Сколько очков каждая сторона уже потратила на чёрном рынке: набранное
+   * считается по взятым фигурам, а это — расход (docs/MODES.md, режим 13).
+   */
+  readonly spent: readonly number[];
+  /** Купленные дополнительные ходы: пока их банк не пуст, очередь не уходит. */
+  readonly extra: readonly number[];
+  /**
    * Ход, который только что отменили: повторить его нельзя, соперник обязан
    * сходить иначе (docs/MODES.md, режим 15).
    */
@@ -227,6 +234,8 @@ export function classicPosition(): Position {
     pending: [],
     chances: [],
     vetoes: [],
+    spent: [],
+    extra: [],
     banned: null,
   };
 }

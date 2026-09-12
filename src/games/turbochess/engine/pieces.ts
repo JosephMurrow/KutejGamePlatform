@@ -32,6 +32,11 @@ export interface PieceMarks {
   readonly agent?: boolean;
   /** Агент пробуждён: соперник им сходил, и теперь его видят все. */
   readonly awake?: boolean;
+  /**
+   * Щит чёрного рынка: фигура переживает одно взятие, рубящий возвращается
+   * назад (docs/MODES.md, режим 13).
+   */
+  readonly shield?: boolean;
 }
 
 export interface Piece extends PieceMarks {
@@ -119,7 +124,7 @@ const CACHE = new Map<string, Piece>();
 
 /** Метки строкой — ими фигуры различаются в кэше и в ключе повторений. */
 export function markKey(marks: PieceMarks): string {
-  return `${marks.mega ? "m" : ""}${marks.agent ? "a" : ""}${marks.awake ? "w" : ""}`;
+  return `${marks.mega ? "m" : ""}${marks.agent ? "a" : ""}${marks.awake ? "w" : ""}${marks.shield ? "s" : ""}`;
 }
 
 /**
@@ -141,10 +146,23 @@ export function piece(
       ...(marks.mega ? { mega: true } : {}),
       ...(marks.agent ? { agent: true } : {}),
       ...(marks.awake ? { awake: true } : {}),
+      ...(marks.shield ? { shield: true } : {}),
     });
     CACHE.set(key, found);
   }
   return found;
+}
+
+/** Та же фигура без этой метки: щит сгорает, когда его пробили. */
+export function unmarked(mover: Piece, mark: keyof PieceMarks): Piece {
+  const marks: PieceMarks = {
+    mega: mover.mega,
+    agent: mover.agent,
+    awake: mover.awake,
+    shield: mover.shield,
+  };
+
+  return piece(mover.kind, mover.side, { ...marks, [mark]: false });
 }
 
 /** Та же фигура с добавленными метками. */
@@ -153,5 +171,6 @@ export function marked(mover: Piece, marks: PieceMarks): Piece {
     mega: mover.mega || marks.mega,
     agent: mover.agent || marks.agent,
     awake: mover.awake || marks.awake,
+    shield: mover.shield || marks.shield,
   });
 }

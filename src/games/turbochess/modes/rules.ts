@@ -7,6 +7,7 @@ import { modeInfo, type TurboMode } from "./catalog";
 import { boozePosition, boozeRules } from "./booze";
 import { giveawayPosition, giveawayRules } from "./giveaway";
 import { lastChancePosition, lastChanceRules } from "./lastChance";
+import { marketPosition, marketRules } from "./market";
 import { megaPosition, megaRules } from "./mega";
 import { noRetreatPosition, noRetreatRules } from "./noRetreat";
 import { nuclearOptions, nuclearRules, nuclearThreshold } from "./nuclear";
@@ -51,6 +52,7 @@ const READY: ReadonlySet<TurboMode> = new Set([
   "LAST_CHANCE",
   "ANARCHY",
   "BOOZE",
+  "BLACK_MARKET",
 ]);
 
 export function isReady(mode: TurboMode): boolean {
@@ -99,6 +101,8 @@ export function startPosition(
       return anarchyPosition();
     case "BOOZE":
       return boozePosition();
+    case "BLACK_MARKET":
+      return marketPosition();
     default:
       return classicPosition();
   }
@@ -170,6 +174,8 @@ export function rulesOf(mode: TurboMode, options: ModeOptions): ModeRules {
       return { variant: null, lines: anarchyRules(), ready: true };
     case "BOOZE":
       return { variant: null, lines: boozeRules(), ready: true };
+    case "BLACK_MARKET":
+      return { variant: null, lines: marketRules(), ready: true };
     default:
       return {
         variant: null,

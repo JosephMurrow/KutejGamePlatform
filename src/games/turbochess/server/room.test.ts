@@ -748,6 +748,48 @@ describe("кнопки режимов", () => {
     );
   });
 
+  it("рынок: покупка списывает очки и не тратит ход", () => {
+    const { room } = table("BLACK_MARKET");
+
+    assert.equal(
+      room.act(GAME_EVENT.buy, "white", { item: "extra" }).reason,
+      "Не хватает очков",
+      "в начале партии очков нет",
+    );
+
+    // Пешка и конь — ровно четыре очка, цена дополнительного хода.
+    move(room, "white", "e2", "e4");
+    move(room, "black", "d7", "d5");
+    move(room, "white", "e4", "d5");
+    move(room, "black", "g8", "f6");
+    move(room, "white", "b1", "c3");
+    move(room, "black", "f6", "d5");
+    move(room, "white", "c3", "d5");
+    move(room, "black", "e7", "e6");
+
+    assert.equal(
+      room.act(GAME_EVENT.buy, "black", { item: "extra" }).reason,
+      "Покупают в свой ход",
+    );
+    assert.equal(
+      room.act(GAME_EVENT.buy, "white", { item: "shield", from: "a2" }).reason,
+      "Не хватает очков",
+      "щит стоит пять, а набрано четыре",
+    );
+
+    assert.equal(
+      room.act(GAME_EVENT.buy, "white", { item: "extra" }).accepted,
+      true,
+    );
+    assert.equal(view(room).turn, 0, "покупка ходом не считается");
+    assert.equal((view(room).position as Position).spent[0], 4, "очки списаны");
+
+    move(room, "white", "d1", "h5");
+    assert.equal(view(room).turn, 0, "дополнительный ход остался за белыми");
+    move(room, "white", "h5", "h4");
+    assert.equal(view(room).turn, 1, "а дальше как обычно");
+  });
+
   it("чужие кнопки в чужом режиме не работают", () => {
     const { room } = table("ANARCHY");
 

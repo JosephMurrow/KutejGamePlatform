@@ -8,12 +8,19 @@ import type {
 } from "@/lib/games/engine";
 import { MoveClock, type Ticker } from "../engine/clock";
 import { parseSquare, squareName } from "../engine/geometry";
-import { TurboGame, type MoveInput, type MoveRejection } from "../engine/game";
+import {
+  TurboGame,
+  type MarketItem,
+  type MarketOrder,
+  type MoveInput,
+  type MoveRejection,
+} from "../engine/game";
 import type { EndReason, Outcome } from "../engine/outcome";
 import type { PieceKind, Side } from "../engine/pieces";
 import type { Position } from "../engine/position";
 import { hideAgents } from "../modes/agents";
 import { TOAST_MS } from "../modes/booze";
+import { marketPrice, pointsLeft } from "../modes/market";
 import { roller } from "../modes/random";
 import type { TurboMode } from "../modes/catalog";
 import { bombReady } from "../modes/nuclear";
@@ -292,6 +299,8 @@ export class TurboRoom implements GameRoomState {
         return this.veto(actorId);
       case GAME_EVENT.toast:
         return this.confirmToast(actorId);
+      case GAME_EVENT.buy:
+        return this.buy(actorId, payload);
       case GAME_EVENT.swap:
         return this.swap(actorId, payload);
       case GAME_EVENT.ready:
@@ -630,6 +639,38 @@ export class TurboRoom implements GameRoomState {
   }
 
   /**
+   * «Чёрный рынок»: купить эффект. Цену считает режим, очки — позиция, а
+   * саму покупку применяет фасад. Комната сводит их вместе и никому на слово
+   * не верит.
+   */
+  private buy(actorId: string, payload: unknown): ActionOutcome {
+    const side = this.sideOf(actorId);
+    if (side === null) return { accepted: false, reason: "Ты не за доской" };
+    if (!this.playing()) return { accepted: false, reason: "Партия не идёт" };
+    if (this.settings.mode !== "BLACK_MARKET") {
+      return { accepted: false, reason: "В этом режиме магазина нет" };
+    }
+    if (this.toast) return { accepted: false, reason: "Сначала выпейте" };
+    if (side !== this.game.turn()) {
+      return { accepted: false, reason: "Покупают в свой ход" };
+    }
+
+    const order = parseOrder(payload);
+    if (!order) return { accepted: false, reason: "Непонятная покупка" };
+
+    const price = marketPrice(order.item, order.kind);
+    if (pointsLeft(this.game.position(), side) < price) {
+      return { accepted: false, reason: "Не хватает очков" };
+    }
+    if (!this.game.market(side, order, price)) {
+      return { accepted: false, reason: "Так не купить" };
+    }
+
+    this.context.changed();
+    return { accepted: true };
+  }
+
+  /**
    * «Анархия»: отменить последний ход соперника. Потраченное на него время
    * возвращается — иначе кнопка была бы способом сжечь чужие часы.
    */
@@ -873,6 +914,36 @@ const REJECTION_TEXT: Record<MoveRejection, string> = {
   needsPromotion: "Выбери, во что превратить пешку",
   illegal: "Так не ходят",
 };
+
+/** Разобрать покупку. Верить клиенту нельзя ни в одном поле. */
+function parseOrder(payload: unknown): MarketOrder | null {
+  if (typeof payload !== "object" || payload === null) return null;
+
+  const { item, from, to, kind } = payload as Record<string, unknown>;
+  const items: readonly MarketItem[] = [
+    "extra",
+    "shield",
+    "relocate",
+    "swap",
+    "revive",
+  ];
+  if (!items.includes(item as MarketItem)) return null;
+
+  const order: MarketOrder = { item: item as MarketItem };
+  if (typeof from === "string") order.from = from;
+  if (typeof to === "string") order.to = to;
+  if (
+    kind === "q" ||
+    kind === "r" ||
+    kind === "b" ||
+    kind === "n" ||
+    kind === "p"
+  ) {
+    order.kind = kind;
+  }
+
+  return order;
+}
 
 /** Разобрать перестановку: две клетки своей зоны. */
 function parseSwap(payload: unknown): { from: string; to: string } | null {

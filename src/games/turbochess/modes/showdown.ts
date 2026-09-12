@@ -131,6 +131,8 @@ export function showdownPosition(
     pending: [],
     chances: [],
     vetoes: [],
+    spent: [],
+    extra: [],
     banned: null,
   };
 }

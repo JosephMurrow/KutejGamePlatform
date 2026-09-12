@@ -94,6 +94,8 @@ export function fromFen(
     pending: [],
     chances: [],
     vetoes: [],
+    spent: [],
+    extra: [],
     banned: null,
   };
 }

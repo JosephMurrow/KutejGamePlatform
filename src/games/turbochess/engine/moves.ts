@@ -14,6 +14,7 @@ import {
   marked,
   patternOf,
   piece,
+  unmarked,
   type Piece,
   type PieceKind,
   type Side,
@@ -348,6 +349,36 @@ function castleMoves(position: Position, moves: Move[]): void {
 }
 
 /**
+ * Своя ли клетка для выставления: одна из двух стартовых горизонталей
+ * стороны. По ней ставят подкрепление, зомби и воскрешённых рынком.
+ */
+export function homeSquare(
+  position: Position,
+  side: Side,
+  square: number,
+): boolean {
+  const forward = position.sides[side]?.forward;
+  if (!forward) return false;
+
+  const lines = pawnLines(position.geometry, forward);
+  const line = lines.coordinate(square);
+  return line === lines.first || line === lines.second;
+}
+
+/** Первая горизонталь стороны: туда пешку не ставят ни из резерва, ни с рынка. */
+export function firstLine(
+  position: Position,
+  side: Side,
+  square: number,
+): boolean {
+  const forward = position.sides[side]?.forward;
+  if (!forward) return false;
+
+  const lines = pawnLines(position.geometry, forward);
+  return lines.coordinate(square) === lines.first;
+}
+
+/**
  * Выставление из резерва: фигура встаёт на свободную клетку своих двух
  * стартовых горизонталей, и это ход (docs/MODES.md, режимы 2 и 14).
  *
@@ -355,21 +386,16 @@ function castleMoves(position: Position, moves: Move[]): void {
  * механика: ходить ей оттуда было бы некуда назад, а вперёд она и так пойдёт.
  */
 function dropMoves(position: Position, moves: Move[]): void {
-  const { geometry, board, turn } = position;
+  const { board, turn } = position;
   const kinds = new Set(position.reserve[turn] ?? []);
   if (kinds.size === 0) return;
 
-  const forward = position.sides[turn]?.forward;
-  if (!forward) return;
-  const lines = pawnLines(geometry, forward);
-
   for (let to = 0; to < board.length; to++) {
     if (at(board, to)) continue;
-    const line = lines.coordinate(to);
-    if (line !== lines.first && line !== lines.second) continue;
+    if (!homeSquare(position, turn, to)) continue;
 
     for (const kind of kinds) {
-      if (kind === "p" && line === lines.first) continue;
+      if (kind === "p" && firstLine(position, turn, to)) continue;
       moves.push(basic(DROP, to, piece(kind, turn), null));
     }
   }
@@ -543,9 +569,21 @@ function landing(position: Position, move: Move): Piece {
   return mover;
 }
 
+/** Щит принял удар: взятия не было, рубящий возвращается назад. */
+function stopped(move: Move): boolean {
+  return Boolean(move.captured?.shield);
+}
+
 /** Доска после хода. */
 function boardAfter(position: Position, move: Move): (Piece | null)[] {
   const board = position.board.slice();
+
+  // Щит сгорает, и на доске больше не меняется ничего: рубящий как стоял, так
+  // и стоит (docs/MODES.md, режим 13).
+  if (stopped(move) && move.captured && move.capturedAt !== null) {
+    board[move.capturedAt] = unmarked(move.captured, "shield");
+    return board;
+  }
 
   if (move.from !== DROP) board[move.from] = null;
   if (move.capturedAt !== null) board[move.capturedAt] = null;
@@ -611,8 +649,14 @@ function reserveAfter(position: Position, move: Move) {
   }
 
   // Король не зомбируется никогда: его берут только там, где мата нет, и
-  // возвращать его на доску было бы вторым королём.
-  if (position.rules.zombies && move.captured && move.captured.kind !== "k") {
+  // возвращать его на доску было бы вторым королём. Отбитое щитом взятие
+  // зомби тоже не даёт: фигура осталась на доске.
+  if (
+    position.rules.zombies &&
+    move.captured &&
+    !stopped(move) &&
+    move.captured.kind !== "k"
+  ) {
     pending.push({
       kind: move.captured.kind,
       side: mover,
@@ -629,20 +673,29 @@ export function play(position: Position, move: Move): Position {
   // очередь после этого всё равно переходит к хозяину агента.
   const mover = position.turn;
   const forward = position.sides[move.piece.side]?.forward;
+  const took = move.captured !== null && !stopped(move);
+  // Купленный дополнительный ход: очередь остаётся у того же, и банк тает.
+  const bank = position.extra[mover] ?? 0;
 
   return {
     ...position,
     ...reserveAfter(position, move),
     board: boardAfter(position, move),
-    turn: nextSide(position, mover),
+    turn: bank > 0 ? mover : nextSide(position, mover),
+    extra:
+      bank > 0
+        ? position.extra.map((left, at) => (at === mover ? left - 1 : left))
+        : position.extra,
     // Король сходил — сгорают все права его стороны; ладья ушла или её
-    // забрали — сгорает право с этой ладьёй.
-    castling: position.castling.filter(
-      (right) =>
-        !(move.piece.kind === "k" && right.side === move.piece.side) &&
-        right.rook !== move.from &&
-        right.rook !== move.to,
-    ),
+    // забрали — сгорает право с этой ладьёй. Отбитый щитом никуда не ходил.
+    castling: stopped(move)
+      ? position.castling
+      : position.castling.filter(
+          (right) =>
+            !(move.piece.kind === "k" && right.side === move.piece.side) &&
+            right.rook !== move.from &&
+            right.rook !== move.to,
+        ),
     enPassant:
       move.doubleStep && forward
         ? {
@@ -650,11 +703,11 @@ export function play(position: Position, move: Move): Position {
             victim: move.to,
           }
         : null,
-    quiet: move.piece.kind === "p" || move.captured ? 0 : position.quiet + 1,
-    sinceCapture: move.captured ? 0 : position.sinceCapture + 1,
+    quiet: move.piece.kind === "p" || took ? 0 : position.quiet + 1,
+    sinceCapture: took ? 0 : position.sinceCapture + 1,
     // Запрет живёт ровно один ход: сходили иначе — и он снят.
     banned: null,
-    taken: move.captured
+    taken: took
       ? position.taken.map((list, side) =>
           side === mover && move.captured ? [...list, move.captured] : list,
         )
@@ -723,9 +776,16 @@ export function san(
     text = `${LETTER[move.piece.kind]}${hint}${move.captured ? "x" : ""}${squareName(geometry, move.to)}`;
   }
 
+  // Щит принял удар — в записи это видно: взятие было, а фигура на месте.
+  if (stopped(move)) text += "^";
+
   const after = play(position, move);
-  if (inCheck(after, after.turn)) {
-    text += legalMoves(after).length === 0 ? "#" : "+";
+  // Шах — сопернику, а не тому, чья очередь: с купленным лишним ходом это
+  // разные стороны.
+  const defender = nextSide(position, position.turn);
+  if (inCheck(after, defender)) {
+    text +=
+      legalMoves(after).length === 0 && after.turn === defender ? "#" : "+";
   }
   return text;
 }

@@ -15,6 +15,7 @@ import {
   type ChatMessagePayload,
 } from "@/shared/protocol";
 import { wakeOnReturn } from "@/shared/socket-wake";
+import type { MarketOrder } from "../engine/game";
 import { GAME_EVENT, GAME_ID, type TurboStatePayload } from "../protocol";
 
 /**
@@ -73,6 +74,8 @@ export interface TurboRoomHandle {
   veto: () => Promise<void>;
   /** «Алко»: подтвердить, что соперник выпил. */
   toast: () => Promise<void>;
+  /** «Чёрный рынок»: купить эффект. */
+  buy: (order: MarketOrder) => Promise<void>;
 }
 
 function connectionQuery(
@@ -232,6 +235,13 @@ export function useTurboRoom(
     await act(GAME_EVENT.toast);
   }, [act]);
 
+  const buy = useCallback(
+    async (order: MarketOrder) => {
+      await act(GAME_EVENT.buy, order);
+    },
+    [act],
+  );
+
   return {
     state,
     connected,
@@ -252,5 +262,6 @@ export function useTurboRoom(
     chance,
     veto,
     toast,
+    buy,
   };
 }

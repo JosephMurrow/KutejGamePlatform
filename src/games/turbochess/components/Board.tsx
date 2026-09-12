@@ -54,6 +54,8 @@ const AGENT = "#ff7a3d";
 const AWAKE = "#c8281e";
 /** Куда выбранной фигуре уже нельзя: назад в пацанских шахматах. */
 const BEHIND = "rgba(43, 18, 6, 0.34)";
+/** Щит чёрного рынка — жёлтый, как наклейки на крышке коробки. */
+const SHIELD = "#ffe14a";
 
 /**
  * Рубашка: чем закрыта чужая половина доски, пока идёт расстановка
@@ -106,6 +108,11 @@ export interface BoardProps {
    * местами. Есть — значит идёт расстановка, и ходов на доске нет вовсе.
    */
   onSwap?: (from: string, to: string) => void;
+  /**
+   * Наведение: покупка чёрного рынка ждёт клетку. Есть — значит доска ходов
+   * не делает, а отдаёт нажатую клетку наружу.
+   */
+  onPick?: (square: string) => void;
 }
 
 export function Board({
@@ -116,6 +123,7 @@ export function Board({
   onMove,
   covered,
   onSwap,
+  onPick,
 }: BoardProps) {
   /** Позиция после своего хода, пока его не приняли. */
   const [preview, setPreview] = useState<Position | null>(null);
@@ -130,8 +138,9 @@ export function Board({
   const shown = preview ?? position;
   const legal = useMemo(() => legalMoves(shown), [shown]);
   const arranging = onSwap !== undefined;
+  const picking = onPick !== undefined;
   const canMove =
-    !arranging && preview === null && controls.includes(shown.turn);
+    !arranging && !picking && preview === null && controls.includes(shown.turn);
 
   const styles = useMemo(() => {
     const marks: Record<string, CSSProperties> = {};
@@ -187,6 +196,7 @@ export function Board({
       if (!cell) return;
       const square = squareName(shown.geometry, at);
       if (cell.mega) ring(square, MEGA);
+      if (cell.shield) ring(square, SHIELD);
       if (cell.awake) ring(square, AWAKE);
       else if (cell.agent) ring(square, AGENT);
     });
@@ -293,6 +303,11 @@ export function Board({
   }
 
   function clickSquare(square: string) {
+    // Покупка ждёт клетку: доска её просто отдаёт наружу.
+    if (picking) {
+      onPick(square);
+      return;
+    }
     if (!canMove && !arranging) return;
 
     if (dropping) {

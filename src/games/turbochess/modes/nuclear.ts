@@ -1,6 +1,7 @@
-import type { PieceKind, Side } from "../engine/pieces";
+import type { Side } from "../engine/pieces";
 import type { Position } from "../engine/position";
 import type { ModeOptions } from "../rooms/settings";
+import { PIECE_VALUE, pointsOf } from "./points";
 
 /**
  * Режим 8, «Ядерные шахматы» (docs/MODES.md): шахматы обычные, но за взятые
@@ -12,18 +13,7 @@ import type { ModeOptions } from "../rooms/settings";
  * взятым фигурам, а они лежат в позиции, так что своя шкала есть и у клиента.
  */
 
-/**
- * Номиналы фигур — общая шкала игры (docs/MODES.md, «Общее для всех
- * режимов»). Короля в обычных шахматах не берут, очков за него не бывает.
- */
-export const PIECE_VALUE: Record<PieceKind, number> = {
-  p: 1,
-  n: 3,
-  b: 3,
-  r: 5,
-  q: 9,
-  k: 0,
-};
+export { PIECE_VALUE };
 
 /**
  * Пороги заряда. Всего у стороны 39 очков материала: 25 — это примерно ферзь,
@@ -52,12 +42,9 @@ export function nuclearOptions(read: (name: string) => unknown): ModeOptions {
   };
 }
 
-/** Заряд стороны: сумма номиналов всего, что она съела у соперника. */
+/** Заряд стороны: те же очки, что и у рынка, — общая шкала номиналов. */
 export function nuclearCharge(position: Position, side: Side): number {
-  return (position.taken[side] ?? []).reduce(
-    (total, taken) => total + (PIECE_VALUE[taken.kind] ?? 0),
-    0,
-  );
+  return pointsOf(position, side);
 }
 
 /** Заряд набран — бомбу можно сбрасывать. */

@@ -1,5 +1,5 @@
 import { parseSquare, squareName } from "./geometry";
-import type { Piece, PieceKind, Side } from "./pieces";
+import { marked, piece, type Piece, type PieceKind, type Side } from "./pieces";
 import {
   STALL_PLIES,
   classicPosition,
@@ -10,6 +10,8 @@ import {
 import {
   DROP,
   canMate,
+  firstLine,
+  homeSquare,
   inCheck,
   insufficientMaterial,
   legalMoves,
@@ -35,6 +37,29 @@ import type { EndReason, Outcome, Result } from "./outcome";
 
 /** Что можно выставить из резерва: всё, кроме короля. */
 export type DropKind = "q" | "r" | "b" | "n" | "p";
+
+/** Что покупают на чёрном рынке (docs/MODES.md, режим 13). */
+export type MarketItem =
+  /** Ходишь дважды подряд. */
+  | "extra"
+  /** Выбранная фигура переживает одно взятие. */
+  | "shield"
+  /** Своя фигура переносится на свободную клетку. */
+  | "relocate"
+  /** Две свои фигуры меняются местами. */
+  | "swap"
+  /** Взятая у тебя фигура возвращается на свои две горизонтали. */
+  | "revive";
+
+export interface MarketOrder {
+  item: MarketItem;
+  /** Клетка своей фигуры: щит, перестановка, обмен. */
+  from?: string;
+  /** Куда: перестановка, обмен, воскрешение. */
+  to?: string;
+  /** Кого воскрешают. */
+  kind?: DropKind;
+}
 
 /** Ход на проводе: координаты и фигура превращения, а не запись партии. */
 export interface MoveInput {
@@ -89,6 +114,19 @@ export type MoveResult =
  */
 function opponent(side: Side): Side {
   return side === 0 ? 1 : 0;
+}
+
+/** Прибавить стороне столько-то, дополнив список до числа сторон. */
+function bump(
+  counts: readonly number[],
+  side: Side,
+  delta: number,
+  sides: number,
+): number[] {
+  return Array.from(
+    { length: sides },
+    (_, seat) => (counts[seat] ?? 0) + (seat === side ? delta : 0),
+  );
 }
 
 /** Шаг истории: позиция, её ключ повторений и ход, который к ней привёл. */
@@ -222,7 +260,7 @@ export class TurboGame {
       ...(chosen.promotion ? { promotion: chosen.promotion } : {}),
       san: san(position, chosen, legal),
       ply: this.ply() + 1,
-      check: inCheck(after, after.turn),
+      check: inCheck(after, nextSide(position, position.turn)),
       ...(chosen.captured ? { captured: chosen.captured.kind } : {}),
     };
 
@@ -356,13 +394,114 @@ export class TurboGame {
     });
     if (!hit) return null;
 
-    const after: Position = { ...position, board };
-    this.count(this.top.key, -1);
-    this.top.position = after;
-    this.top.key = repetitionKey(after);
-    this.count(this.top.key, 1);
+    this.replace({ ...position, board });
 
     return this.detect();
+  }
+
+  /**
+   * Купить эффект чёрного рынка (docs/MODES.md, режим 13). Цену знает режим, а
+   * хватает ли очков — проверяет комната; фасаду остаётся применить эффект и
+   * записать трату.
+   *
+   * Покупка ходом не считается — кроме дополнительного хода, который ход и
+   * есть: он кладётся в банк, и ближайший ход очередь не передаёт. Поэтому
+   * позиция правится на месте, а не новым шагом истории.
+   */
+  market(side: Side, order: MarketOrder, price: number): boolean {
+    if (this.ended) return false;
+
+    const position = this.top.position;
+    if (position.turn !== side) return false;
+
+    const after = this.applyMarket(position, side, order);
+    if (!after) return false;
+
+    this.replace({
+      ...after,
+      spent: bump(after.spent, side, price, position.sides.length),
+    });
+
+    return true;
+  }
+
+  /** Что покупка делает с позицией; `null` — так купить нельзя. */
+  private applyMarket(
+    position: Position,
+    side: Side,
+    order: MarketOrder,
+  ): Position | null {
+    const { geometry } = position;
+    const from = order.from ? parseSquare(geometry, order.from) : null;
+    const to = order.to ? parseSquare(geometry, order.to) : null;
+    const board = position.board.slice();
+
+    const mine = (square: number | null): Piece | null => {
+      const cell = square === null ? null : (board[square] ?? null);
+      return cell && cell.side === side ? cell : null;
+    };
+
+    if (order.item === "extra") {
+      return {
+        ...position,
+        extra: bump(position.extra, side, 1, position.sides.length),
+      };
+    }
+
+    if (order.item === "shield") {
+      const target = mine(from);
+      if (from === null || !target || target.shield) return null;
+
+      board[from] = marked(target, { shield: true });
+      return { ...position, board };
+    }
+
+    if (order.item === "relocate") {
+      const target = mine(from);
+      if (from === null || to === null || !target) return null;
+      if (board[to]) return null;
+
+      board[from] = null;
+      board[to] = target;
+      return { ...position, board };
+    }
+
+    if (order.item === "swap") {
+      const one = mine(from);
+      const other = mine(to);
+      if (from === null || to === null || !one || !other || from === to) {
+        return null;
+      }
+
+      board[from] = other;
+      board[to] = one;
+      return { ...position, board };
+    }
+
+    // Воскрешение: фигуру берут из того, что забрал соперник, и ставят на
+    // свою половину. Пешку на первую горизонталь не ставят — как и всегда.
+    const kind = order.kind;
+    if (!kind || to === null || board[to]) return null;
+    if (!homeSquare(position, side, to)) return null;
+    if (kind === "p" && firstLine(position, side, to)) return null;
+
+    const grave = position.taken.map((list) => [...list]);
+    const enemy = position.sides.findIndex((_, seat) => seat !== side);
+    const at = (grave[enemy] ?? []).findIndex((cell) => cell.kind === kind);
+    if (enemy < 0 || at < 0) return null;
+
+    grave[enemy]?.splice(at, 1);
+    board[to] = piece(kind, side);
+
+    return { ...position, board, taken: grave };
+  }
+
+  /** Поменять текущую позицию, не делая нового хода. */
+  private replace(position: Position): void {
+    this.count(this.top.key, -1);
+    this.top.position = position;
+    this.top.key = repetitionKey(position);
+    this.count(this.top.key, 1);
   }
 
   /**
