@@ -1291,3 +1291,161 @@ describe("бот за столом", () => {
     assert.ok(draft.seats[1]?.startsWith("bot:"));
   });
 });
+
+describe("бот жмёт кнопки режимов", () => {
+  /** Стол с одним ботом в нужном режиме и с нужными ручками. */
+  function botTable(
+    mode: TurboMode,
+    options: ModeOptions = {},
+    level: LevelId = "expert",
+  ) {
+    let at = 1000;
+    const settings: TurboRoomSettings = {
+      mode,
+      timeControl: "MIN_3",
+      options,
+      bots: 1,
+      botLevel: level,
+    };
+    const context: GameRoomContext = {
+      key: `turbo-${mode}`,
+      ownerId: "human",
+      isPrivate: true,
+      settings,
+      connections: () => 1,
+      introduce: () => {},
+      forget: () => {},
+      emitted: () => {},
+      changed: () => {},
+    };
+    const pool = makeBots(1, level, 4242);
+    const room = new TurboRoom(context, settings, () => at, undefined, pool);
+    room.join("human");
+
+    return {
+      room,
+      bot: pool[0]!,
+      pass: (ms: number) => {
+        at += ms;
+      },
+      /** Дать боту доиграть паузу и сделать своё дело. */
+      let: (ms = 40_000) => {
+        at += ms;
+        room.tick();
+      },
+    };
+  }
+
+  it("алко: бот подтверждает чужую стопку, и она идёт в счётчик", () => {
+    const table = botTable("BOOZE");
+    const { room } = table;
+
+    // Играем, пока бот не срубит: окно подтверждения висит у срубившего, и
+    // отвечать на него будет он.
+    let toast: { drinker: number; pourer: number } | null = null;
+    for (let half = 0; half < 40 && !toast; half++) {
+      const state = view(room, "human");
+      if (state.phase !== "playing") break;
+
+      if (state.turn === 0) {
+        const legal = new TurboGame(state.position as Position).legal();
+        const pick = legal.find((one) => one.from && one.to) ?? legal[0];
+        assert.ok(pick);
+        room.act(GAME_EVENT.move, "human", {
+          ...pick,
+          ply: (state.moves as string[]).length,
+        });
+      } else {
+        table.let(20_000);
+      }
+
+      const after = view(room, "human").toast as typeof toast;
+      if (after) toast = after;
+    }
+
+    assert.ok(toast, "бот что-то срубил, и окно повисло");
+    assert.equal(toast.pourer, 1, "подтверждает срубивший — бот");
+
+    const before = (view(room, "human").drinks as number[])[0] ?? 0;
+    const pieces = (view(room, "human").position as Position).board.filter(
+      Boolean,
+    ).length;
+
+    // Бот держит паузу, а потом подтверждает — до конца окна и без штрафа.
+    table.let(9_000);
+    const state = view(room, "human");
+    assert.equal(state.toast, null, "окно закрылось");
+    assert.equal(
+      (state.drinks as number[])[0],
+      before + 1,
+      "стопка засчитана человеку",
+    );
+    assert.equal(
+      (state.position as Position).board.filter(Boolean).length,
+      pieces,
+      "штрафа не было: фигуры на месте",
+    );
+  });
+
+  it("ядерные: без заряда бот бомбу не жмёт, а просто ходит", () => {
+    const table = botTable("NUCLEAR", { threshold: 20 });
+    const { room } = table;
+
+    assert.equal(move(room, "human", "e2", "e4").accepted, true);
+    table.let(20_000);
+
+    const state = view(room, "human");
+    assert.equal(state.phase, "playing", "партия не кончилась взрывом");
+    assert.equal((state.moves as string[]).length, 2, "бот сходил как обычно");
+  });
+
+  it("вскрываемся: бот расставляется по своей заготовке и говорит «готов»", () => {
+    const table = botTable("SHOWDOWN");
+    const { room } = table;
+
+    const setup = view(room, "human");
+    assert.equal(setup.phase, "setup");
+    assert.equal((setup.setupReady as boolean[])[1], false);
+
+    // Бот думает над расстановкой десять-тридцать секунд.
+    table.pass(5_000);
+    room.tick();
+    assert.equal((view(room, "human").setupReady as boolean[])[1], false);
+
+    table.let(30_000);
+    assert.equal(
+      (view(room, "human").setupReady as boolean[])[1],
+      true,
+      "бот готов",
+    );
+  });
+
+  it("анархия: бот отменяет мат, пока у него есть «НЕТ»", () => {
+    const table = botTable("ANARCHY");
+    const { room } = table;
+
+    // Детский мат: бот играет чёрными и должен отменить последний ход.
+    const mate: [string, string][] = [
+      ["e2", "e4"],
+      ["f1", "c4"],
+      ["d1", "h5"],
+      ["h5", "f7"],
+    ];
+
+    for (const [from, to] of mate) {
+      const done = move(room, "human", from, to);
+      if (!done.accepted) break;
+      table.let(20_000);
+    }
+
+    const state = view(room, "human");
+    // Либо мат отменён и партия идёт, либо бот увернулся раньше — но партия
+    // точно не кончилась матом, пока «НЕТ» целы.
+    const vetoes = (state.position as Position).vetoes[1] ?? 0;
+    if (state.phase === "over") {
+      assert.ok(vetoes === 0, "мат засчитан только с пустыми «НЕТ»");
+    } else {
+      assert.equal(state.phase, "playing");
+    }
+  });
+});

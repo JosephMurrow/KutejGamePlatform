@@ -7,6 +7,17 @@ import type {
   GameViewer,
 } from "@/lib/games/engine";
 import type { BotRecord, BotSeat } from "../bots/seat";
+import {
+  bombCall,
+  chanceCall,
+  MARKET_COOLDOWN,
+  marketCall,
+  setupCall,
+  setupWait,
+  toastCall,
+  vetoCall,
+} from "../bots/buttons";
+import { evaluate } from "../bots/evaluate";
 import { think } from "../bots/mind";
 import { pauseMs } from "../bots/tempo";
 import { MoveClock, type Ticker } from "../engine/clock";
@@ -18,6 +29,7 @@ import {
   type MoveInput,
   type MoveRejection,
 } from "../engine/game";
+import { inCheck, legalMoves, play } from "../engine/moves";
 import type { EndReason, Outcome } from "../engine/outcome";
 import type { PieceKind, Side } from "../engine/pieces";
 import type { Position } from "../engine/position";
@@ -26,6 +38,7 @@ import { TOAST_MS } from "../modes/booze";
 import { marketPrice, pointsLeft } from "../modes/market";
 import { roller } from "../modes/random";
 import type { TurboMode } from "../modes/catalog";
+import { chanceReady } from "../modes/lastChance";
 import { bombReady } from "../modes/nuclear";
 import { startPosition } from "../modes/rules";
 import {
@@ -169,6 +182,18 @@ export class TurboRoom implements GameRoomState {
   private botAt: number | null = null;
   /** На каком полуходе назначена эта пауза. */
   private botPly = -1;
+  /**
+   * Оценка позиции глазами бота сразу после его хода.
+   *
+   * По ней он потом видит, во сколько обошёлся ход соперника, — а по этому
+   * считается вероятность «НЕТ» в анархии: чем хуже чужой ход, тем вероятнее
+   * отмена (docs/BOTS.md, режим 15).
+   */
+  private botEdge: (number | null)[] = [];
+  /** С какого своего хода у бота заряжена бомба: по этому считается терпение. */
+  private botArmed: (number | null)[] = [];
+  /** На каком полуходе бот последний раз подходил к прилавку. */
+  private botBought: number[] = [];
 
   constructor(
     private readonly context: GameRoomContext,
@@ -215,6 +240,19 @@ export class TurboRoom implements GameRoomState {
     return true;
   }
 
+  /**
+   * Снимок поменялся: сказать платформе и завести боту паузу.
+   *
+   * Пауза заводится здесь, а не по первому вопросу о ней, потому что считаться
+   * она должна с той минуты, когда ход перешёл к боту, — а не с той, когда
+   * платформа впервые спросила дедлайн. Разница видна на тике, пришедшем без
+   * вопроса: раньше он уходил впустую, и бот ходил только со второго.
+   */
+  private changed(): void {
+    this.botWait();
+    this.context.changed();
+  }
+
   /** Мест столько, сколько сторон в позиции: двое, в королевской битве — четверо. */
   private get capacity(): number {
     return this.game.position().sides.length;
@@ -233,7 +271,7 @@ export class TurboRoom implements GameRoomState {
       if (this.seats.length === this.capacity) this.start();
     }
 
-    this.context.changed();
+    this.changed();
   }
 
   /** Досадить ботов из запаса — столько, сколько просили, и не больше мест. */
@@ -268,7 +306,7 @@ export class TurboRoom implements GameRoomState {
       return { accepted: false, reason: "Больше программ нет" };
     }
 
-    this.context.changed();
+    this.changed();
     return { accepted: true };
   }
 
@@ -288,7 +326,7 @@ export class TurboRoom implements GameRoomState {
     } else {
       this.seats.splice(at, 1);
     }
-    this.context.changed();
+    this.changed();
   }
 
   seated(): readonly string[] {
@@ -347,8 +385,10 @@ export class TurboRoom implements GameRoomState {
       if (this.now() >= this.toast.until) {
         this.finish(this.game.punish(this.rolls(this.capacity, 1)));
         this.closeToast();
+      } else if (this.botWait() === 0) {
+        this.doBot();
       } else {
-        this.context.changed();
+        this.changed();
       }
       return;
     }
@@ -356,7 +396,8 @@ export class TurboRoom implements GameRoomState {
     // Время расстановки вышло — вскрываемся с тем, что стоит на доске.
     if (this.setupUntil !== null) {
       if (this.now() >= this.setupUntil) this.reveal();
-      else this.context.changed();
+      else if (this.botWait() === 0) this.doBot();
+      else this.changed();
       return;
     }
 
@@ -365,15 +406,15 @@ export class TurboRoom implements GameRoomState {
       return;
     }
 
-    // Бот додумал — ходит. Ход идёт обычной дверью и сам зовёт `changed`.
+    // Бот додумал — ходит или жмёт кнопку. Всё идёт обычной дверью.
     if (this.botWait() === 0) {
-      this.playBot();
+      this.doBot();
       return;
     }
 
     // Разбудили раньше срока. `changed` обязателен и тут: будильник платформа
     // заводит только на него, и молчаливый тик оставил бы комнату без часов.
-    this.context.changed();
+    this.changed();
   }
 
   act(event: string, actorId: string, payload: unknown): ActionOutcome {
@@ -428,7 +469,7 @@ export class TurboRoom implements GameRoomState {
       this.finish(this.game.abandon(side));
     } else {
       this.seats.splice(side, 1);
-      this.context.changed();
+      this.changed();
     }
     return { accepted: true };
   }
@@ -543,6 +584,44 @@ export class TurboRoom implements GameRoomState {
   }
 
   /**
+   * Что бот должен сделать прямо сейчас, кроме хода.
+   *
+   * Две кнопки живут вне очереди: подтверждение чужой стопки (окно висит у
+   * срубившего, чья бы ни была очередь) и расстановка вслепую, которой очереди
+   * нет вовсе. Обе идут тем же будильником, что и ход, — иначе в комнате
+   * появилось бы три источника времени вместо одного.
+   */
+  private botDuty(): {
+    bot: BotSeat;
+    seat: Side;
+    kind: "toast" | "setup";
+  } | null {
+    if (!this.playing()) return null;
+
+    if (this.toast) {
+      const seat = this.toast.pourer;
+      const bot = this.botAt_(seat);
+      return bot ? { bot, seat, kind: "toast" } : null;
+    }
+
+    if (this.setupUntil !== null) {
+      for (let seat = 0; seat < this.capacity; seat++) {
+        if (this.setupReady[seat]) continue;
+        const bot = this.botAt_(seat);
+        if (bot) return { bot, seat, kind: "setup" };
+      }
+    }
+
+    return null;
+  }
+
+  /** Бот на этом месте; `null` — там человек или место пустое. */
+  private botAt_(seat: Side): BotSeat | null {
+    const id = this.seats[seat];
+    return id === undefined ? null : (this.bots.get(id) ?? null);
+  }
+
+  /**
    * Сколько боту осталось «думать»; `null` — ждать некого.
    *
    * Пауза назначается на первый вопрос об этом полуходе и держится до тех пор,
@@ -550,19 +629,35 @@ export class TurboRoom implements GameRoomState {
    * должны получить один и тот же ответ.
    */
   private botWait(): number | null {
-    const bot = this.botToMove();
+    const duty = this.botDuty();
+    const bot = duty ? duty.bot : this.botToMove();
     if (!bot) {
       this.botAt = null;
       return null;
     }
 
-    const ply = this.game.ply();
-    if (this.botAt === null || this.botPly !== ply) {
-      this.botPly = ply;
-      this.botAt = this.now() + this.botPause(bot);
+    // Дело вне очереди живёт своим счётом: полуход при стопке и расстановке не
+    // меняется, поэтому меткой служит вид дела.
+    const mark = duty ? (duty.kind === "toast" ? -2 : -3) : this.game.ply();
+    if (this.botAt === null || this.botPly !== mark) {
+      this.botPly = mark;
+      this.botAt =
+        this.now() +
+        (duty ? this.dutyPause(duty.kind, bot) : this.botPause(bot));
     }
 
     return Math.max(0, this.botAt - this.now());
+  }
+
+  /** Пауза на дело вне очереди: над стопкой думают иначе, чем над расстановкой. */
+  private dutyPause(kind: "toast" | "setup", bot: BotSeat): number {
+    const roll = roller(this.seed, this.game.ply() * 8 + 7);
+
+    if (kind === "toast") {
+      return toastCall({ traits: bot.traits, windowMs: TOAST_MS, roll }).waitMs;
+    }
+
+    return setupWait(roll);
   }
 
   /** Пауза перед ходом: считается один раз на полуход и по зерну партии. */
@@ -580,12 +675,71 @@ export class TurboRoom implements GameRoomState {
    * Ход бота. Идёт через ту же дверь, что и ход человека: `makeMove` проверит
    * очередь, номер полухода и законность — у бота нет никаких поблажек, кроме
    * тех, что записаны в его уровне.
+   *
+   * Перед ходом бот решает про кнопки режима: они не ходы, и перебор про них
+   * ничего не знает. Кнопка, которая кончает партию или заменяет ход, на этом
+   * полуходе ход и отменяет.
    */
+  /** Что бот делает по будильнику: своё дело вне очереди или свой ход. */
+  private doBot(): void {
+    const duty = this.botDuty();
+    this.botAt = null;
+
+    if (!duty) {
+      this.playBot();
+      return;
+    }
+
+    if (duty.kind === "toast") {
+      const roll = roller(this.seed, this.game.ply() * 8 + 7);
+      const answer = toastCall({
+        traits: duty.bot.traits,
+        windowMs: TOAST_MS,
+        roll,
+      });
+      // Соврать здесь — это промолчать: окно закроется само, и штраф придёт
+      // обоим. Поэтому «не подтверждаю» — это просто не звать `confirmToast`.
+      if (answer.confirm) this.confirmToast(duty.bot.id);
+      else this.changed();
+      return;
+    }
+
+    this.setupBot(duty.bot, duty.seat);
+  }
+
+  /**
+   * Расстановка вслепую: бот раскладывается по заготовке характера и говорит
+   * «готов». Заготовка — это обмены от стандартной расстановки, поэтому она
+   * всегда полная, чем бы дело ни кончилось.
+   */
+  private setupBot(bot: BotSeat, seat: Side): void {
+    const { geometry } = this.game.position();
+    const zone = showdownZone(seat, geometry);
+    // Заготовка написана местами в зоне, а дверь принимает клетки: бот стучится
+    // в ту же дверь, что и человек, и переводит сам.
+    const square = (at: number) => {
+      const found = zone[at];
+      return found === undefined ? null : squareName(geometry, found);
+    };
+
+    for (const [from, to] of setupCall(bot.character)) {
+      const one = square(from);
+      const two = square(to);
+      if (one && two) this.swap(bot.id, { from: one, to: two });
+    }
+
+    this.readyUp(bot.id);
+  }
+
   private playBot(): void {
     const bot = this.botToMove();
     if (!bot) return;
 
     const seat = this.game.turn();
+    this.botAt = null;
+
+    if (this.pressButtons(bot, seat)) return;
+
     const thought = think({
       position: this.game.position(),
       seat,
@@ -601,8 +755,130 @@ export class TurboRoom implements GameRoomState {
     // разберёт движок на ближайшем тике.
     if (!thought) return;
 
-    this.botAt = null;
+    // Оценка после своего хода запоминается до чужого: по разнице потом видно,
+    // во сколько обошёлся ход соперника.
     this.makeMove(bot.id, { ...thought.input, ply: this.game.ply() });
+    this.botEdge[seat] = evaluate(this.game.position(), seat);
+  }
+
+  /**
+   * Кнопки режима в свой ход: бомба, «НЕТ», последний шанс, магазин.
+   *
+   * `true` — ход на этом полуходе уже не нужен: бомба кончает партию, «НЕТ» и
+   * шанс отдают очередь сопернику, дополнительный ход с рынка возвращает её
+   * боту, и ходить он будет следующим тиком.
+   */
+  private pressButtons(bot: BotSeat, seat: Side): boolean {
+    const position = this.game.position();
+    const roll = roller(this.seed, this.game.ply() * 8 + 6);
+
+    // Ядерные: бомба кончает партию победой, и решать про неё надо до хода.
+    if (this.settings.mode === "NUCLEAR") {
+      if (bombReady(position, this.settings.options, seat)) {
+        const armed = this.botArmed[seat];
+        if (armed === null) this.botArmed[seat] = this.game.ply();
+        const since = Math.floor(
+          (this.game.ply() - (this.botArmed[seat] ?? this.game.ply())) / 2,
+        );
+
+        if (
+          bombCall({
+            edge: evaluate(position, seat),
+            since,
+            traits: bot.traits,
+            roll,
+          })
+        ) {
+          return this.dropBomb(bot.id).accepted;
+        }
+      } else {
+        this.botArmed[seat] = null;
+      }
+    }
+
+    // Анархия: отменить чужой ход, пока он не стал историей.
+    if (this.settings.mode === "ANARCHY" && this.game.ply() > 0) {
+      const was = this.botEdge[seat] ?? null;
+      const now = evaluate(position, seat);
+
+      if (
+        vetoCall({
+          loss: was === null ? 0 : was - now,
+          mate: this.mated(seat),
+          left: position.vetoes[seat] ?? 0,
+          traits: bot.traits,
+          roll,
+        })
+      ) {
+        // Отменённый ход соперник переиграет другим: бот ждёт его снова.
+        return this.veto(bot.id).accepted;
+      }
+    }
+
+    // Последний шанс: прыжок вместо хода, и он один на партию.
+    if (this.settings.mode === "LAST_CHANCE" && chanceReady(position, seat)) {
+      if (
+        chanceCall({
+          mate: this.mated(seat),
+          check: inCheck(position, seat),
+          cost: this.escapeCost(seat),
+          level: bot.level,
+          traits: bot.traits,
+        })
+      ) {
+        return this.useChance(bot.id).accepted;
+      }
+    }
+
+    // Чёрный рынок: покупка хода не стоит, кроме дополнительного — он ход и есть.
+    if (this.settings.mode === "BLACK_MARKET") {
+      const order = marketCall({
+        position,
+        seat,
+        since: Math.floor((this.game.ply() - (this.botBought[seat] ?? 0)) / 2),
+        traits: bot.traits,
+        roll,
+      });
+
+      if (order && this.buy(bot.id, order).accepted) {
+        this.botBought[seat] = this.game.ply();
+        // Дополнительный ход очередь не отдаёт: ходить всё равно боту, и он
+        // сделает это следующим тиком — с новой паузой, как человек.
+        return true;
+      }
+    }
+
+    return false;
+  }
+
+  /**
+   * Мат ли это.
+   *
+   * В анархии и последнем шансе мат не кончает партию, пока цела кнопка, —
+   * значит очередь до бота доходит, и он должен понимать, что происходит:
+   * шах, из которого нет ни одного хода, и есть мат.
+   */
+  private mated(seat: Side): boolean {
+    const position = this.game.position();
+    if (position.turn !== seat) return false;
+
+    return inCheck(position, seat) && legalMoves(position).length === 0;
+  }
+
+  /**
+   * Во сколько обходится лучший выход из шаха: по нему сильный уровень решает,
+   * жать ли последний шанс до мата.
+   */
+  private escapeCost(seat: Side): number {
+    const position = this.game.position();
+    const now = evaluate(position, seat);
+    let best = -Infinity;
+
+    for (const move of legalMoves(position)) {
+      best = Math.max(best, evaluate(play(position, move), seat));
+    }
+
+    return best === -Infinity ? 0 : now - best;
   }
 
   private playing(): boolean {
@@ -639,6 +915,7 @@ export class TurboRoom implements GameRoomState {
     this.drinks = Array.from({ length: this.capacity }, () => 0);
     this.vetoed = [];
     this.toast = null;
+    this.forgetBots();
 
     // «Вскрываемся» начинается не с хода, а с расстановки вслепую: часы хода
     // пойдут после вскрытия.
@@ -665,7 +942,19 @@ export class TurboRoom implements GameRoomState {
     this.game = new TurboGame(showdownPosition(this.arrangement));
     this.moveStartedAt = this.now();
     this.clock.restart();
-    this.context.changed();
+    this.changed();
+  }
+
+  /** Новая партия — боту забыть, что он видел и когда покупал. */
+  private forgetBots(): void {
+    this.botEdge = Array.from({ length: this.capacity }, () => null);
+    this.botArmed = Array.from({ length: this.capacity }, () => null);
+    this.botBought = Array.from(
+      { length: this.capacity },
+      () => -MARKET_COOLDOWN,
+    );
+    this.botAt = null;
+    this.botPly = -1;
   }
 
   private newGame(): TurboGame {
@@ -735,7 +1024,7 @@ export class TurboRoom implements GameRoomState {
 
     this.finish(result.outcome ?? this.capIfTooLong());
     // Без этого дедлайн сдвинулся бы, а будильник звонил бы по старому времени.
-    this.context.changed();
+    this.changed();
 
     return { accepted: true };
   }
@@ -760,7 +1049,7 @@ export class TurboRoom implements GameRoomState {
     this.toast = null;
     this.moveStartedAt = this.now();
     this.clock.restart();
-    this.context.changed();
+    this.changed();
   }
 
   /**
@@ -806,7 +1095,7 @@ export class TurboRoom implements GameRoomState {
     this.offer = null;
     this.clock.restart();
     this.finish(result.outcome ?? this.capIfTooLong());
-    this.context.changed();
+    this.changed();
 
     return { accepted: true };
   }
@@ -839,7 +1128,7 @@ export class TurboRoom implements GameRoomState {
       return { accepted: false, reason: "Так не купить" };
     }
 
-    this.context.changed();
+    this.changed();
     return { accepted: true };
   }
 
@@ -867,7 +1156,7 @@ export class TurboRoom implements GameRoomState {
     this.offer = null;
     this.moveStartedAt = this.now();
     this.clock.restart();
-    this.context.changed();
+    this.changed();
 
     return { accepted: true };
   }
@@ -901,7 +1190,7 @@ export class TurboRoom implements GameRoomState {
     if (!swapped) return { accepted: false, reason: "Так не переставить" };
 
     this.arrangement[side] = swapped;
-    this.context.changed();
+    this.changed();
     return { accepted: true };
   }
 
@@ -915,7 +1204,7 @@ export class TurboRoom implements GameRoomState {
 
     this.setupReady[side] = true;
     if (this.setupReady.every((ready) => ready)) this.reveal();
-    else this.context.changed();
+    else this.changed();
 
     return { accepted: true };
   }
@@ -975,7 +1264,7 @@ export class TurboRoom implements GameRoomState {
 
     this.offered[side] = ply;
     this.offer = side;
-    this.context.changed();
+    this.changed();
     return { accepted: true };
   }
 
@@ -987,7 +1276,7 @@ export class TurboRoom implements GameRoomState {
     }
 
     this.offer = null;
-    this.context.changed();
+    this.changed();
     return { accepted: true };
   }
 
@@ -1023,7 +1312,7 @@ export class TurboRoom implements GameRoomState {
 
     this.seats.reverse();
     this.start();
-    this.context.changed();
+    this.changed();
     return { accepted: true };
   }
 
@@ -1092,7 +1381,7 @@ export class TurboRoom implements GameRoomState {
     if (draft && draft.moves.length > 0) this.persist?.(draft);
 
     this.context.emitted([{ type: "turbochess_finished", ...outcome }]);
-    this.context.changed();
+    this.changed();
   }
 }
 
