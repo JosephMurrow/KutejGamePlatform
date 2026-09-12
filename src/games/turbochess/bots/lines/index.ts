@@ -5,6 +5,7 @@ import { CODER } from "./coder";
 import { DRUNK } from "./drunk";
 import { DWARF } from "./dwarf";
 import { GENIUS } from "./genius";
+import { HOOKAH } from "./hookah";
 import { PHYSICIST } from "./physicist";
 import { PILOT } from "./pilot";
 import { STRATEGIST } from "./strategist";
@@ -31,6 +32,7 @@ export const LINES: Partial<Record<Character, Lines>> = {
   physicist: PHYSICIST,
   sweetie: SWEETIE,
   dwarf: DWARF,
+  hookah: HOOKAH,
 };
 
 /** Колода характера; пустая — этот пока молчит. */
