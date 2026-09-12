@@ -43,6 +43,13 @@ export const GAME_EVENT = {
   /** Ещё партия в той же комнате: места меняются. */
   rematch: "game:rematch",
   /**
+   * «Вскрываемся»: поменять две свои фигуры местами, пока идёт расстановка.
+   * `{ from, to }` — клетки своей зоны.
+   */
+  swap: "game:swap",
+  /** «Вскрываемся»: расстановка готова. Оба готовы — вскрываемся досрочно. */
+  ready: "game:ready",
+  /**
    * «Ядерные»: сбросить бомбу. Только в свой ход и вместо хода — набранный
    * заряд проверяет комната (docs/MODES.md, режим 8).
    */
@@ -50,7 +57,13 @@ export const GAME_EVENT = {
 } as const;
 
 /** Где стол: ждёт игроков, партия идёт, кончилась — или это закрытая дверь зала. */
-export type TurboPhase = "waiting" | "playing" | "over" | "closed";
+export type TurboPhase =
+  | "waiting"
+  /** «Вскрываемся»: оба расставляют фигуры вслепую. */
+  | "setup"
+  | "playing"
+  | "over"
+  | "closed";
 
 export interface TurboPlayerPayload extends PlayerPayload {
   /** Место за столом, с нуля. У двоих это и сторона: белые — 0, чёрные — 1. */
@@ -78,6 +91,13 @@ export interface TurboStatePayload extends RoomStatePayload<TurboPlayerPayload> 
   lastMove: { from: string; to: string } | null;
   /** Чья очередь; вне партии — null. */
   turn: Side | null;
+  /**
+   * Клетки, закрытые рубашкой: чужая половина во время расстановки. Зритель и
+   * экран видят закрытыми обе — трансляцию смотрит и соперник.
+   */
+  covered: string[];
+  /** Кто уже нажал «готов». Вне расстановки — пусто. */
+  setupReady: boolean[];
   /** Есть ли прямо сейчас основание требовать ничью. */
   claimable: "threefold" | "fiftyMoves" | null;
   /** Кто предложил ничью и ждёт ответа. Видят только сидящие за столом. */

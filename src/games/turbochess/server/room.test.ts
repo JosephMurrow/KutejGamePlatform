@@ -4,7 +4,9 @@ import type { GameRoomContext, GameRoomEvent } from "@/lib/games/engine";
 import { squareName } from "../engine/geometry";
 import { legalMoves, play, type Move } from "../engine/moves";
 import type { Position } from "../engine/position";
+import { TurboGame } from "../engine/game";
 import { PIECE_VALUE, nuclearCharge } from "../modes/nuclear";
+import { SHOWDOWN_SETUP_MS } from "../modes/showdown";
 import type {
   ModeOptions,
   TimeControl,
@@ -473,6 +475,150 @@ describe("подкрепление", () => {
       (view(room).position as Position).reserve[0],
       ["r", "b", "n", "p"],
       "ферзь ушёл из запаса",
+    );
+  });
+});
+
+describe("вскрываемся", () => {
+  function showdownTable() {
+    let at = 1000;
+    const settings: TurboRoomSettings = {
+      mode: "SHOWDOWN",
+      timeControl: "SEC_30",
+      options: {},
+    };
+    const drafts: MatchDraft[] = [];
+    const context: GameRoomContext = {
+      key: "turbo-showdown",
+      ownerId: "white",
+      isPrivate: true,
+      settings,
+      connections: () => 2,
+      introduce: () => {},
+      forget: () => {},
+      emitted: () => {},
+      changed: () => {},
+    };
+    const room = new TurboRoom(
+      context,
+      settings,
+      () => at,
+      (draft) => drafts.push(draft),
+    );
+    room.join("white");
+    room.join("black");
+
+    return {
+      room,
+      drafts,
+      pass: (ms: number) => {
+        at += ms;
+      },
+    };
+  }
+
+  const kindAt = (room: TurboRoom, viewer: string, square: string) =>
+    new TurboGame(view(room, viewer).position as Position).pieceAt(square)
+      ?.kind ?? null;
+
+  it("стол начинается с расстановки, а не с партии", () => {
+    const { room } = showdownTable();
+
+    assert.equal(view(room).phase, "setup");
+    assert.equal(view(room).turn, null);
+    assert.equal(move(room, "white", "e2", "e4").reason, "Ещё расставляемся");
+
+    const covered = view(room).covered as string[];
+    assert.equal(covered.length, 16, "закрыта чужая половина");
+    assert.ok(
+      covered.every((square) => square.endsWith("7") || square.endsWith("8")),
+      "белым закрыта именно чёрная половина",
+    );
+    assert.equal(kindAt(room, "white", "e1"), "k", "своя половина видна");
+    assert.equal(kindAt(room, "white", "e8"), null, "чужая — нет");
+    assert.equal(
+      (room.snapshot({ kind: "screen" }).extra.covered as string[]).length,
+      32,
+      "экрану закрыты обе: трансляцию смотрит и соперник",
+    );
+  });
+
+  it("переставляет только свои и только по правилам", () => {
+    const { room } = showdownTable();
+
+    assert.equal(
+      room.act(GAME_EVENT.swap, "white", { from: "a1", to: "b1" }).accepted,
+      true,
+    );
+    assert.equal(kindAt(room, "white", "a1"), "n");
+    assert.equal(kindAt(room, "white", "b1"), "r");
+
+    assert.equal(
+      room.act(GAME_EVENT.swap, "white", { from: "e1", to: "e2" }).reason,
+      "Так не переставить",
+      "король остаётся на первой горизонтали",
+    );
+    assert.equal(
+      room.act(GAME_EVENT.swap, "white", { from: "a8", to: "b8" }).reason,
+      "Так не переставить",
+      "чужая зона не своя",
+    );
+    assert.equal(
+      room.act(GAME_EVENT.swap, "watcher", { from: "a1", to: "b1" }).reason,
+      "Ты не за доской",
+    );
+  });
+
+  it("оба готовы — вскрываемся досрочно и играем", () => {
+    const { room } = showdownTable();
+    room.act(GAME_EVENT.swap, "white", { from: "a1", to: "b1" });
+
+    assert.equal(room.act(GAME_EVENT.ready, "white", {}).accepted, true);
+    assert.equal(view(room).phase, "setup", "ждём второго");
+    assert.deepEqual(view(room).setupReady, [true, false]);
+    assert.equal(
+      room.act(GAME_EVENT.swap, "white", { from: "c1", to: "d1" }).reason,
+      "Ты уже сказал «готов»",
+    );
+
+    assert.equal(room.act(GAME_EVENT.ready, "black", {}).accepted, true);
+    assert.equal(view(room).phase, "playing");
+    assert.equal(view(room).turn, 0, "после вскрытия ходят белые");
+    assert.equal(
+      kindAt(room, "watcher", "a1"),
+      "n",
+      "вскрытая расстановка видна всем",
+    );
+    assert.equal(
+      room.act(GAME_EVENT.swap, "white", { from: "a1", to: "b1" }).reason,
+      "Расстановка кончилась",
+    );
+    assert.deepEqual(move(room, "white", "b2", "b4"), { accepted: true });
+  });
+
+  it("время вышло — вскрываемся с тем, что стоит", () => {
+    const { room, pass } = showdownTable();
+    room.act(GAME_EVENT.swap, "black", { from: "a8", to: "b8" });
+
+    pass(SHOWDOWN_SETUP_MS);
+    room.tick();
+
+    assert.equal(view(room).phase, "playing");
+    assert.equal(kindAt(room, "white", "a8"), "n", "чужая половина вскрылась");
+  });
+
+  it("расстановка уезжает в запись партии", () => {
+    const { room, drafts } = showdownTable();
+    room.act(GAME_EVENT.swap, "white", { from: "a1", to: "b1" });
+    room.act(GAME_EVENT.ready, "white", {});
+    room.act(GAME_EVENT.ready, "black", {});
+
+    move(room, "white", "b2", "b4");
+    room.act(GAME_EVENT.resign, "black", {});
+
+    assert.equal(
+      drafts.at(-1)?.options.setup,
+      "nrbqkbnrpppppppp/rnbqkbnrpppppppp",
     );
   });
 });

@@ -12,6 +12,7 @@ import {
   oneKindRules,
 } from "./oneKind";
 import { reinforcementsPosition, reinforcementsRules } from "./reinforcements";
+import { showdownPosition, showdownRules, showdownStart } from "./showdown";
 import { zombiePosition, zombieRules } from "./zombies";
 
 /**
@@ -37,6 +38,7 @@ const READY: ReadonlySet<TurboMode> = new Set([
   "NUCLEAR",
   "REINFORCEMENTS",
   "ZOMBIE",
+  "SHOWDOWN",
 ]);
 
 export function isReady(mode: TurboMode): boolean {
@@ -63,6 +65,11 @@ export function startPosition(mode: TurboMode, options: ModeOptions): Position {
       return reinforcementsPosition();
     case "ZOMBIE":
       return zombiePosition();
+    // До вскрытия партия стоит стандартной расстановкой: её и получит тот,
+    // кто ничего не тронул. Настоящую позицию соберёт комната, когда оба
+    // будут готовы.
+    case "SHOWDOWN":
+      return showdownPosition([showdownStart(), showdownStart()]);
     default:
       return classicPosition();
   }
@@ -120,6 +127,8 @@ export function rulesOf(mode: TurboMode, options: ModeOptions): ModeRules {
       return { variant: null, lines: reinforcementsRules(), ready: true };
     case "ZOMBIE":
       return { variant: null, lines: zombieRules(), ready: true };
+    case "SHOWDOWN":
+      return { variant: null, lines: showdownRules(), ready: true };
     default:
       return {
         variant: null,

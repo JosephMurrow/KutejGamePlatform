@@ -3,7 +3,7 @@
 import { useMemo, useState, type CSSProperties } from "react";
 import { Chessboard, ChessboardProvider, SparePiece } from "react-chessboard";
 import type { DropKind, MoveInput } from "../engine/game";
-import { parseSquare } from "../engine/geometry";
+import { fileOf, parseSquare, rankOf } from "../engine/geometry";
 import { legalMoves, play } from "../engine/moves";
 import type { PieceKind, Side } from "../engine/pieces";
 import { nextSide, type Position } from "../engine/position";
@@ -46,6 +46,28 @@ const SOFT = "#ff7a3d";
 /** Нотация на светлом поле; на тёмном она цвета светлого поля. */
 const INK = "#7a3a1a";
 
+/**
+ * Рубашка: чем закрыта чужая половина доски, пока идёт расстановка
+ * («Вскрываемся»). Направление «Карамель», выбрано хозяином канвой из трёх
+ * (правило D0): тон клетки приглушён, внутри кант цвета светлого поля и знак
+ * турбо — тот же, что на крышке коробки. Рисунком, а не картинкой: тянется под
+ * любой размер клетки и не тащит файла.
+ */
+const BOLT = "M60 4 L20 56 H46 L36 96 L80 38 H54 Z";
+
+function back(ground: string): string {
+  const svg =
+    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">` +
+    `<rect width="100" height="100" fill="${ground}"/>` +
+    `<rect x="7" y="7" width="86" height="86" rx="4" fill="none" stroke="${LIGHT}" stroke-opacity=".42" stroke-width="2"/>` +
+    `<g transform="translate(28 28) scale(0.44)">` +
+    `<path d="${BOLT}" fill="${LIGHT}" fill-opacity=".3"/></g></svg>`;
+
+  return `url("data:image/svg+xml,${encodeURIComponent(svg)}")`;
+}
+
+const BACK = { light: back("#c8956a"), dark: back("#8f5233") };
+
 /** Кант вокруг доски. Стилями, а не картинкой: тянется под любую ширину. */
 const FRAME: CSSProperties = {
   padding: 7,
@@ -68,6 +90,13 @@ export interface BoardProps {
   flipped: boolean;
   /** Сделать ход. `false` — отказ, доска возвращается как была. */
   onMove: (move: MoveInput) => boolean | Promise<boolean>;
+  /** Клетки, закрытые рубашкой: чужая половина во время расстановки. */
+  covered?: readonly string[];
+  /**
+   * Расстановка «Вскрываемся»: вместо хода доска меняет две свои фигуры
+   * местами. Есть — значит идёт расстановка, и ходов на доске нет вовсе.
+   */
+  onSwap?: (from: string, to: string) => void;
 }
 
 export function Board({
@@ -76,6 +105,8 @@ export function Board({
   lastMove,
   flipped,
   onMove,
+  covered,
+  onSwap,
 }: BoardProps) {
   /** Позиция после своего хода, пока его не приняли. */
   const [preview, setPreview] = useState<Position | null>(null);
@@ -89,7 +120,9 @@ export function Board({
 
   const shown = preview ?? position;
   const legal = useMemo(() => legalMoves(shown), [shown]);
-  const canMove = preview === null && controls.includes(shown.turn);
+  const arranging = onSwap !== undefined;
+  const canMove =
+    !arranging && preview === null && controls.includes(shown.turn);
 
   const styles = useMemo(() => {
     const marks: Record<string, CSSProperties> = {};
@@ -120,6 +153,18 @@ export function Board({
       }
     }
 
+    // Закрытые клетки: своей позиции у них нет, поэтому и подсветок нет.
+    for (const square of covered ?? []) {
+      const at = parseSquare(shown.geometry, square);
+      if (at === null) continue;
+      const light =
+        (fileOf(shown.geometry, at) + rankOf(shown.geometry, at)) % 2 === 1;
+      marks[square] = {
+        backgroundImage: light ? BACK.light : BACK.dark,
+        backgroundSize: "cover",
+      };
+    }
+
     // Куда встанет фигура с полки. Взятия тут не бывает: выставляют только на
     // свободную клетку.
     if (dropping) {
@@ -131,12 +176,18 @@ export function Board({
     }
 
     return marks;
-  }, [dropping, lastMove, legal, picked, shown]);
+  }, [covered, dropping, lastMove, legal, picked, shown]);
 
-  /** Своя ли фигура на клетке — того, чья очередь. */
+  /**
+   * Своя ли фигура на клетке. В расстановке на доске только свои: чужая
+   * половина пуста и закрыта рубашкой.
+   */
   function own(square: string): boolean {
     const index = parseSquare(shown.geometry, square);
-    return index !== null && shown.board[index]?.side === shown.turn;
+    if (index === null) return false;
+
+    const cell = shown.board[index];
+    return arranging ? cell !== null : cell?.side === shown.turn;
   }
 
   async function send(from: string, to: string, choice?: PromotionChoice) {
@@ -179,7 +230,17 @@ export function Board({
   }
 
   function attempt(from: string, to: string): boolean {
-    if (!canMove || from === to) return false;
+    if (from === to) return false;
+
+    // Расстановка: клетки меняются местами, а законность проверяет сервер.
+    if (arranging) {
+      if (!own(from)) return false;
+      setPicked(null);
+      onSwap(from, to);
+      return true;
+    }
+
+    if (!canMove) return false;
 
     const kind = moveKind(shown, legal, from, to);
     if (kind === "none") return false;
@@ -194,7 +255,7 @@ export function Board({
   }
 
   function clickSquare(square: string) {
-    if (!canMove) return;
+    if (!canMove && !arranging) return;
 
     if (dropping) {
       void sendDrop(dropping, square);
@@ -227,7 +288,7 @@ export function Board({
         chessboardRows: shown.geometry.height,
         chessboardColumns: shown.geometry.width,
         boardOrientation: flipped ? "black" : "white",
-        allowDragging: canMove,
+        allowDragging: canMove || arranging,
         showNotation: true,
         animationDurationInMs: 180,
         lightSquareStyle: { backgroundColor: LIGHT },
@@ -254,8 +315,10 @@ export function Board({
 
           return attempt(sourceSquare, targetSquare);
         },
-        canDragPiece: ({ piece }) =>
-          canMove && piece.pieceType.startsWith(colorOf(shown.turn)),
+        canDragPiece: ({ piece, square }) =>
+          arranging
+            ? square !== null && own(square)
+            : canMove && piece.pieceType.startsWith(colorOf(shown.turn)),
       }}
     >
       <div className="flex flex-col gap-1.5">

@@ -69,6 +69,12 @@ export function ScreenView({
         </div>
       ) : null}
 
+      {state.phase === "setup" ? (
+        <div className="text-2xl text-muted">
+          Расставляются вслепую — вскроемся разом
+        </div>
+      ) : null}
+
       <div className="flex w-full max-w-[min(80vh,900px)] items-end justify-between gap-6">
         <Name nickname={name(1)} side={SIDE_NAME[1]} score={score(1)} />
         <Name
@@ -85,6 +91,7 @@ export function ScreenView({
           controls={[]}
           lastMove={state.lastMove}
           flipped={false}
+          covered={state.covered}
           onMove={() => false}
         />
       </div>
@@ -101,7 +108,7 @@ export function ScreenView({
               {state.reason ? REASON_TEXT[state.reason] : ""}
             </span>
           </div>
-        ) : state.phase === "playing" ? (
+        ) : state.phase === "playing" || state.phase === "setup" ? (
           <Countdown
             deadline={state.deadline}
             durationMs={state.phaseDurationMs}

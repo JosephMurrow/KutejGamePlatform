@@ -7,12 +7,22 @@ import type {
   GameViewer,
 } from "@/lib/games/engine";
 import { MoveClock, type Ticker } from "../engine/clock";
+import { parseSquare, squareName } from "../engine/geometry";
 import { TurboGame, type MoveInput, type MoveRejection } from "../engine/game";
 import type { EndReason, Outcome } from "../engine/outcome";
-import type { Side } from "../engine/pieces";
+import type { PieceKind, Side } from "../engine/pieces";
+import type { Position } from "../engine/position";
 import type { TurboMode } from "../modes/catalog";
 import { bombReady } from "../modes/nuclear";
 import { startPosition } from "../modes/rules";
+import {
+  SHOWDOWN_SETUP_MS,
+  showdownNote,
+  showdownPosition,
+  showdownStart,
+  showdownSwap,
+  showdownZone,
+} from "../modes/showdown";
 import { GAME_EVENT, type TurboPhase } from "../protocol";
 import {
   MOVE_LIMIT_MS,
@@ -112,6 +122,15 @@ export class TurboRoom implements GameRoomState {
   private offer: Side | null = null;
   /** На каком полуходе каждая сторона предлагала в последний раз. */
   private offered: number[] = [];
+  /**
+   * Идёт расстановка вслепую — момент её конца по монотонным часам; `null` —
+   * расстановки нет (docs/MODES.md, режим 16).
+   */
+  private setupUntil: number | null = null;
+  /** Расстановки сторон, каждая в порядке зоны режима. */
+  private arrangement: PieceKind[][] = [];
+  /** Кто уже нажал «готов». */
+  private setupReady: boolean[] = [];
 
   constructor(
     private readonly context: GameRoomContext,
@@ -181,13 +200,17 @@ export class TurboRoom implements GameRoomState {
     return showing === null ? null : Date.now() + showing;
   }
 
-  /** Сколько осталось — по часам хода или по ожиданию ушедшего. */
+  /** Сколько осталось — по расстановке, часам хода или ожиданию ушедшего. */
   private showing(): number | null {
     if (!this.playing()) return null;
 
     const waits: number[] = [];
-    const left = this.clock.left();
-    if (left !== null) waits.push(left);
+    if (this.setupUntil !== null) {
+      waits.push(Math.max(0, this.setupUntil - this.now()));
+    } else {
+      const left = this.clock.left();
+      if (left !== null) waits.push(left);
+    }
     if (this.absence) {
       waits.push(Math.max(0, ABANDON_MS - (this.now() - this.absence.since)));
     }
@@ -202,6 +225,13 @@ export class TurboRoom implements GameRoomState {
     if (this.absence && this.now() - this.absence.since >= ABANDON_MS) {
       const gone = this.sideOf(this.absence.id);
       if (gone !== null) this.finish(this.game.abandon(gone));
+      return;
+    }
+
+    // Время расстановки вышло — вскрываемся с тем, что стоит на доске.
+    if (this.setupUntil !== null) {
+      if (this.now() >= this.setupUntil) this.reveal();
+      else this.context.changed();
       return;
     }
 
@@ -231,6 +261,10 @@ export class TurboRoom implements GameRoomState {
         return this.rematch(actorId);
       case GAME_EVENT.bomb:
         return this.dropBomb(actorId);
+      case GAME_EVENT.swap:
+        return this.swap(actorId, payload);
+      case GAME_EVENT.ready:
+        return this.readyUp(actorId);
       default:
         return { accepted: false, reason: "Неизвестное действие" };
     }
@@ -260,17 +294,24 @@ export class TurboRoom implements GameRoomState {
 
   snapshot(viewer: GameViewer): GameRoomSnapshot {
     const showing = this.showing();
+    // Своя половина расстановки видна только своему месту.
+    const seat = viewer.kind === "player" ? this.sideOf(viewer.id) : null;
 
     return {
       deadline: showing === null ? null : Date.now() + showing,
-      phaseDurationMs: MOVE_LIMIT_MS[this.settings.timeControl],
+      // Во время расстановки отсчёт идёт по её девяноста секундам, а не по
+      // лимиту на ход: полоса времени должна показывать то, что идёт.
+      phaseDurationMs:
+        this.setupUntil === null
+          ? MOVE_LIMIT_MS[this.settings.timeControl]
+          : SHOWDOWN_SETUP_MS,
       playerCount: this.seats.length,
       players: this.seats.map((id, seat) => ({
         id,
         extra: { seat, away: this.absence?.id === id },
       })),
       extra: {
-        ...this.view(),
+        ...this.view(seat),
         // Предложение ничьей до ответа — секрет сидящих. Зритель узнает о нём
         // только по итогу партии.
         drawOffer: this.seatedViewer(viewer) ? this.offer : null,
@@ -286,21 +327,26 @@ export class TurboRoom implements GameRoomState {
     this.clock.stop();
   }
 
-  /** Игровая часть снимка. */
-  private view(): Record<string, unknown> {
+  /** Игровая часть снимка — такая, какой её видит это место. */
+  private view(seat: Side | null): Record<string, unknown> {
     const outcome = this.game.outcome();
+    const setup = this.setupUntil !== null;
     const phase: TurboPhase = outcome
       ? "over"
-      : this.startedAt === null
-        ? "waiting"
-        : "playing";
+      : setup
+        ? "setup"
+        : this.startedAt === null
+          ? "waiting"
+          : "playing";
 
     return {
       phase,
       mode: this.settings.mode,
       options: this.settings.options,
       seats: this.capacity,
-      position: this.game.position(),
+      position: setup ? this.setupBoard(seat) : this.game.position(),
+      covered: setup ? this.coveredZones(seat) : [],
+      setupReady: setup ? [...this.setupReady] : [],
       moves: this.game.history(),
       lastMove: this.game.lastMove(),
       turn: phase === "playing" ? this.game.turn() : null,
@@ -309,6 +355,30 @@ export class TurboRoom implements GameRoomState {
       reason: outcome?.reason ?? null,
       timeControl: this.settings.timeControl,
     };
+  }
+
+  /**
+   * Доска, какой её видит этот зритель во время расстановки: своя половина на
+   * месте, чужая пуста и закрыта рубашкой. Зрителю и экрану пусты обе —
+   * трансляцию смотрит и соперник.
+   */
+  private setupBoard(seat: Side | null): Position {
+    return showdownPosition(
+      this.arrangement.map((own, side) => (side === seat ? own : null)),
+    );
+  }
+
+  /** Клетки, закрытые рубашкой: чужие зоны расстановки. */
+  private coveredZones(seat: Side | null): string[] {
+    const { geometry } = this.game.position();
+
+    return this.arrangement.flatMap((_, side) =>
+      side === seat
+        ? []
+        : showdownZone(side, geometry).map((square) =>
+            squareName(geometry, square),
+          ),
+    );
   }
 
   /** Партия идёт: началась и не кончилась. */
@@ -343,7 +413,33 @@ export class TurboRoom implements GameRoomState {
     this.startedAt = this.now();
     this.startedWall = new Date();
     this.moveStartedAt = this.startedAt;
+
+    // «Вскрываемся» начинается не с хода, а с расстановки вслепую: часы хода
+    // пойдут после вскрытия.
+    if (this.settings.mode === "SHOWDOWN") {
+      this.setupUntil = this.startedAt + SHOWDOWN_SETUP_MS;
+      this.arrangement = Array.from({ length: this.capacity }, () =>
+        showdownStart(),
+      );
+      this.setupReady = Array.from({ length: this.capacity }, () => false);
+      return;
+    }
+
     this.clock.restart();
+  }
+
+  /**
+   * Вскрытие: обе расстановки открываются разом, и дальше идёт обычная партия.
+   * Зовётся по готовности обоих или по истечении времени — что раньше.
+   */
+  private reveal(): void {
+    if (this.setupUntil === null) return;
+
+    this.setupUntil = null;
+    this.game = new TurboGame(showdownPosition(this.arrangement));
+    this.moveStartedAt = this.now();
+    this.clock.restart();
+    this.context.changed();
   }
 
   private newGame(): TurboGame {
@@ -355,6 +451,9 @@ export class TurboRoom implements GameRoomState {
   /** Чистая партия: новая доска, новая запись, новое зерно. */
   private fresh(): void {
     this.game = this.newGame();
+    this.setupUntil = null;
+    this.arrangement = [];
+    this.setupReady = [];
     this.times = [];
     this.matchId = randomUUID();
     this.seed = newSeed();
@@ -370,6 +469,9 @@ export class TurboRoom implements GameRoomState {
     }
     if (!this.playing()) {
       return { accepted: false, reason: "Соперник ещё не сел" };
+    }
+    if (this.setupUntil !== null) {
+      return { accepted: false, reason: "Ещё расставляемся" };
     }
     if (side !== this.game.turn()) {
       return { accepted: false, reason: "Сейчас не твой ход" };
@@ -402,6 +504,54 @@ export class TurboRoom implements GameRoomState {
     if (!this.playing()) return { accepted: false, reason: "Партия не идёт" };
 
     this.finish(this.game.resign(side));
+    return { accepted: true };
+  }
+
+  /**
+   * Поменять две свои фигуры местами, пока идёт расстановка. Клетки проверяет
+   * комната: обе должны быть из своей зоны, а король остаётся на первой
+   * горизонтали — так решено в постановке.
+   */
+  private swap(actorId: string, payload: unknown): ActionOutcome {
+    const side = this.sideOf(actorId);
+    if (side === null) return { accepted: false, reason: "Ты не за доской" };
+    if (this.setupUntil === null) {
+      return { accepted: false, reason: "Расстановка кончилась" };
+    }
+    if (this.setupReady[side]) {
+      return { accepted: false, reason: "Ты уже сказал «готов»" };
+    }
+
+    const squares = parseSwap(payload);
+    if (!squares) return { accepted: false, reason: "Непонятная клетка" };
+
+    const { geometry } = this.game.position();
+    const zone = showdownZone(side, geometry);
+    const swapped = showdownSwap(
+      this.arrangement[side] ?? [],
+      zone.indexOf(parseSquare(geometry, squares.from) ?? -1),
+      zone.indexOf(parseSquare(geometry, squares.to) ?? -1),
+      geometry,
+    );
+    if (!swapped) return { accepted: false, reason: "Так не переставить" };
+
+    this.arrangement[side] = swapped;
+    this.context.changed();
+    return { accepted: true };
+  }
+
+  /** «Готов». Готовы оба — вскрываемся, не дожидаясь конца времени. */
+  private readyUp(actorId: string): ActionOutcome {
+    const side = this.sideOf(actorId);
+    if (side === null) return { accepted: false, reason: "Ты не за доской" };
+    if (this.setupUntil === null) {
+      return { accepted: false, reason: "Расстановка кончилась" };
+    }
+
+    this.setupReady[side] = true;
+    if (this.setupReady.every((ready) => ready)) this.reveal();
+    else this.context.changed();
+
     return { accepted: true };
   }
 
@@ -527,7 +677,12 @@ export class TurboRoom implements GameRoomState {
       id: this.matchId,
       roomKey: this.context.key,
       mode: this.settings.mode,
-      options: this.settings.options,
+      // Расстановка «Вскрываемся» уезжает в запись вместе с ручками: без неё
+      // партию не перемотать, а отдельного поля под неё в базе нет.
+      options:
+        this.settings.mode === "SHOWDOWN"
+          ? { ...this.settings.options, setup: showdownNote(this.arrangement) }
+          : this.settings.options,
       seed: this.seed,
       timeControl: this.settings.timeControl,
       seats: [...this.seats],
@@ -567,6 +722,16 @@ const REJECTION_TEXT: Record<MoveRejection, string> = {
   needsPromotion: "Выбери, во что превратить пешку",
   illegal: "Так не ходят",
 };
+
+/** Разобрать перестановку: две клетки своей зоны. */
+function parseSwap(payload: unknown): { from: string; to: string } | null {
+  if (typeof payload !== "object" || payload === null) return null;
+
+  const { from, to } = payload as Record<string, unknown>;
+  if (typeof from !== "string" || typeof to !== "string") return null;
+
+  return { from, to };
+}
 
 /** Разобрать присланное клиентом. Верить ему нельзя ни в одном поле. */
 function parseMove(payload: unknown): { move: MoveInput; ply: number } | null {

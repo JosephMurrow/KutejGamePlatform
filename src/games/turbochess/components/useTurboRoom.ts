@@ -63,6 +63,10 @@ export interface TurboRoomHandle {
   rematch: () => Promise<void>;
   /** «Ядерные»: сбросить бомбу вместо хода. */
   bomb: () => Promise<void>;
+  /** «Вскрываемся»: поменять две свои фигуры местами во время расстановки. */
+  swap: (from: string, to: string) => Promise<void>;
+  /** «Вскрываемся»: расстановка готова. */
+  ready: () => Promise<void>;
 }
 
 function connectionQuery(
@@ -199,6 +203,17 @@ export function useTurboRoom(
     await act(GAME_EVENT.bomb);
   }, [act]);
 
+  const swap = useCallback(
+    async (from: string, to: string) => {
+      await act(GAME_EVENT.swap, { from, to });
+    },
+    [act],
+  );
+
+  const ready = useCallback(async () => {
+    await act(GAME_EVENT.ready);
+  }, [act]);
+
   return {
     state,
     connected,
@@ -214,5 +229,7 @@ export function useTurboRoom(
     declineDraw,
     rematch,
     bomb,
+    swap,
+    ready,
   };
 }

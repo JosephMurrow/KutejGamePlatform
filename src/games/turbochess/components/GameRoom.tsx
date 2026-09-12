@@ -64,6 +64,8 @@ export function GameRoom({
   const me = state?.players.find((player) => player.id === userId) ?? null;
   const mySide = me?.seat ?? null;
   const playing = state?.phase === "playing";
+  /** «Вскрываемся»: до вскрытия ходов нет, фигуры меняются местами. */
+  const arranging = state?.phase === "setup" && mySide !== null;
 
   // Звук по свежему ходу: щелчок, взятие, шах или конец партии.
   const heard = useRef(0);
@@ -83,7 +85,7 @@ export function GameRoom({
 
   // Уход посреди партии стоит поражения — платформа спросит об этом на выходе.
   useExitWarning(
-    playing && mySide !== null
+    (playing || state?.phase === "setup") && mySide !== null
       ? "Партия идёт: уход засчитают за поражение."
       : null,
   );
@@ -137,6 +139,10 @@ export function GameRoom({
               controls={playing && mySide !== null ? [mySide] : []}
               lastMove={state.lastMove}
               flipped={orientation}
+              covered={state.covered}
+              onSwap={
+                arranging ? (from, to) => void room.swap(from, to) : undefined
+              }
               onMove={(input: MoveInput) =>
                 room.move({ ...input, ply: state.moves.length })
               }
@@ -146,6 +152,14 @@ export function GameRoom({
           <aside className="flex w-full flex-col gap-3 lg:w-72">
             <ModeCard state={state} />
             <ModeStatus state={state} mySide={mySide} onBomb={room.bomb} />
+            {state.phase === "setup" ? (
+              <Setup
+                state={state}
+                mySide={mySide}
+                clockOffset={room.clockOffset}
+                onReady={room.ready}
+              />
+            ) : null}
 
             <Seat
               state={state}
@@ -269,6 +283,65 @@ function ModeCard({ state }: { state: TurboStatePayload }) {
           ))}
         </div>
       ) : null}
+    </div>
+  );
+}
+
+/**
+ * Расстановка «Вскрываемся»: часы, счёт готовых и кнопка «готов». Сами фигуры
+ * меняются местами на доске — здесь только то, что к ней не приклеить.
+ */
+function Setup({
+  state,
+  mySide,
+  clockOffset,
+  onReady,
+}: {
+  state: TurboStatePayload;
+  mySide: Side | null;
+  clockOffset: number;
+  onReady: () => void;
+}) {
+  const mine = mySide !== null && (state.setupReady[mySide] ?? false);
+  const ready = state.setupReady.filter(Boolean).length;
+
+  return (
+    <div className="flex flex-col gap-2 rounded-xl border border-accent bg-tint px-4 py-3">
+      <div className="flex items-baseline justify-between gap-3">
+        <span className="text-sm font-semibold text-accent">
+          Расставляйтесь
+        </span>
+        <span className="tabular text-xs text-muted">
+          готовы {ready} из {state.seats}
+        </span>
+      </div>
+
+      <Countdown
+        deadline={state.deadline}
+        durationMs={state.phaseDurationMs}
+        clockOffset={clockOffset}
+      />
+
+      {mySide === null ? (
+        <p className="text-xs text-muted">
+          Ты смотришь: до вскрытия закрыты обе половины.
+        </p>
+      ) : (
+        <>
+          <p className="text-xs text-muted">
+            Меняй свои фигуры местами прямо на доске. Король — только на первой
+            горизонтали. Чужая половина закрыта, вскроемся разом.
+          </p>
+          <button
+            type="button"
+            onClick={onReady}
+            disabled={mine}
+            className="rounded-lg bg-accent px-3 py-2 text-sm font-semibold text-surface transition hover:bg-deep disabled:opacity-50"
+          >
+            {mine ? "Ждём соперника" : "Готов"}
+          </button>
+        </>
+      )}
     </div>
   );
 }
@@ -435,6 +508,9 @@ function Seat({
           <div className="text-xs text-muted">
             {sideName(side)}
             {player.away ? " · вышел" : ""}
+            {state.phase === "setup" && state.setupReady[side]
+              ? " · готов"
+              : ""}
             {/*
               Счёт взятых — у места, а не общей строкой: считать в уме, кто
               кого обогнал, посреди резни некогда.
