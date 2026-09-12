@@ -4,6 +4,7 @@ import { BUTCHER } from "./butcher";
 import { CODER } from "./coder";
 import { DRUNK } from "./drunk";
 import { GENIUS } from "./genius";
+import { PHYSICIST } from "./physicist";
 import { PILOT } from "./pilot";
 import { STRATEGIST } from "./strategist";
 
@@ -25,6 +26,7 @@ export const LINES: Partial<Record<Character, Lines>> = {
   genius: GENIUS,
   strategist: STRATEGIST,
   pilot: PILOT,
+  physicist: PHYSICIST,
 };
 
 /** Колода характера; пустая — этот пока молчит. */
