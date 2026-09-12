@@ -3,6 +3,7 @@ import type { Lines } from "../talk";
 import { BUTCHER } from "./butcher";
 import { CODER } from "./coder";
 import { DRUNK } from "./drunk";
+import { GENIUS } from "./genius";
 
 /**
  * Колоды характеров: у кого какие реплики.
@@ -19,6 +20,7 @@ export const LINES: Partial<Record<Character, Lines>> = {
   drunk: DRUNK,
   butcher: BUTCHER,
   coder: CODER,
+  genius: GENIUS,
 };
 
 /** Колода характера; пустая — этот пока молчит. */
