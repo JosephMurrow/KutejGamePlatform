@@ -6,6 +6,7 @@ import { legalMoves, play, type Move } from "../engine/moves";
 import type { Position } from "../engine/position";
 import { TurboGame } from "../engine/game";
 import { PIECE_VALUE, nuclearCharge } from "../modes/nuclear";
+import { BINGE_CARD_MS } from "../modes/binge";
 import { TOAST_MS } from "../modes/booze";
 import { modeInfo, type TurboMode } from "../modes/catalog";
 import { BOT_AVATAR_OFFSET } from "../bots/avatars";
@@ -801,6 +802,68 @@ describe("кнопки режимов", () => {
     assert.equal(view(room).turn, 0, "дополнительный ход остался за белыми");
     move(room, "white", "h5", "h4");
     assert.equal(view(room).turn, 1, "а дальше как обычно");
+  });
+
+  it("загул: взятие тянет карту, и пока она висит, ходить нельзя", () => {
+    const { room, pass } = table("BINGE");
+    move(room, "white", "e2", "e4");
+    move(room, "black", "d7", "d5");
+
+    const before = view(room).bingeLeft as Record<string, number>;
+    move(room, "white", "e4", "d5");
+
+    const card = view(room).binge as {
+      event: { rank: string };
+      by: number;
+      miss: boolean;
+    } | null;
+    assert.ok(card, "карточка висит");
+    assert.equal(card.by, 0, "тянет тот, кто срубил");
+    assert.equal(card.event.rank, "pawn", "срубили пешку — колода пешечная");
+    assert.equal(
+      (view(room).bingeLeft as Record<string, number>).pawn,
+      (before.pawn ?? 0) - 1,
+      "карта выбыла из колоды",
+    );
+
+    assert.equal(
+      move(room, "black", "d8", "d5").reason,
+      "Сначала карточка",
+      "под карточкой доски не видно, ходить нечестно",
+    );
+
+    pass(BINGE_CARD_MS);
+    room.tick();
+
+    assert.equal(view(room).binge, null, "карточку дочитали");
+    // Какое событие выпало, решает зерно партии, и оно у каждой комнаты своё:
+    // доска после карточки может быть какой угодно. Проверяется не она, а то,
+    // что стол разблокировался — ход отбивается уже по правилам, а не окном.
+    assert.notEqual(
+      move(room, "black", "d8", "d5").reason,
+      "Сначала карточка",
+      "и партия пошла дальше",
+    );
+  });
+
+  it("загул: без взятия карты не тянут, а в чужом режиме их нет вовсе", () => {
+    const { room } = table("BINGE");
+    move(room, "white", "e2", "e4");
+
+    assert.equal(view(room).binge, null, "ход без взятия события не даёт");
+    assert.deepEqual(
+      view(room).bingeLeft,
+      { pawn: 3, minor: 4, rook: 6, queen: 1 },
+      "колоды свежие",
+    );
+
+    const other = table("CLASSIC");
+    move(other.room, "white", "e2", "e4");
+    move(other.room, "black", "d7", "d5");
+    move(other.room, "white", "e4", "d5");
+
+    assert.equal(view(other.room).binge, null);
+    assert.equal(view(other.room).bingeLeft, null, "колод вне загула нет");
   });
 
   it("чужие кнопки в чужом режиме не работают", () => {

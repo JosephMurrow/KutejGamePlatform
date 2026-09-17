@@ -25,15 +25,13 @@ describe("каркас режимов", () => {
     assert.deepEqual(modeOptions("MEGA", field), {});
   });
 
-  it("у каждого режима есть правила; готовые — одновидовые и классика", () => {
+  it("у каждого режима есть правила, и все они готовы", () => {
     for (const { id } of MODES) {
       const rules = rulesOf(id, {});
       assert.ok(rules.lines.length > 0, id);
       assert.equal(rules.ready, isReady(id), id);
+      assert.equal(isReady(id), true, id);
     }
-    assert.equal(isReady("ONE_KIND"), true);
-    assert.equal(isReady("CLASSIC"), true);
-    assert.equal(isReady("BINGE"), false);
     assert.equal(rulesOf("ONE_KIND", { kind: "r" }).variant, "все — ладьи");
   });
 });

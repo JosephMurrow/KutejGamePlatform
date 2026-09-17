@@ -2,6 +2,7 @@ import type { PlayerPayload, RoomStatePayload } from "@/shared/protocol";
 import type { Result, EndReason } from "./engine/outcome";
 import type { Side } from "./engine/pieces";
 import type { Position } from "./engine/position";
+import type { BingeEvent, BingeRank } from "./modes/binge";
 import type { TurboMode } from "./modes/catalog";
 import type { ModeOptions, TimeControl } from "./rooms/settings";
 
@@ -112,6 +113,19 @@ export interface TurboStatePayload extends RoomStatePayload<TurboPlayerPayload> 
   toast: { drinker: Side; pourer: Side } | null;
   /** «Алко»: сколько выпито каждым. */
   drinks: number[];
+  /**
+   * «Загул»: карточка события во весь экран. Пока она висит, часы хода стоят и
+   * ходить нельзя (docs/MODES.md, режим 12).
+   */
+  binge: {
+    event: BingeEvent;
+    /** Кто тянул карту: тянет её тот, кто срубил. */
+    by: Side;
+    /** Карта сгорела впустую: в этой позиции ей нечего было делать. */
+    miss: boolean;
+  } | null;
+  /** «Загул»: сколько карт осталось в каждой колоде; вне режима — null. */
+  bingeLeft: Record<BingeRank, number> | null;
   /** «Анархия»: отменённые ходы — их показывают перечёркнутыми. */
   vetoed: { ply: number; san: string }[];
   /** Есть ли прямо сейчас основание требовать ничью. */

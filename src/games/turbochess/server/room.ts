@@ -37,6 +37,15 @@ import type { EndReason, Outcome } from "../engine/outcome";
 import type { PieceKind, Side } from "../engine/pieces";
 import { alive, type Position } from "../engine/position";
 import { hideAgents } from "../modes/agents";
+import {
+  BINGE_CARD_MS,
+  bingeLeft,
+  bingeRank,
+  drawBinge,
+  freshDecks,
+  type BingeDecks,
+  type BingeEvent,
+} from "../modes/binge";
 import { TOAST_MS } from "../modes/booze";
 import { marketPrice, pointsLeft } from "../modes/market";
 import { roller } from "../modes/random";
@@ -171,6 +180,23 @@ export class TurboRoom implements GameRoomState {
   private drinks: number[] = [];
   /** «Анархия»: отменённые ходы — их показывают перечёркнутыми. */
   private vetoed: { ply: number; san: string }[] = [];
+  /**
+   * «Загул»: колоды событий на партию. Общие на двоих и без возврата, поэтому
+   * живут у стола, а не в позиции: доски они не касаются (docs/MODES.md,
+   * режим 12). Вне режима — `null`.
+   */
+  private decks: BingeDecks | null = null;
+  /**
+   * «Загул»: карточка события во весь экран. Пока она висит, часы хода стоят и
+   * ходить нельзя — как над стопкой в алко-шахматах: читать и думать
+   * одновременно нечестно, а под карточкой ещё и доски не видно.
+   */
+  private card: {
+    event: BingeEvent;
+    by: Side;
+    miss: boolean;
+    until: number;
+  } | null = null;
   /** Боты за столом по их номеру игрока. Пустая — за столом одни живые. */
   private readonly bots = new Map<string, BotSeat>();
   /**
@@ -364,7 +390,9 @@ export class TurboRoom implements GameRoomState {
     if (!this.playing()) return null;
 
     const waits: number[] = [];
-    if (this.toast) {
+    if (this.card) {
+      waits.push(Math.max(0, this.card.until - this.now()));
+    } else if (this.toast) {
       waits.push(Math.max(0, this.toast.until - this.now()));
     } else if (this.setupUntil !== null) {
       waits.push(Math.max(0, this.setupUntil - this.now()));
@@ -390,6 +418,14 @@ export class TurboRoom implements GameRoomState {
     if (this.absence && this.now() - this.absence.since >= ABANDON_MS) {
       const gone = this.sideOf(this.absence.id);
       if (gone !== null) this.finish(this.game.abandon(gone));
+      return;
+    }
+
+    // Карточку дочитали — часы пошли снова. Ходить и жать кнопки в эти
+    // секунды некому, поэтому ни бот, ни человек тут ничего не делают.
+    if (this.card) {
+      if (this.now() >= this.card.until) this.closeCard();
+      else this.changed();
       return;
     }
 
@@ -496,11 +532,13 @@ export class TurboRoom implements GameRoomState {
       deadline: showing === null ? null : Date.now() + showing,
       // Во время расстановки отсчёт идёт по её девяноста секундам, а не по
       // лимиту на ход: полоса времени должна показывать то, что идёт.
-      phaseDurationMs: this.toast
-        ? TOAST_MS
-        : this.setupUntil === null
-          ? MOVE_LIMIT_MS[this.settings.timeControl]
-          : SHOWDOWN_SETUP_MS,
+      phaseDurationMs: this.card
+        ? BINGE_CARD_MS
+        : this.toast
+          ? TOAST_MS
+          : this.setupUntil === null
+            ? MOVE_LIMIT_MS[this.settings.timeControl]
+            : SHOWDOWN_SETUP_MS,
       playerCount: this.seats.length,
       players: this.seats.map((id, seat) => ({
         id,
@@ -551,6 +589,10 @@ export class TurboRoom implements GameRoomState {
         ? { drinker: this.toast.drinker, pourer: this.toast.pourer }
         : null,
       drinks: [...this.drinks],
+      binge: this.card
+        ? { event: this.card.event, by: this.card.by, miss: this.card.miss }
+        : null,
+      bingeLeft: this.decks ? bingeLeft(this.decks) : null,
       vetoed: [...this.vetoed],
       moves: this.game.history(),
       lastMove: this.game.lastMove(),
@@ -1016,6 +1058,8 @@ export class TurboRoom implements GameRoomState {
     this.drinks = Array.from({ length: this.capacity }, () => 0);
     this.vetoed = [];
     this.toast = null;
+    this.card = null;
+    this.decks = this.settings.mode === "BINGE" ? freshDecks() : null;
     this.forgetBots();
     this.greet();
 
@@ -1103,6 +1147,7 @@ export class TurboRoom implements GameRoomState {
       return { accepted: false, reason: "Ещё расставляемся" };
     }
     if (this.toast) return { accepted: false, reason: "Сначала выпейте" };
+    if (this.card) return { accepted: false, reason: "Сначала карточка" };
     if (side !== this.game.turn()) {
       return { accepted: false, reason: "Сейчас не твой ход" };
     }
@@ -1121,6 +1166,11 @@ export class TurboRoom implements GameRoomState {
     // Предложение живёт до ответа или до следующего хода — что раньше.
     this.offer = null;
 
+    // «Загул»: взятие тянет карту, и событие может кончить партию само —
+    // поэтому оно разыгрывается до разбора итога, а не после.
+    const after =
+      result.outcome ?? this.drawCard(result.move, side, spentAt) ?? null;
+
     // Алко-шахматы: после взятия висит окно, и часы хода на это время стоят.
     if (this.settings.mode === "BOOZE" && result.move.captured) {
       this.toast = {
@@ -1129,11 +1179,15 @@ export class TurboRoom implements GameRoomState {
         until: spentAt + TOAST_MS,
       };
       this.clock.stop();
+    } else if (this.card) {
+      this.clock.stop();
     } else {
       this.clock.restart();
     }
 
-    this.finish(result.outcome ?? this.capIfTooLong());
+    this.finish(after ?? this.capIfTooLong());
+    // Партия кончилась этим же ходом — карточке не место поверх итога.
+    if (this.game.isOver()) this.card = null;
     // Ботам рассказываем после того, как партия разобрана: иначе на мате они
     // говорили бы про взятие, а не про мат.
     this.announce(result.move, side);
@@ -1154,8 +1208,58 @@ export class TurboRoom implements GameRoomState {
 
   /** Броски партии: одно зерно, разная соль — и партия воспроизводится. */
   private rolls(count: number, salt: number): number[] {
-    const roll = roller(this.seed, this.game.ply() * 8 + salt);
+    const roll = this.dice(salt);
     return Array.from({ length: count }, () => roll());
+  }
+
+  /**
+   * Те же кости, но россыпью: сколько их понадобится, знает только тот, кто
+   * бросает. Событию загула их нужно от одной до дюжины.
+   */
+  private dice(salt: number): () => number {
+    return roller(this.seed, this.game.ply() * 8 + salt);
+  }
+
+  /**
+   * «Загул»: взятие тянуло карту (docs/MODES.md, режим 12).
+   *
+   * Тянет и применяет режим, комната только даёт ему кости по зерну партии и
+   * держит окно, пока карточка висит. Карта, которой в этой позиции нечего
+   * делать, всё равно выбывает — «сгорает впустую», так решил хозяин.
+   */
+  private drawCard(move: MoveRecord, side: Side, at: number): Outcome | null {
+    if (this.settings.mode !== "BINGE" || !this.decks) return null;
+    if (!move.captured) return null;
+
+    const rank = bingeRank(move.captured);
+    if (!rank) return null;
+
+    const deal = drawBinge(
+      this.decks,
+      rank,
+      this.game.position(),
+      side,
+      this.dice(2),
+    );
+    // Колода кончилась — взятие этого ранга событий больше не даёт.
+    if (!deal) return null;
+
+    this.card = {
+      event: deal.event,
+      by: side,
+      miss: deal.position === null,
+      until: at + BINGE_CARD_MS,
+    };
+
+    return deal.position ? this.game.reshape(deal.position) : null;
+  }
+
+  /** Карточку дочитали: часы хода пошли снова. */
+  private closeCard(): void {
+    this.card = null;
+    this.moveStartedAt = this.now();
+    this.clock.restart();
+    this.changed();
   }
 
   /** Окно закрылось: часы хода пошли снова. */

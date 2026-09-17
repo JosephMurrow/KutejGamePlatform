@@ -4,6 +4,7 @@ import { Countdown } from "@/components/ui/Countdown";
 import { REASON_TEXT } from "../engine/outcome";
 import { takenCount } from "../modes/annihilation";
 import { BATTLE_SIDE_NAME } from "../modes/battle";
+import { BINGE_RANKS, BINGE_RANK_LABEL } from "../modes/binge";
 import { modeInfo } from "../modes/catalog";
 import { nuclearCharge, nuclearThreshold } from "../modes/nuclear";
 import { rulesOf } from "../modes/rules";
@@ -55,6 +56,10 @@ export function ScreenView({
     if (state.mode === "BOOZE") {
       return `выпито: ${state.drinks[seat] ?? 0}`;
     }
+    if (state.mode === "BINGE" && state.binge) {
+      // Карту тянет срубивший, и зритель должен видеть, кому она выпала.
+      return state.binge.by === seat ? "тянет карту" : null;
+    }
     if (state.mode === "NUCLEAR") {
       const options = state.options ?? {};
       return `заряд ${nuclearCharge(state.position, seat)} из ${nuclearThreshold(options)}`;
@@ -102,6 +107,35 @@ export function ScreenView({
           </>
         )}
       </div>
+
+      {state.binge ? (
+        <div className="flex w-full max-w-[min(80vh,900px)] flex-col items-center gap-2 rounded-2xl border border-accent bg-tint px-6 py-5 text-center">
+          <span className="text-lg text-muted">
+            {BINGE_RANK_LABEL[state.binge.event.rank]}
+          </span>
+          <span className="text-4xl font-extrabold text-accent">
+            {state.binge.event.title}
+          </span>
+          <span className="text-xl text-muted">
+            {state.binge.miss
+              ? "Мимо: событию тут нечего делать"
+              : state.binge.event.text}
+          </span>
+        </div>
+      ) : null}
+
+      {state.bingeLeft ? (
+        <div className="flex w-full max-w-[min(80vh,900px)] justify-between gap-4 text-lg text-muted">
+          {BINGE_RANKS.map((rank) => (
+            <span key={rank}>
+              {BINGE_RANK_LABEL[rank]}:{" "}
+              <span className="tabular font-semibold text-ink">
+                {state.bingeLeft?.[rank] ?? 0}
+              </span>
+            </span>
+          ))}
+        </div>
+      ) : null}
 
       <div className="w-full max-w-[min(80vh,900px)]">
         <Board

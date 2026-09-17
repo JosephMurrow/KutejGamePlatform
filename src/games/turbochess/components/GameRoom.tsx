@@ -13,6 +13,7 @@ import type { Side } from "../engine/pieces";
 import type { Position } from "../engine/position";
 import { STALL_WARN, stallLeft, takenCount } from "../modes/annihilation";
 import { BATTLE_SIDE_NAME } from "../modes/battle";
+import { BINGE_RANKS, BINGE_RANK_LABEL } from "../modes/binge";
 import { modeInfo } from "../modes/catalog";
 import { chanceReady } from "../modes/lastChance";
 import {
@@ -365,6 +366,8 @@ export function GameRoom({
           </aside>
         </main>
       )}
+
+      {state?.binge ? <BingeCard state={state} mySide={mySide} /> : null}
 
       {state?.toast ? (
         <Toast
@@ -764,6 +767,29 @@ function ModeStatus({
     );
   }
 
+  if (state.mode === "BINGE" && state.bingeLeft) {
+    const left = state.bingeLeft;
+
+    return (
+      <div className="flex flex-col gap-2 rounded-xl border border-line bg-paper px-4 py-3">
+        <span className="text-sm font-semibold">Колоды</span>
+        <div className="flex flex-col gap-1">
+          {BINGE_RANKS.map((rank) => (
+            <div
+              key={rank}
+              className="flex items-baseline justify-between gap-3 text-xs"
+            >
+              <span className="text-muted">{BINGE_RANK_LABEL[rank]}</span>
+              <span className="tabular font-semibold">
+                {left[rank] === 0 ? "пусто" : `осталось ${left[rank]}`}
+              </span>
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  }
+
   if (state.mode === "NUCLEAR" && mySide !== null) {
     return (
       <Charge
@@ -777,6 +803,49 @@ function ModeStatus({
   }
 
   return null;
+}
+
+/**
+ * «Загул»: карточка события во весь экран (docs/MODES.md, режим 12).
+ *
+ * Висит пару секунд и закрывается сама — по тому же дедлайну, которым живёт
+ * комната, а не по своему таймеру: пока она висит, часы хода стоят и ходить
+ * нельзя, и кнопки «закрыть» у неё нет намеренно.
+ */
+function BingeCard({
+  state,
+  mySide,
+}: {
+  state: TurboStatePayload;
+  mySide: Side | null;
+}) {
+  const card = state.binge;
+  if (!card) return null;
+
+  const mine = mySide === card.by;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink/80 px-4">
+      <div className="flex w-full max-w-md flex-col gap-3 rounded-2xl border border-accent bg-paper px-6 py-7 text-center">
+        <span className="text-xs font-semibold uppercase tracking-wide text-muted">
+          {BINGE_RANK_LABEL[card.event.rank]} ·{" "}
+          {mine ? "твоя карта" : "карта соперника"}
+        </span>
+
+        <span className="text-2xl font-extrabold text-accent">
+          {card.event.title}
+        </span>
+
+        <p className="text-sm leading-relaxed text-muted">{card.event.text}</p>
+
+        {card.miss ? (
+          <p className="text-xs font-semibold text-ink">
+            Мимо: в этой позиции событию нечего делать. Карта всё равно сгорела.
+          </p>
+        ) : null}
+      </div>
+    </div>
+  );
 }
 
 /**
