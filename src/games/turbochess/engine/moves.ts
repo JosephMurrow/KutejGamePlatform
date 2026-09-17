@@ -9,21 +9,25 @@ import {
   type Vec,
 } from "./geometry";
 import {
+  PATTERNS,
   PROMOTIONS,
   markKey,
   marked,
   patternOf,
   piece,
   unmarked,
+  type Pattern,
   type Piece,
   type PieceKind,
   type Side,
 } from "./pieces";
 import {
   ZOMBIE_DELAY,
+  bent,
   kingIsRoyal,
   nextSide,
   type CastleRight,
+  type Effect,
   type Position,
   type Zombie,
 } from "./position";
@@ -166,17 +170,25 @@ function pawnMoves(
     }
   };
 
-  const one = offset(geometry, from, forward);
-  if (one !== null && !at(board, one)) {
-    push(one, null, {});
+  // Обычно шаг один, со своей второй горизонтали — два, а с «Разгона» — три,
+  // откуда бы пешка ни шла (docs/MODES.md, режим 12).
+  const second = lines.coordinate(from) === lines.second;
+  const far = bent(position, "rush", pawn.side) ? 3 : second ? 2 : 1;
 
-    const two = offset(geometry, from, forward, 2);
-    if (
-      two !== null &&
-      lines.coordinate(from) === lines.second &&
-      !at(board, two)
-    ) {
-      moves.push(basic(from, two, pawn, null, { doubleStep: true }));
+  for (let step = 1; step <= far; step++) {
+    const to = offset(geometry, from, forward, step);
+    if (to === null || at(board, to)) break;
+
+    // Взятие на проходе даёт только обычный двойной шаг со своей горизонтали:
+    // разогнавшуюся на три клетки мимоходом не бьют.
+    push(to, null, step === 2 && second ? { doubleStep: true } : {});
+  }
+
+  // «Заплетается»: шаг вбок на свободную клетку, без взятия.
+  if (bent(position, "stagger", pawn.side)) {
+    for (const vec of sideways(forward)) {
+      const to = offset(geometry, from, vec);
+      if (to !== null && !at(board, to)) push(to, null, {});
     }
   }
 
@@ -190,7 +202,7 @@ function pawnMoves(
       continue;
     }
 
-    const passant = position.enPassant;
+    const passant = bent(position, "closed") ? null : position.enPassant;
     if (!target && passant && passant.target === to) {
       const victim = at(board, passant.victim);
       if (victim && victim.kind === "p" && victim.side !== pawn.side) {
@@ -240,6 +252,20 @@ function megaPawnMoves(
   }
 }
 
+/**
+ * По какой таблице ходит фигура. Обычно по своей — но «Занос» меняет коней со
+ * слонами на один ход (docs/MODES.md, режим 12). Мега-форма сильнее заноса:
+ * она уже не конь и не слон.
+ */
+function patternFor(position: Position, mover: Piece): Pattern {
+  const swap = mover.kind === "n" ? "b" : mover.kind === "b" ? "n" : null;
+  if (!swap || mover.mega || !bent(position, "skid", mover.side)) {
+    return patternOf(mover);
+  }
+
+  return PATTERNS[swap];
+}
+
 function pieceMoves(
   position: Position,
   from: number,
@@ -248,7 +274,7 @@ function pieceMoves(
 ): void {
   if (mover.kind === "p") return;
   const { geometry, board } = position;
-  const pattern = patternOf(mover);
+  const pattern = patternFor(position, mover);
 
   for (const vec of pattern.leaps) {
     if (!allowed(position, mover, vec)) continue;
@@ -307,6 +333,8 @@ function pieceMoves(
  */
 function castleMoves(position: Position, moves: Move[]): void {
   const { geometry, board, turn } = position;
+  // «Кабак закрыт»: рокировка не работает, как и взятие на проходе.
+  if (bent(position, "closed")) return;
 
   for (const right of position.castling) {
     if (right.side !== turn) continue;
@@ -470,7 +498,7 @@ function hits(
     );
   }
 
-  const pattern = patternOf(attacker);
+  const pattern = patternFor(position, attacker);
   if (
     pattern.leaps.some(
       ([vx, vy]) =>
@@ -629,10 +657,27 @@ export function legalMoves(position: Position): Move[] {
         banned.promotion === move.promotion
       ),
   );
-  if (!position.rules.mustCapture) return moves;
+  const allowed = hungover(position, moves);
+  if (!position.rules.mustCapture) return allowed;
 
-  const captures = moves.filter((move) => move.captured);
-  return captures.length > 0 ? captures : moves;
+  const captures = allowed.filter((move) => move.captured);
+  return captures.length > 0 ? captures : allowed;
+}
+
+/**
+ * «Похмелье»: ходить обязан той же фигурой, что и прошлый раз
+ * (docs/MODES.md, режим 12).
+ *
+ * Фигуры может уже не быть на доске или ей может быть некуда идти — тогда
+ * правило молчит: событие бьёт по сопернику, но оставить его вовсе без ходов
+ * оно не может, иначе рулетка ставила бы мат сама.
+ */
+function hungover(position: Position, moves: Move[]): Move[] {
+  const stuck = bent(position, "hangover", position.turn);
+  if (!stuck || stuck.square === undefined) return moves;
+
+  const only = moves.filter((move) => move.from === stuck.square);
+  return only.length > 0 ? only : moves;
 }
 
 /**
@@ -678,6 +723,28 @@ function reserveAfter(position: Position, move: Move) {
   return { reserve, pending };
 }
 
+/**
+ * Эффекты «Загула» после хода (docs/MODES.md, режим 12).
+ *
+ * У направленного эффекта счёт идёт по ходам той стороны, которой он касается:
+ * иначе лишний ход соперника съедал бы чужую слепоту, ничего ей не показав.
+ * У общего счёт по всем полуходам. «Кураж» ходов не считает вовсе — он ждёт
+ * взятия и на нём же сгорает.
+ */
+function effectsAfter(position: Position, move: Move, took: boolean): Effect[] {
+  const mover = position.turn;
+
+  return position.effects.flatMap((effect) => {
+    if (effect.kind === "swagger") {
+      return took && effect.side === mover ? [] : [effect];
+    }
+    if (effect.side !== null && effect.side !== mover) return [effect];
+
+    const left = effect.left - 1;
+    return left > 0 ? [{ ...effect, left }] : [];
+  });
+}
+
 /** Позиция после хода. Ход должен быть из `legalMoves`. */
 export function play(position: Position, move: Move): Position {
   // Ходит сторона, чья очередь: чужим двойным агентом ходит соперник, и
@@ -687,16 +754,19 @@ export function play(position: Position, move: Move): Position {
   const took = move.captured !== null && !stopped(move);
   // Купленный дополнительный ход: очередь остаётся у того же, и банк тает.
   const bank = position.extra[mover] ?? 0;
+  // «Кураж» загула: взятие даёт лишний ход, и платит за него он, а не банк.
+  const swagger = took && bent(position, "swagger", mover) !== null;
 
   return {
     ...position,
     ...reserveAfter(position, move),
     board: boardAfter(position, move),
-    turn: bank > 0 ? mover : nextSide(position, mover),
+    turn: swagger || bank > 0 ? mover : nextSide(position, mover),
     extra:
-      bank > 0
+      bank > 0 && !swagger
         ? position.extra.map((left, at) => (at === mover ? left - 1 : left))
         : position.extra,
+    effects: effectsAfter(position, move, took),
     // Король сходил — сгорают все права его стороны; ладья ушла или её
     // забрали — сгорает право с этой ладьёй. Отбитый щитом никуда не ходил.
     castling: stopped(move)
@@ -830,7 +900,14 @@ export function repetitionKey(position: Position): string {
     .sort()
     .join(",");
 
-  return `${board}|${position.turn}|${castling}|${passant}|${reserve}|${pending}`;
+  // Согнутые правила — тоже часть позиции: с «Разгоном» те же фигуры играют
+  // другую партию, и повторением это не считается.
+  const effects = position.effects
+    .map((effect) => `${effect.kind}${effect.side}${effect.left}`)
+    .sort()
+    .join(",");
+
+  return `${board}|${position.turn}|${castling}|${passant}|${reserve}|${pending}|${effects}`;
 }
 
 /** Цвет поля: слоны на полях одного цвета доску не покрывают. */

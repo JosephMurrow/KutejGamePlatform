@@ -134,6 +134,7 @@ export function showdownPosition(
     spent: [],
     extra: [],
     banned: null,
+    effects: [],
   };
 }
 

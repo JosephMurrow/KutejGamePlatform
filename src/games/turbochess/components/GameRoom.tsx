@@ -13,7 +13,16 @@ import type { Side } from "../engine/pieces";
 import type { Position } from "../engine/position";
 import { STALL_WARN, stallLeft, takenCount } from "../modes/annihilation";
 import { BATTLE_SIDE_NAME } from "../modes/battle";
-import { BINGE_RANKS, BINGE_RANK_LABEL } from "../modes/binge";
+import {
+  BINGE_RANKS,
+  BINGE_RANK_LABEL,
+  EFFECT_HINT,
+  EFFECT_LABEL,
+  blinded,
+  effectLeft,
+  effectWhom,
+  shaking,
+} from "../modes/binge";
 import { modeInfo } from "../modes/catalog";
 import { chanceReady } from "../modes/lastChance";
 import {
@@ -211,6 +220,7 @@ export function GameRoom({
                 : "mx-auto w-full max-w-[min(78svh,560px)]"
             }
           >
+            <Effects position={state.position} mySide={mySide} />
             <div
               style={
                 wide
@@ -222,7 +232,10 @@ export function GameRoom({
                 position={state.position}
                 controls={playing && mySide !== null ? [mySide] : []}
                 lastMove={state.lastMove}
-                flipped={orientation}
+                // «Тремор» переворачивает доску обоим — поверх того, как её
+                // развернул сам игрок (docs/MODES.md, режим 12).
+                flipped={orientation !== shaking(state.position)}
+                blind={blinded(state.position, mySide)}
                 covered={state.covered}
                 onSwap={
                   arranging ? (from, to) => void room.swap(from, to) : undefined
@@ -803,6 +816,41 @@ function ModeStatus({
   }
 
   return null;
+}
+
+/**
+ * «Загул»: полоса действующих эффектов над доской со счётчиком оставшихся
+ * ходов (docs/MODES.md, режим 12).
+ *
+ * Пусто — полосы нет вовсе: место над доской дорогое, и пустая строка съедала
+ * бы его во всех остальных режимах.
+ */
+function Effects({
+  position,
+  mySide,
+}: {
+  position: Position;
+  mySide: Side | null;
+}) {
+  if (position.effects.length === 0) return null;
+
+  return (
+    <div className="mb-2 flex flex-wrap gap-1.5">
+      {position.effects.map((effect) => (
+        <span
+          key={`${effect.kind}${effect.side}`}
+          className="flex items-baseline gap-1.5 rounded-lg border border-accent bg-tint px-2.5 py-1 text-xs"
+          title={EFFECT_HINT[effect.kind]}
+        >
+          <span className="font-semibold text-accent">
+            {EFFECT_LABEL[effect.kind]}
+          </span>
+          <span className="text-muted">{effectWhom(effect, mySide)}</span>
+          <span className="tabular text-muted">{effectLeft(effect)}</span>
+        </span>
+      ))}
+    </div>
+  );
 }
 
 /**

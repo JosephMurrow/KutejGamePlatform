@@ -112,6 +112,7 @@ export function battlePosition(): Position {
     spent: [],
     extra: [],
     banned: null,
+    effects: [],
   };
 }
 

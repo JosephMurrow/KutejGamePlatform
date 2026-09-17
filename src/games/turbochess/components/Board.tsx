@@ -113,6 +113,12 @@ export interface BoardProps {
    * не делает, а отдаёт нажатую клетку наружу.
    */
   onPick?: (square: string) => void;
+  /**
+   * «Слепота» загула: ходы выбранной фигуры не подсвечиваются
+   * (docs/MODES.md, режим 12). Ходить при этом можно — просто вслепую, а
+   * незаконный ход доска по-прежнему не пустит.
+   */
+  blind?: boolean;
 }
 
 export function Board({
@@ -124,6 +130,7 @@ export function Board({
   covered,
   onSwap,
   onPick,
+  blind = false,
 }: BoardProps) {
   /** Позиция после своего хода, пока его не приняли. */
   const [preview, setPreview] = useState<Position | null>(null);
@@ -169,9 +176,12 @@ export function Board({
       };
     }
 
+    // Сама выбранная клетка видна и вслепую: иначе непонятно, чем ходишь.
     if (picked) {
       marks[picked] = { boxShadow: `inset 0 0 0 999px ${ACCENT}57` };
-      for (const [square, capture] of targetsFrom(shown, legal, picked)) {
+      for (const [square, capture] of blind
+        ? []
+        : targetsFrom(shown, legal, picked)) {
         marks[square] = capture
           ? { boxShadow: `inset 0 0 0 4px ${ACCENT}8a` }
           : {
@@ -181,7 +191,7 @@ export function Board({
     }
 
     // Куда выбранной фигуре уже нельзя: назад пацанские шахматы не пускают.
-    if (picked && shown.rules.forwardOnly) {
+    if (picked && !blind && shown.rules.forwardOnly) {
       for (const square of behindSquares(shown, picked)) {
         marks[square] = {
           ...marks[square],
@@ -228,7 +238,7 @@ export function Board({
     }
 
     return marks;
-  }, [covered, dropping, lastMove, legal, picked, shown]);
+  }, [blind, covered, dropping, lastMove, legal, picked, shown]);
 
   /**
    * Своя ли фигура на клетке. В расстановке на доске только свои: чужая

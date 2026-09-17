@@ -4,7 +4,15 @@ import { Countdown } from "@/components/ui/Countdown";
 import { REASON_TEXT } from "../engine/outcome";
 import { takenCount } from "../modes/annihilation";
 import { BATTLE_SIDE_NAME } from "../modes/battle";
-import { BINGE_RANKS, BINGE_RANK_LABEL } from "../modes/binge";
+import {
+  BINGE_RANKS,
+  BINGE_RANK_LABEL,
+  EFFECT_HINT,
+  EFFECT_LABEL,
+  effectLeft,
+  effectWhom,
+  shaking,
+} from "../modes/binge";
 import { modeInfo } from "../modes/catalog";
 import { nuclearCharge, nuclearThreshold } from "../modes/nuclear";
 import { rulesOf } from "../modes/rules";
@@ -137,12 +145,33 @@ export function ScreenView({
         </div>
       ) : null}
 
+      {state.position.effects.length > 0 ? (
+        <div className="flex w-full max-w-[min(80vh,900px)] flex-wrap justify-center gap-3">
+          {state.position.effects.map((effect) => (
+            <span
+              key={`${effect.kind}${effect.side}`}
+              className="rounded-xl border border-accent bg-tint px-4 py-2 text-lg"
+            >
+              <span className="font-semibold text-accent">
+                {EFFECT_LABEL[effect.kind]}
+              </span>
+              <span className="text-muted">
+                {" "}
+                — {EFFECT_HINT[effect.kind]}, {effectWhom(effect, null)},{" "}
+                {effectLeft(effect)}
+              </span>
+            </span>
+          ))}
+        </div>
+      ) : null}
+
       <div className="w-full max-w-[min(80vh,900px)]">
         <Board
           position={state.position}
           controls={[]}
           lastMove={state.lastMove}
-          flipped={false}
+          // «Тремор» крутит доску и зрителям: они смотрят ту же партию.
+          flipped={shaking(state.position)}
           covered={state.covered}
           onMove={() => false}
         />

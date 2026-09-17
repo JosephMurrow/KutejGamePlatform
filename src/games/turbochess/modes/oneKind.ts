@@ -99,6 +99,7 @@ export function oneKindPosition(kind: OneKind): Position {
     spent: [],
     extra: [],
     banned: null,
+    effects: [],
   };
 }
 

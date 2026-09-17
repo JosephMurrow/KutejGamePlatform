@@ -96,6 +96,7 @@ export function fromFen(
     vetoes: [],
     spent: [],
     extra: [],
+    effects: [],
     banned: null,
   };
 }

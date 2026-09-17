@@ -43,6 +43,7 @@ import {
   bingeRank,
   drawBinge,
   freshDecks,
+  thirstCut,
   type BingeDecks,
   type BingeEvent,
 } from "../modes/binge";
@@ -197,6 +198,12 @@ export class TurboRoom implements GameRoomState {
     miss: boolean;
     until: number;
   } | null = null;
+  /**
+   * Куда каждая сторона ходила в прошлый раз. Нужно «Похмелью»: оно велит
+   * ходить той же фигурой, а запись ходов не помнит, кто её сделал, — и при
+   * лишнем ходе подряд соседние записи оказываются одного игрока.
+   */
+  private lastTo: (number | null)[] = [];
   /** Боты за столом по их номеру игрока. Пустая — за столом одни живые. */
   private readonly bots = new Map<string, BotSeat>();
   /**
@@ -1060,6 +1067,7 @@ export class TurboRoom implements GameRoomState {
     this.toast = null;
     this.card = null;
     this.decks = this.settings.mode === "BINGE" ? freshDecks() : null;
+    this.lastTo = Array.from({ length: this.capacity }, () => null);
     this.forgetBots();
     this.greet();
 
@@ -1074,7 +1082,7 @@ export class TurboRoom implements GameRoomState {
       return;
     }
 
-    this.clock.restart();
+    this.restartClock();
   }
 
   /** Поздороваться каждому боту за столом: партия началась. */
@@ -1092,7 +1100,7 @@ export class TurboRoom implements GameRoomState {
     this.setupUntil = null;
     this.game = new TurboGame(showdownPosition(this.arrangement));
     this.moveStartedAt = this.now();
-    this.clock.restart();
+    this.restartClock();
     for (const bot of this.bots.values()) bot.speak?.("reveal", 0);
     this.changed();
   }
@@ -1165,6 +1173,10 @@ export class TurboRoom implements GameRoomState {
     this.moveStartedAt = spentAt;
     // Предложение живёт до ответа или до следующего хода — что раньше.
     this.offer = null;
+    this.lastTo[side] = parseSquare(
+      this.game.position().geometry,
+      result.move.to,
+    );
 
     // «Загул»: взятие тянет карту, и событие может кончить партию само —
     // поэтому оно разыгрывается до разбора итога, а не после.
@@ -1182,7 +1194,7 @@ export class TurboRoom implements GameRoomState {
     } else if (this.card) {
       this.clock.stop();
     } else {
-      this.clock.restart();
+      this.restartClock();
     }
 
     this.finish(after ?? this.capIfTooLong());
@@ -1240,6 +1252,10 @@ export class TurboRoom implements GameRoomState {
       this.game.position(),
       side,
       this.dice(2),
+      {
+        enemyMoved: this.lastTo[(side + 1) % this.capacity] ?? null,
+        timed: this.clock.limited,
+      },
     );
     // Колода кончилась — взятие этого ранга событий больше не даёт.
     if (!deal) return null;
@@ -1258,15 +1274,32 @@ export class TurboRoom implements GameRoomState {
   private closeCard(): void {
     this.card = null;
     this.moveStartedAt = this.now();
-    this.clock.restart();
+    this.restartClock();
     this.changed();
+  }
+
+  /**
+   * Пошёл новый ход.
+   *
+   * Одна дверь на все часы комнаты: «Сушняк» загула режет время тому, чей ход
+   * сейчас, и узнать об этом надо в единственном месте, а не в семи
+   * (docs/MODES.md, режим 12).
+   */
+  private restartClock(): void {
+    const limit = MOVE_LIMIT_MS[this.settings.timeControl];
+    const cut =
+      this.settings.mode === "BINGE"
+        ? thirstCut(this.game.position(), this.game.turn(), limit)
+        : 0;
+
+    this.clock.restart(cut);
   }
 
   /** Окно закрылось: часы хода пошли снова. */
   private closeToast(): void {
     this.toast = null;
     this.moveStartedAt = this.now();
-    this.clock.restart();
+    this.restartClock();
     this.changed();
   }
 
@@ -1313,7 +1346,7 @@ export class TurboRoom implements GameRoomState {
     this.times.push(Math.round(spentAt - this.moveStartedAt));
     this.moveStartedAt = spentAt;
     this.offer = null;
-    this.clock.restart();
+    this.restartClock();
     this.finish(result.outcome ?? this.capIfTooLong());
     this.changed();
 
@@ -1375,7 +1408,7 @@ export class TurboRoom implements GameRoomState {
     this.vetoed.push({ ply: gone.ply, san: gone.san });
     this.offer = null;
     this.moveStartedAt = this.now();
-    this.clock.restart();
+    this.restartClock();
     // Отменяют всегда чужой ход: ворчит тот, чья теперь снова очередь.
     this.tell(this.game.turn(), "vetoed");
     this.changed();

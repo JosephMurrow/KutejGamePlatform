@@ -59,6 +59,21 @@ describe("часы на ход", () => {
     assert.equal(clock.expired(), false);
   });
 
+  it("урезанный ход короче на столько, на сколько урезали", () => {
+    const time = ticker();
+    const clock = new MoveClock(30_000, time.now);
+
+    // «Сушняк» загула: минус время с одного хода (docs/MODES.md, режим 12).
+    clock.restart(10_000);
+    assert.equal(clock.left(), 20_000);
+
+    time.pass(20_000);
+    assert.equal(clock.expired(), true, "и флаг падает раньше");
+
+    clock.restart();
+    assert.equal(clock.left(), 30_000, "следующий ход снова целый");
+  });
+
   it("остановленные часы времени не считают", () => {
     const time = ticker();
     const clock = new MoveClock(10_000, time.now);

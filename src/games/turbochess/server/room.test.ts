@@ -6,7 +6,7 @@ import { legalMoves, play, type Move } from "../engine/moves";
 import type { Position } from "../engine/position";
 import { TurboGame } from "../engine/game";
 import { PIECE_VALUE, nuclearCharge } from "../modes/nuclear";
-import { BINGE_CARD_MS } from "../modes/binge";
+import { BINGE_CARD_MS, bingeLeft, freshDecks } from "../modes/binge";
 import { TOAST_MS } from "../modes/booze";
 import { modeInfo, type TurboMode } from "../modes/catalog";
 import { BOT_AVATAR_OFFSET } from "../bots/avatars";
@@ -853,7 +853,7 @@ describe("кнопки режимов", () => {
     assert.equal(view(room).binge, null, "ход без взятия события не даёт");
     assert.deepEqual(
       view(room).bingeLeft,
-      { pawn: 3, minor: 4, rook: 6, queen: 1 },
+      bingeLeft(freshDecks()),
       "колоды свежие",
     );
 

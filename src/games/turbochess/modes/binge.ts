@@ -6,7 +6,13 @@ import {
   reachedThrone,
 } from "../engine/moves";
 import { piece, type Piece, type PieceKind, type Side } from "../engine/pieces";
-import { classicPosition, type Position } from "../engine/position";
+import {
+  bent,
+  classicPosition,
+  type Effect,
+  type EffectKind,
+  type Position,
+} from "../engine/position";
 
 /**
  * Режим 12, «Загул» (docs/MODES.md): после каждого взятия срубивший тянет
@@ -62,6 +68,27 @@ export interface BingeEvent {
 }
 
 /**
+ * Что событию нужно знать про стол сверх позиции.
+ *
+ * Позиция не помнит, кто чем ходил, и ничего не знает про часы — а «Похмелью»
+ * нужна фигура, которой соперник ходил в прошлый раз, «Сушняку» — есть ли
+ * вообще что резать. Двух полей хватает, и растить их без нужды не надо:
+ * стол — не второй источник правды, а справка.
+ */
+export interface BingeTable {
+  /**
+   * Клетка, на которой стоит фигура, ходившая соперником в прошлый раз;
+   * `null` — он ещё не ходил.
+   */
+  readonly enemyMoved: number | null;
+  /** Есть ли лимит на ход: в безлимитной комнате «Сушняку» нечего резать. */
+  readonly timed: boolean;
+}
+
+/** Стол, о котором ничего не известно: так события зовут из проверок. */
+export const BARE_TABLE: BingeTable = { enemyMoved: null, timed: true };
+
+/**
  * Что событие делает с позицией; `null` — в этой позиции делать нечего.
  *
  * Такая карта **сгорает впустую**: показывается с пометкой «мимо» и выбывает
@@ -72,6 +99,7 @@ type Play = (
   position: Position,
   side: Side,
   roll: () => number,
+  table: BingeTable,
 ) => Position | null;
 
 interface Card extends BingeEvent {
@@ -249,7 +277,108 @@ function stepForward(
   return moved;
 }
 
+/**
+ * Событие, которое не двигает фигуры, а гнёт правила: оно кладёт в позицию
+ * действующий эффект, а движок дальше сам решает, что с ним делать. Вернуло
+ * `null` — гнуть нечего, и карта сгорает впустую.
+ */
+function bends(
+  make: (position: Position, side: Side, table: BingeTable) => Effect | null,
+): Play {
+  return (position, side, _roll, table) => {
+    const effect = make(position, side, table);
+    if (!effect) return null;
+
+    return { ...position, effects: [...position.effects, effect] };
+  };
+}
+
 const CARDS: readonly Card[] = [
+  {
+    id: "rush",
+    rank: "pawn",
+    title: "Разгон",
+    text: "Пешки обеих сторон ходят на три клетки. Два хода.",
+    play: bends(() => ({ kind: "rush", side: null, left: 2 })),
+  },
+  {
+    id: "hangover",
+    rank: "pawn",
+    title: "Похмелье",
+    text: "Соперник обязан ходить той же фигурой, что и в прошлый раз.",
+    play: bends((position, side, table) => {
+      const enemy = rival(position, side);
+      const square = table.enemyMoved;
+      if (enemy < 0 || square === null) return null;
+      // Той фигуры может уже не быть: её этим ходом и срубили.
+      if (position.board[square]?.side !== enemy) return null;
+
+      return { kind: "hangover", side: enemy, left: 1, square };
+    }),
+  },
+  {
+    id: "tremor",
+    rank: "pawn",
+    title: "Тремор",
+    text: "Доска развёрнута на сто восемьдесят градусов — обоим. Два хода.",
+    play: bends(() => ({ kind: "tremor", side: null, left: 2 })),
+  },
+  {
+    id: "blind",
+    rank: "pawn",
+    title: "Слепота",
+    text: "Сопернику на один ход не подсвечиваются ходы.",
+    play: bends((position, side) => {
+      const enemy = rival(position, side);
+      return enemy < 0 ? null : { kind: "blind", side: enemy, left: 1 };
+    }),
+  },
+  {
+    id: "stagger",
+    rank: "pawn",
+    title: "Заплетается",
+    text: "Пешки обеих сторон ходят вбок на одну клетку без взятия. Два хода.",
+    play: bends(() => ({ kind: "stagger", side: null, left: 2 })),
+  },
+  {
+    id: "thirst",
+    rank: "pawn",
+    title: "Сушняк",
+    text: "У соперника меньше времени на ближайший ход.",
+    play: bends((position, side, table) => {
+      const enemy = rival(position, side);
+      // Часов нет — резать нечего, и карта сгорает впустую.
+      if (enemy < 0 || !table.timed) return null;
+
+      return { kind: "thirst", side: enemy, left: 1 };
+    }),
+  },
+  {
+    id: "skid",
+    rank: "minor",
+    title: "Занос",
+    text: "Кони ходят как слоны, слоны — как кони. Один ход.",
+    play: bends((position) => {
+      const spun = position.board.some(
+        (cell) => cell?.kind === "n" || cell?.kind === "b",
+      );
+      return spun ? { kind: "skid", side: null, left: 1 } : null;
+    }),
+  },
+  {
+    id: "swagger",
+    rank: "minor",
+    title: "Кураж",
+    text: "Следующее твоё взятие даёт дополнительный ход.",
+    play: bends((_position, side) => ({ kind: "swagger", side, left: 1 })),
+  },
+  {
+    id: "closed",
+    rank: "minor",
+    title: "Кабак закрыт",
+    text: "Два хода без рокировки и без взятия на проходе.",
+    play: bends(() => ({ kind: "closed", side: null, left: 2 })),
+  },
   {
     id: "double",
     rank: "pawn",
@@ -626,6 +755,7 @@ export function drawBinge(
   position: Position,
   side: Side,
   roll: () => number,
+  table: BingeTable = BARE_TABLE,
 ): BingeDeal | null {
   const deck = decks[rank];
   const id = pick(deck, roll);
@@ -637,7 +767,7 @@ export function drawBinge(
 
   return {
     event: { id: card.id, rank: card.rank, title: card.title, text: card.text },
-    position: playBinge(position, card, side, roll),
+    position: playBinge(position, card, side, roll, table),
   };
 }
 
@@ -657,8 +787,9 @@ function playBinge(
   card: Card,
   side: Side,
   roll: () => number,
+  table: BingeTable,
 ): Position | null {
-  const after = card.play(position, side, roll);
+  const after = card.play(position, side, roll, table);
   if (!after) return null;
   if (inCheck(after, side)) return null;
   return after;
@@ -667,6 +798,75 @@ function playBinge(
 export function bingePosition(): Position {
   // Банк лишних ходов: им живут «Второе дыхание» и «Разгуляй».
   return { ...classicPosition(), extra: [0, 0] };
+}
+
+/** Как действующий эффект зовётся в полосе над доской. */
+export const EFFECT_LABEL: Record<EffectKind, string> = {
+  rush: "Разгон",
+  hangover: "Похмелье",
+  tremor: "Тремор",
+  blind: "Слепота",
+  stagger: "Заплетается",
+  skid: "Занос",
+  swagger: "Кураж",
+  closed: "Кабак закрыт",
+  thirst: "Сушняк",
+};
+
+/** И что он делает — одной короткой строкой, рядом с названием. */
+export const EFFECT_HINT: Record<EffectKind, string> = {
+  rush: "пешки ходят на три клетки",
+  hangover: "ходить той же фигурой",
+  tremor: "доска вверх ногами",
+  blind: "ходы не подсвечиваются",
+  stagger: "пешки ходят вбок",
+  skid: "кони слонами, слоны конями",
+  swagger: "взятие даст лишний ход",
+  closed: "без рокировки и взятия на проходе",
+  thirst: "меньше времени на ход",
+};
+
+/** Сколько эффекту осталось — человеческим текстом для полосы. */
+export function effectLeft(effect: Effect): string {
+  if (effect.kind === "swagger") return "до взятия";
+  if (effect.left === 1) return "ещё ход";
+
+  return `ещё ${effect.left} хода`;
+}
+
+/** Кого эффект касается: полоса общая, а эффекты у сторон разные. */
+export function effectWhom(effect: Effect, mySide: Side | null): string {
+  if (effect.side === null) return "у обоих";
+  if (mySide === null) return effect.side === 0 ? "у белых" : "у чёрных";
+
+  return effect.side === mySide ? "у тебя" : "у соперника";
+}
+
+/** «Слепота»: этой стороне ходы не подсвечиваются. */
+export function blinded(position: Position, side: Side | null): boolean {
+  return side !== null && bent(position, "blind", side) !== null;
+}
+
+/** «Тремор»: доска показана вверх ногами — обоим сразу. */
+export function shaking(position: Position): boolean {
+  return bent(position, "tremor") !== null;
+}
+
+/**
+ * «Сушняк»: минус тридцать секунд с ближайшего хода — но не больше половины
+ * лимита, иначе на десятисекундном контроле карта была бы не сушняком, а
+ * упавшим флагом. В безлимитной комнате резать нечего.
+ */
+export const THIRST_MS = 30_000;
+
+export function thirstCut(
+  position: Position,
+  side: Side,
+  limitMs: number | null,
+): number {
+  if (limitMs === null || !bent(position, "thirst", side)) return 0;
+
+  return Math.min(THIRST_MS, Math.floor(limitMs / 2));
 }
 
 /** Правила для игрока — на карточке перед стартом и по кнопке у доски. */

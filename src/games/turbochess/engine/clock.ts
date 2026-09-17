@@ -19,6 +19,11 @@ export type Ticker = () => number;
 export class MoveClock {
   /** Момент начала текущего хода по монотонным часам; null — часы стоят. */
   private startedAt: number | null = null;
+  /**
+   * На сколько урезан именно этот ход: «Сушняк» загула отнимает у соперника
+   * время на один ход (docs/MODES.md, режим 12). Живёт до следующего старта.
+   */
+  private shorterBy = 0;
 
   constructor(
     /** Сколько даётся на ход. `null` — без ограничения. */
@@ -32,8 +37,9 @@ export class MoveClock {
   }
 
   /** Пошёл новый ход: счёт начинается заново. */
-  restart(): void {
+  restart(shortenMs = 0): void {
     this.startedAt = this.now();
+    this.shorterBy = Math.max(0, shortenMs);
   }
 
   /** Часы остановлены: партия кончилась или ещё не началась. */
@@ -52,7 +58,10 @@ export class MoveClock {
   left(): number | null {
     if (this.limitMs === null || this.startedAt === null) return null;
 
-    return Math.max(0, this.limitMs - (this.now() - this.startedAt));
+    return Math.max(
+      0,
+      this.limitMs - this.shorterBy - (this.now() - this.startedAt),
+    );
   }
 
   /** Время на ход вышло. */
