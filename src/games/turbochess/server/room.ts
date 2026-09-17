@@ -41,6 +41,7 @@ import {
   BINGE_CARD_MS,
   bingeLeft,
   bingeRank,
+  bingeSwapsSeats,
   drawBinge,
   freshDecks,
   thirstCut,
@@ -1266,8 +1267,27 @@ export class TurboRoom implements GameRoomState {
       miss: deal.position === null,
       until: at + BINGE_CARD_MS,
     };
+    // «Обмен любезностями»: доски событие не касается, а стол — касается.
+    if (deal.position && bingeSwapsSeats(deal.event)) this.swapSeats();
 
     return deal.position ? this.game.reshape(deal.position) : null;
+  }
+
+  /**
+   * Игроки поменялись сторонами: фигуры остаются, где стояли, и ходит та же
+   * сторона — за неё теперь играет другой человек (docs/MODES.md, режим 12).
+   *
+   * Вместе с местом переезжает и всё, что бот помнит о партии: его память
+   * лежит по номеру места, а место у него теперь другое. Загул играют вдвоём,
+   * поэтому разворота списков хватает.
+   */
+  private swapSeats(): void {
+    this.seats.reverse();
+    this.botEdge.reverse();
+    this.botArmed.reverse();
+    this.botBought.reverse();
+    this.botSeen.reverse();
+    this.botStanding.reverse();
   }
 
   /** Карточку дочитали: часы хода пошли снова. */

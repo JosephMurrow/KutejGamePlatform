@@ -4,13 +4,14 @@ import { fromFen } from "../engine/fen";
 import { parseSquare, squareName } from "../engine/geometry";
 import { TurboGame } from "../engine/game";
 import { inCheck, legalMoves } from "../engine/moves";
-import type { Piece, Side } from "../engine/pieces";
+import { piece, type Piece, type Side } from "../engine/pieces";
 import type { Effect, Position } from "../engine/position";
 import {
   BINGE_EVENTS,
   BINGE_RANKS,
   THIRST_MS,
   bingeLeft,
+  bingeSwapsSeats,
   bingePosition,
   bingeRank,
   bingeRules,
@@ -497,5 +498,81 @@ describe("загул: согнутые правила", () => {
       effectLeft({ kind: "swagger", side: 0, left: 1 }),
       "до взятия",
     );
+  });
+});
+
+describe("загул: стороны и резерв", () => {
+  it("«Гопстоп» уводит чужую пешку к тебе в резерв", () => {
+    const after = deal("4k3/5p2/8/8/8/8/8/4K3 b", "mugging");
+    assert.ok(after);
+
+    assert.equal(at(after, "f7"), null, "пешки на доске нет");
+    assert.deepEqual(after.reserve[0], ["p"], "зато есть в резерве");
+    assert.deepEqual(after.reserve[1], [], "у соперника ничего не прибавилось");
+  });
+
+  it("«Гопстоп» без чужих пешек — мимо", () => {
+    assert.equal(deal("4k3/5n2/8/8/8/8/8/4K3 b", "mugging"), null);
+  });
+
+  it("«Чудо-воскрешение» поднимает своих коней и слонов с кладбища", () => {
+    const rank = BINGE_EVENTS.find((event) => event.id === "miracle")?.rank;
+    assert.ok(rank);
+
+    const grave = {
+      ...fromFen("4k3/8/8/8/8/8/8/4K3 b"),
+      // Кладбище белых — это то, что забрали чёрные.
+      taken: [[], [piece("n", 0), piece("p", 0), piece("b", 0)]],
+    };
+    const drawn = drawBinge(only("miracle"), rank, grave, 0, rolls([0.5]));
+    const after = drawn?.position;
+    assert.ok(after);
+
+    const raised = after.board.flatMap((cell, square) =>
+      cell?.side === 0 && cell.kind !== "k"
+        ? [{ kind: cell.kind, square }]
+        : [],
+    );
+    assert.deepEqual(
+      raised.map((one) => one.kind).sort(),
+      ["b", "n"],
+      "конь и слон встали, пешка осталась лежать",
+    );
+    assert.ok(
+      raised.every((one) => Math.floor(one.square / 8) < 4),
+      "и встали на своей половине",
+    );
+    assert.deepEqual(
+      after.taken[1]?.map((cell) => cell.kind),
+      ["p"],
+      "поднятые уходят с кладбища",
+    );
+  });
+
+  it("«Чудо-воскрешение» с пустым кладбищем — мимо", () => {
+    assert.equal(deal("4k3/8/8/8/8/8/8/4K3 b", "miracle"), null);
+  });
+
+  it("«Белая горячка» зеркалит доску и гасит рокировку", () => {
+    const after = deal("r3k2r/8/8/8/8/8/8/R3K2R b KQkq -", "horrors");
+    assert.ok(after);
+
+    assert.equal(at(after, "d1")?.kind, "k", "король переехал зеркально");
+    assert.equal(at(after, "d8")?.kind, "k");
+    assert.equal(at(after, "a1")?.kind, "r");
+    assert.deepEqual(after.castling, [], "рокировки после зеркала нет");
+  });
+
+  it("«Обмен любезностями» доски не трогает — пересаживает стол", () => {
+    const before = fromFen("4k3/8/8/8/8/8/8/R3K3 b");
+    const after = deal("4k3/8/8/8/8/8/8/R3K3 b", "courtesy");
+    assert.ok(after);
+
+    assert.deepEqual(after.board, before.board, "фигуры остались, где стояли");
+    assert.equal(after.turn, before.turn, "и очередь та же");
+
+    for (const event of BINGE_EVENTS) {
+      assert.equal(bingeSwapsSeats(event), event.id === "courtesy", event.id);
+    }
   });
 });

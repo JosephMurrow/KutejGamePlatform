@@ -655,6 +655,96 @@ const CARDS: readonly Card[] = [
     },
   },
   {
+    id: "mugging",
+    rank: "minor",
+    title: "Гопстоп",
+    text: "Случайная пешка соперника уходит тебе в резерв.",
+    play: (position, side, roll) => {
+      const enemy = rival(position, side);
+      if (enemy < 0) return null;
+
+      const at = pick(
+        squaresOf(position, enemy, (mover) => mover.kind === "p"),
+        roll,
+      );
+      if (at === undefined) return null;
+
+      const board = position.board.slice();
+      board[at] = null;
+      const reserve = position.reserve.map((list, seat) =>
+        seat === side ? [...list, "p" as PieceKind] : [...list],
+      );
+
+      return { ...reshaped(position, board), reserve };
+    },
+  },
+  {
+    id: "miracle",
+    rank: "queen",
+    title: "Чудо-воскрешение",
+    text: "Твои взятые кони и слоны встают на свободные клетки твоей половины.",
+    play: (position, side, roll) => {
+      const enemy = rival(position, side);
+      if (enemy < 0) return null;
+
+      // Что забрал соперник — это и есть твоё кладбище.
+      const graves = position.taken.map((list) => [...list]);
+      const mine = graves[enemy];
+      if (!mine) return null;
+
+      const board = position.board.slice();
+      let raised = false;
+
+      // С конца: вырезание из списка не должно сдвигать ещё не разобранные.
+      for (let at = mine.length - 1; at >= 0; at--) {
+        const fallen = mine[at];
+        if (!fallen || (fallen.kind !== "n" && fallen.kind !== "b")) continue;
+
+        const free = board.flatMap((cell, square) =>
+          !cell && ownHalf(position, side, square) ? [square] : [],
+        );
+        const to = pick(free, roll);
+        if (to === undefined) break;
+
+        board[to] = piece(fallen.kind, side);
+        mine.splice(at, 1);
+        raised = true;
+      }
+      if (!raised) return null;
+
+      return { ...reshaped(position, board), taken: graves };
+    },
+  },
+  {
+    id: "horrors",
+    rank: "queen",
+    title: "Белая горячка",
+    text: "Доска зеркалится по вертикали вместе с фигурами.",
+    play: (position) => {
+      const { geometry } = position;
+      const board = position.board.map((_, square) => {
+        const x = fileOf(geometry, square);
+        const y = rankOf(geometry, square);
+
+        return (
+          position.board[squareAt(geometry, geometry.width - 1 - x, y)] ?? null
+        );
+      });
+
+      return reshaped(position, board);
+    },
+  },
+  {
+    id: "courtesy",
+    rank: "queen",
+    title: "Обмен любезностями",
+    text: "Игроки меняются сторонами. Очередь хода не меняется.",
+    // Доски это событие не касается вовсе: фигуры остаются, где стояли, и
+    // ходит та же сторона — меняются местами люди. Пересаживает их комната,
+    // потому что стол её, а не позиции.
+    play: (position) => position,
+  },
+  {
     id: "spent",
     rank: "queen",
     title: "Всё пропил",
@@ -798,6 +888,15 @@ function playBinge(
 export function bingePosition(): Position {
   // Банк лишних ходов: им живут «Второе дыхание» и «Разгуляй».
   return { ...classicPosition(), extra: [0, 0] };
+}
+
+/**
+ * Событие, которое меняет не доску, а стол: «Обмен любезностями» пересаживает
+ * игроков, и доиграть его может только комната — позиция про то, кто где
+ * сидит, ничего не знает.
+ */
+export function bingeSwapsSeats(event: BingeEvent): boolean {
+  return event.id === "courtesy";
 }
 
 /** Как действующий эффект зовётся в полосе над доской. */
