@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { GameRoomContext, GameRoomEvent } from "@/lib/games/engine";
-import { parseSquare, squareName } from "../engine/geometry";
-import { legalMoves, play, type Move } from "../engine/moves";
+import { squareName } from "../engine/geometry";
+import { attacked, legalMoves, play, type Move } from "../engine/moves";
 import type { Position } from "../engine/position";
 import { TurboGame } from "../engine/game";
 import { PIECE_VALUE, nuclearCharge } from "../modes/nuclear";
@@ -95,6 +95,74 @@ function move(
     to,
     ply,
     ...(promotion ? { promotion } : {}),
+  });
+}
+
+/**
+ * Как ходить за человека в проверках, где важно не «кто выиграл», а что
+ * фигуры встретились: взятие, размен, чужой ход в ответ.
+ *
+ * Бот ходит по зерну комнаты, а оно у каждой партии своё, — поэтому ждать
+ * встречи «когда-нибудь само» нельзя: так проверка падала раз в шесть
+ * прогонов. Человек её устраивает нарочно.
+ */
+
+/** Взять, если есть чем. */
+function grab(position: Position): Move | null {
+  return legalMoves(position).find((move) => move.captured) ?? null;
+}
+
+/**
+ * Ход, после которого сопернику есть что срубить даром: отбивать его взятие
+ * будет нечем, и даже слабый бот на такое польстится.
+ */
+function offer(position: Position): Move | null {
+  let best: { move: Move; gain: number } | null = null;
+
+  for (const move of legalMoves(position)) {
+    if (move.from < 0) continue;
+    const after = play(position, move);
+
+    for (const answer of legalMoves(after)) {
+      if (!answer.captured) continue;
+
+      const gain = PIECE_VALUE[answer.captured.kind] ?? 0;
+      if (gain <= (best?.gain ?? 0)) continue;
+      // Даром — значит отбивать нечем: размен бот посчитает и брать не станет.
+      if (attacked(play(after, answer), answer.to, after.turn)) continue;
+
+      best = { move, gain };
+    }
+  }
+
+  return best?.move ?? null;
+}
+
+/** Ход, после которого мы сами кого-нибудь бьём: фигуры идут на сближение. */
+function approach(position: Position): Move | null {
+  let best: { move: Move; hits: number } | null = null;
+
+  for (const move of legalMoves(position)) {
+    if (move.from < 0) continue;
+    const after = play(position, move);
+    const hits = after.board.filter(
+      (cell, square) =>
+        cell?.side === after.turn && attacked(after, square, after.turn),
+    ).length;
+
+    if (hits > (best?.hits ?? 0)) best = { move, hits };
+  }
+
+  return best?.move ?? null;
+}
+
+/** Отправить ход человека — тот, что выбрали помощники выше. */
+function send(room: TurboRoom, position: Position, pick: Move, ply: number) {
+  return room.act(GAME_EVENT.move, "human", {
+    from: squareName(position.geometry, pick.from),
+    to: squareName(position.geometry, pick.to),
+    ply,
+    ...(pick.promotion ? { promotion: pick.promotion } : {}),
   });
 }
 
@@ -1404,20 +1472,21 @@ describe("бот жмёт кнопки режимов", () => {
     const { room } = table;
 
     // Играем, пока бот не срубит: окно подтверждения висит у срубившего, и
-    // отвечать на него будет он.
+    // отвечать на него будет он. Человек нарочно подставляет фигуру — какую
+    // именно, зависит от того, как ходит бот, поэтому ход выбирается на месте.
     let toast: { drinker: number; pourer: number } | null = null;
     for (let half = 0; half < 40 && !toast; half++) {
       const state = view(room, "human");
       if (state.phase !== "playing") break;
 
       if (state.turn === 0) {
-        const legal = new TurboGame(state.position as Position).legal();
-        const pick = legal.find((one) => one.from && one.to) ?? legal[0];
-        assert.ok(pick);
-        room.act(GAME_EVENT.move, "human", {
-          ...pick,
-          ply: (state.moves as string[]).length,
-        });
+        const position = state.position as Position;
+        // Сам человек не рубит: стопку наливает срубивший, а проверяем мы
+        // именно бота за этим окном.
+        const pick = offer(position) ?? legalMoves(position)[0];
+        assert.ok(pick, "человеку есть чем ходить");
+
+        send(room, position, pick, (state.moves as string[]).length);
       } else {
         table.let(20_000);
       }
@@ -1437,8 +1506,10 @@ describe("бот жмёт кнопки режимов", () => {
       Boolean,
     ).length;
 
-    // Бот держит паузу, а потом подтверждает — до конца окна и без штрафа.
-    table.let(9_000);
+    // Бот держит паузу, а потом подтверждает. Пауза у него своя: обычно
+    // несколько секунд, но иногда он тянет почти всё окно — поэтому ждём до
+    // последней его четверти секунды, и всё равно раньше штрафа.
+    table.let(TOAST_MS - 250);
     const state = view(room, "human");
     assert.equal(state.toast, null, "окно закрылось");
     assert.equal(
@@ -1585,19 +1656,18 @@ describe("бот разговаривает", () => {
       if (state.phase !== "playing") break;
 
       if (state.turn === 0) {
-        const legal = new TurboGame(state.position as Position).legal();
-        const grab = legal.find((one) => {
-          const board = (state.position as Position).board;
-          const geometry = (state.position as Position).geometry;
-          const target = parseSquare(geometry, one.to);
-          return target !== null && board[target];
-        });
-        const pick = grab ?? legal[0];
-        assert.ok(pick);
-        room.act(GAME_EVENT.move, "human", {
-          ...pick,
-          ply: (state.moves as string[]).length,
-        });
+        const position = state.position as Position;
+        // Боту нужно и срубить, и потерять. Сперва человек берёт сам — бот
+        // отобьётся, и получится размен; брать нечего — идёт на сближение,
+        // и только если и сближаться не с кем, подставляет фигуру даром.
+        const pick =
+          grab(position) ??
+          approach(position) ??
+          offer(position) ??
+          legalMoves(position)[0];
+        assert.ok(pick, "человеку есть чем ходить");
+
+        send(room, position, pick, (state.moves as string[]).length);
       } else {
         table.let(20_000);
       }
