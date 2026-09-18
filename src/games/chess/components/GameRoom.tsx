@@ -55,9 +55,10 @@ export function GameRoom({
 
   const state = room.state;
   const me = state?.players.find((player) => player.id === userId) ?? null;
-  const opponent =
-    state?.players.find((player) => player.id !== userId) ?? null;
   const myColor = me?.color ?? null;
+  /** Кто сидит за этим цветом. Зритель ищет обоих игроков так же, как игрок. */
+  const seated = (color: ChessColor) =>
+    state?.players.find((player) => player.color === color) ?? null;
 
   // Пустой список нужен своей ссылкой: иначе он каждый раз новый, и от него
   // пересчитывается всё, что на нём висит.
@@ -91,6 +92,8 @@ export function GameRoom({
 
   // Зритель смотрит с белой стороны, игрок — со своей.
   const orientation = flipped ?? myColor === "black";
+  const bottomColor: ChessColor = orientation ? "black" : "white";
+  const topColor: ChessColor = orientation ? "white" : "black";
   const over = state?.phase === "over";
   const waiting = state?.phase === "waiting";
   // Доска есть не всегда: в общем зале до посадки человек стоит в очереди.
@@ -197,13 +200,19 @@ export function GameRoom({
           </div>
 
           <aside className="flex w-full flex-col gap-3 lg:w-72">
+            {/*
+              Места — по цветам, как на доске: сверху тот, чьи фигуры сверху.
+              У игрока внизу он сам, у зрителя — белые (или чёрные, если он
+              развернул доску). Раньше места считались от «я» и «не я», и
+              зритель видел одного игрока, а на месте второго — «Ты смотришь».
+            */}
             <Seat
-              player={opponent}
-              color={myColor === "white" ? "black" : "white"}
-              active={!over && !waiting && state.turn !== myColor}
+              player={seated(topColor)}
+              color={topColor}
+              active={!over && !waiting && state.turn === topColor}
               state={state}
               clockOffset={room.clockOffset}
-              placeholder="Ждём соперника"
+              placeholder={myColor ? "Ждём соперника" : "Ждём игрока"}
             />
 
             <Moves
@@ -213,12 +222,12 @@ export function GameRoom({
             />
 
             <Seat
-              player={me}
-              color={myColor ?? "white"}
-              active={!over && !waiting && state.turn === myColor}
+              player={seated(bottomColor)}
+              color={bottomColor}
+              active={!over && !waiting && state.turn === bottomColor}
               state={state}
               clockOffset={room.clockOffset}
-              placeholder="Ты смотришь"
+              placeholder={myColor ? "Ждём соперника" : "Ждём игрока"}
             />
 
             {waiting && roomCode ? (
