@@ -1,8 +1,13 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useState, useSyncExternalStore } from "react";
 import { Modal } from "@/components/ui/Modal";
 import { buildQr } from "@/lib/qr";
+
+/** Подписываться не на что: гидратация случается один раз и сама. */
+function subscribe(): () => void {
+  return () => {};
+}
 
 /**
  * Приглашение: QR-код, ссылка и кнопка копирования.
@@ -24,7 +29,18 @@ export function InviteModal({
   hint: string;
 }) {
   const [copied, setCopied] = useState(false);
-  const qr = useMemo(() => (link ? buildQr(link) : null), [link]);
+  // Ссылку комнаты собирают из адресной строки, а её на сервере нет: там она
+  // пустая, в браузере — настоящая, и первая отрисовка разъезжалась с серверной.
+  // Поэтому до гидратации окно рисуется так же, как на сервере, — без ссылки, —
+  // а сразу после неё показывает то, что пришло. Окно в эти мгновения закрыто,
+  // и разницы никто не видит.
+  const hydrated = useSyncExternalStore(
+    subscribe,
+    () => true,
+    () => false,
+  );
+  const shown = hydrated ? link : "";
+  const qr = useMemo(() => (shown ? buildQr(shown) : null), [shown]);
 
   async function copy() {
     try {
@@ -62,7 +78,7 @@ export function InviteModal({
         <p className="text-center text-xs text-muted">{hint}</p>
 
         <p className="tabular w-full truncate rounded-lg border border-line bg-surface px-3 py-2 text-center text-xs text-muted">
-          {link}
+          {shown}
         </p>
 
         <button
