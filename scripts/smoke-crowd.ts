@@ -11,7 +11,8 @@ import { GAME_EVENT } from "../src/games/pricetitute/protocol";
  *
  *   npm run smoke:crowd -- 12 3
  */
-const URL = process.env.CROWD_URL ?? "http://localhost:3000";
+const URL =
+  process.env.CROWD_URL ?? process.env.SMOKE_URL ?? "http://localhost:3000";
 const COUNT = Number(process.argv[2] ?? 12);
 const ROUNDS = Number(process.argv[3] ?? 3);
 const PREFIX = "crowd_";

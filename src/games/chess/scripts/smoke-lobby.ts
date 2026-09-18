@@ -20,7 +20,8 @@ import { GAME_EVENT, GAME_ID } from "../protocol";
  * Нужен живой `npm run dev` и база.
  */
 
-const URL = "http://localhost:3000";
+/** Куда ходит смоук: `SMOKE_URL`, иначе локальный сервер (docs/TESTING.md). */
+const URL = process.env.SMOKE_URL ?? "http://localhost:3000";
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 /** Сколько человек приводим в зал. Нечётное намеренно: последний ждёт. */
