@@ -10,7 +10,7 @@ import { confirmLetter, resetLetter, welcomeLetter } from "../mail/letters";
 import { sendLetter } from "../mail/send";
 import type { FormState } from "./form-state";
 import { claimLink, issueLink } from "./links";
-import { endSession, getSessionUserId, startSession } from "./session";
+import { endSession, sessionMemberId, startSession } from "./session";
 import {
   emailOnlySchema,
   fieldErrorsFrom,
@@ -184,7 +184,8 @@ export async function updateProfileAction(
   _prev: FormState,
   formData: FormData,
 ): Promise<FormState> {
-  const userId = await getSessionUserId();
+  // Только полноценный игрок: гостю ник меняет хозяин комнаты, через фильтр.
+  const userId = await sessionMemberId();
   if (!userId) {
     redirect("/login");
   }
@@ -226,7 +227,9 @@ export async function attachEmailAction(
   _prev: FormState,
   formData: FormData,
 ): Promise<FormState> {
-  const userId = await getSessionUserId();
+  // Гостю почта не положена: через неё он сбросил бы пароль и остался
+  // насовсем, а гость живёт одну комнату.
+  const userId = await sessionMemberId();
   if (!userId) {
     redirect("/login");
   }
@@ -324,6 +327,8 @@ export async function requestResetAction(
   const user = await prisma.user.findFirst({
     where: {
       isBot: false,
+      // Гостю восстанавливать нечего: пароля у него нет и не будет.
+      isGuest: false,
       emailConfirmedAt: { not: null },
       OR: [{ login: normalizeLogin(raw) }, { email: raw.toLowerCase() }],
     },
@@ -370,6 +375,16 @@ export async function resetPasswordAction(
         "Ссылка не сработала: она живёт час и срабатывает один раз. " +
         "Запроси восстановление заново.",
     };
+  }
+
+  // Ссылку гостю не выдают (см. requestResetAction), но проверка стоит и
+  // здесь: пароль гостю превратил бы одноразовый профиль в постоянный.
+  const owner = await prisma.user.findUnique({
+    where: { id: claimed.userId },
+    select: { isGuest: true, isBot: true },
+  });
+  if (!owner || owner.isGuest || owner.isBot) {
+    return { error: "Ссылка не сработала. Запроси восстановление заново." };
   }
 
   const now = new Date();

@@ -2,7 +2,7 @@
 
 import { redirect } from "next/navigation";
 import { createGuest } from "../auth/guest";
-import { getSessionUserId, startSession } from "../auth/session";
+import { sessionMemberId, startSession } from "../auth/session";
 import type { FormState } from "../auth/form-state";
 import { allowsGuests, ROOM_CODE_LENGTH } from "@/shared/room-settings";
 import { defaultGameServer, gameServerById } from "@/lib/games/servers";
@@ -16,7 +16,9 @@ export async function createRoomAction(
   _prev: FormState,
   formData: FormData,
 ): Promise<FormState> {
-  const userId = await getSessionUserId();
+  // Комнату заводит только полноценный игрок: гость заведён ради чужой
+  // комнаты, и своих у него нет (docs/SECURITY.md, S-C1).
+  const userId = await sessionMemberId();
   if (!userId) {
     // На витрину, а не в форму конкретной игры: платформенный экшен не обязан
     // знать, чью комнату заводили (src/games/chess/docs/BACKLOG.md A4).
