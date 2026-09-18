@@ -10,6 +10,8 @@ import { confirmLetter, resetLetter, welcomeLetter } from "../mail/letters";
 import { sendLetter } from "../mail/send";
 import type { FormState } from "./form-state";
 import { claimLink, issueLink } from "./links";
+import { LoginGuard } from "./login-guard";
+import { requestAddress } from "../request-address";
 import { endSession, sessionMemberId, startSession } from "./session";
 import {
   emailOnlySchema,
@@ -53,6 +55,26 @@ function isUniqueViolation(error: unknown): boolean {
   );
 }
 
+/** Час в миллисекундах: окно лимитов регистрации и почты. */
+const HOUR_MS = 60 * 60 * 1000;
+
+/**
+ * Регистраций с одного адреса в час (docs/SECURITY.md, S-B2). Считаются только
+ * состоявшиеся: ошибка в форме лимит не тратит. Пятеро за одним роутером —
+ * это компания у телевизора, шестой за час — уже конвейер.
+ */
+const registerLimiter = new RateLimiter(5, HOUR_MS);
+
+/**
+ * Писем подтверждения по просьбе одного аккаунта в час. Квота на адрес
+ * получателя стоит в `sendLetter`; эта не даёт одному аккаунту обходить её,
+ * меняя адрес по кругу.
+ */
+const attachLimiter = new RateLimiter(5, HOUR_MS);
+
+/** Сторож входа: неудачи по логину и попытки с адреса (S-B1). */
+const loginGuard = new LoginGuard();
+
 export async function registerAction(
   _prev: FormState,
   formData: FormData,
@@ -86,6 +108,17 @@ export async function registerAction(
   }
 
   const login = normalizeLogin(parsed.data.login);
+  const address = await requestAddress();
+
+  if (registerLimiter.blocked(address)) {
+    return {
+      values,
+      error:
+        "С этого адреса сегодня уже заводили несколько аккаунтов. " +
+        "Попробуй через час.",
+    };
+  }
+
   let userId: string;
 
   try {
@@ -101,6 +134,7 @@ export async function registerAction(
       select: { id: true },
     });
     userId = user.id;
+    registerLimiter.hit(address);
   } catch (error) {
     if (isUniqueViolation(error)) {
       // Уникальны и логин, и адрес. Prisma говорит, на каком поле споткнулась.
@@ -157,20 +191,40 @@ export async function loginAction(
     return { values, fieldErrors: fieldErrorsFrom(parsed.error) };
   }
 
+  const login = normalizeLogin(parsed.data.login);
+
+  // До argon2 и до базы: иначе отказ приходил бы уже после дорогой работы.
+  if (!loginGuard.admit(login, await requestAddress())) {
+    return {
+      values,
+      error:
+        "Слишком много попыток входа. Подожди четверть часа и попробуй " +
+        "снова — или восстанови пароль по почте.",
+    };
+  }
+
   const user = await prisma.user.findUnique({
-    where: { login: normalizeLogin(parsed.data.login) },
+    where: { login },
     select: { id: true, passwordHash: true, isBot: true },
   });
 
   // Одинаковый текст на неизвестный логин и на неверный пароль: не подсказываем,
-  // какие логины заняты.
+  // какие логины заняты. Неудача засчитывается логину в обоих случаях — по той
+  // же причине.
   const wrong: FormState = { values, error: "Неверный логин или пароль" };
   // Боты «Forever alone» — обычные записи в таблице, но входить под ними нельзя.
-  if (!user || user.isBot) return wrong;
+  if (!user || user.isBot) {
+    loginGuard.failed(login);
+    return wrong;
+  }
 
   const passwordOk = await verify(user.passwordHash, parsed.data.password);
-  if (!passwordOk) return wrong;
+  if (!passwordOk) {
+    loginGuard.failed(login);
+    return wrong;
+  }
 
+  loginGuard.succeeded(login);
   await startSession(user.id);
   redirect(safeNext(formData.get("next")));
 }
@@ -254,6 +308,14 @@ export async function attachEmailAction(
     return { values, error: "Этот адрес уже подтверждён" };
   }
 
+  // До сохранения адреса: отказ не должен оставлять почту поменянной.
+  if (!attachLimiter.allow(userId)) {
+    return {
+      values,
+      error: "Писем было уже несколько. Проверь почту или попробуй через час.",
+    };
+  }
+
   if (me.email !== email) {
     try {
       await prisma.user.update({
@@ -277,18 +339,31 @@ export async function attachEmailAction(
   }
 
   const token = await issueLink(userId, email, "EMAIL_CONFIRM");
-  const sent = await sendLetter(email, confirmLetter(me.login, token));
+  const outcome = await sendLetter(email, confirmLetter(me.login, token));
 
   revalidatePath("/profile");
 
-  return sent
-    ? { values, ok: `Письмо ушло на ${email}. Перейди по ссылке из него.` }
-    : {
+  switch (outcome) {
+    case "sent":
+      return {
+        values,
+        ok: `Письмо ушло на ${email}. Перейди по ссылке из него.`,
+      };
+    case "limit":
+      return {
+        values,
+        error:
+          "Адрес сохранён, но писем на него уже было достаточно. Проверь " +
+          "почту, в том числе спам, или запроси письмо через час.",
+      };
+    default:
+      return {
         values,
         error:
           "Адрес сохранён, но письмо отправить не удалось — отправка почты " +
           "сейчас не настроена. Попробуй позже.",
       };
+  }
 }
 
 /**

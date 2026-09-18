@@ -1,6 +1,7 @@
 import { createTransport, type Transporter } from "nodemailer";
 import { env } from "@/lib/env";
 import type { Letter } from "./letter";
+import { LetterQuota } from "./quota";
 
 /**
  * Отправка писем через внешний релей.
@@ -33,14 +34,38 @@ function mailer(): Transporter {
   return transport;
 }
 
+/** Потолки на письма: на один адрес и на весь процесс. */
+const quota = new LetterQuota();
+
 /**
- * Отправить письмо. Возвращает `false`, если отправка не настроена или релей
- * не принял письмо: вызывающий сам решает, что сказать человеку.
+ * Чем кончилась отправка:
+ *
+ * - `sent` — релей принял письмо;
+ * - `off` — отправка не настроена (нет `MAIL_HOST`);
+ * - `limit` — упёрлись в квоту (`./quota.ts`), письмо не отправлялось;
+ * - `failed` — релей не принял.
  */
-export async function sendLetter(to: string, letter: Letter): Promise<boolean> {
+export type LetterOutcome = "sent" | "off" | "limit" | "failed";
+
+/**
+ * Отправить письмо. Не бросает: что сказать человеку, решает вызывающий по
+ * исходу.
+ */
+export async function sendLetter(
+  to: string,
+  letter: Letter,
+): Promise<LetterOutcome> {
   if (!isMailConfigured()) {
     console.warn(`[почта] не настроена, письмо «${letter.subject}» не ушло`);
-    return false;
+    return "off";
+  }
+
+  if (!quota.take(to)) {
+    // Адрес в лог не пишем целиком: это чужая почта.
+    console.warn(
+      `[почта] лимит: письмо «${letter.subject}» на ${maskAddress(to)} не ушло`,
+    );
+    return "limit";
   }
 
   try {
@@ -52,11 +77,18 @@ export async function sendLetter(to: string, letter: Letter): Promise<boolean> {
       html: letter.html,
     });
 
-    return true;
+    return "sent";
   } catch (error) {
     console.error("[почта] отправка не удалась:", error);
-    return false;
+    return "failed";
   }
+}
+
+/** `anya@mail.ru` → `a***@mail.ru`: в логе видно, куда, но не чья почта. */
+export function maskAddress(address: string): string {
+  const at = address.lastIndexOf("@");
+  if (at <= 0) return "***";
+  return `${address[0]}***${address.slice(at)}`;
 }
 
 /** Ссылка для письма: собирается от внешнего адреса, а не от запроса. */

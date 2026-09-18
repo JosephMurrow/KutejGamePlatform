@@ -33,9 +33,15 @@ const letter = buildLetter({
 });
 
 sendLetter(to, letter)
-  .then((ok) => {
-    console.log(ok ? `Письмо ушло на ${to}` : "Релей письмо не принял");
-    process.exit(ok ? 0 : 1);
+  .then((outcome) => {
+    const said = {
+      sent: `Письмо ушло на ${to}`,
+      off: "Отправка не настроена",
+      limit: "Лимит писем на этот адрес исчерпан — попробуй через час",
+      failed: "Релей письмо не принял",
+    }[outcome];
+    console.log(said);
+    process.exit(outcome === "sent" ? 0 : 1);
   })
   .catch((error: unknown) => {
     console.error(error);

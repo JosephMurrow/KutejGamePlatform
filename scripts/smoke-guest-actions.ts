@@ -1,9 +1,9 @@
-import { createRequire } from "node:module";
 import { createGuest } from "../src/lib/auth/guest";
 import { issueLink } from "../src/lib/auth/links";
 import { signSessionToken } from "../src/lib/auth/token";
 import { prisma } from "../src/lib/prisma";
 import { createPrivateRoom, deletePrivateRoom } from "../src/lib/rooms/private";
+import { callAction as call, form, SMOKE_URL } from "./actions";
 
 /**
  * Смоук: серверные экшены глазами гостя (docs/SECURITY.md, S-C1).
@@ -26,30 +26,14 @@ import { createPrivateRoom, deletePrivateRoom } from "../src/lib/rooms/private";
  * открытую гостю страницу. Вторая — нет. У сброса пароля первой защиты нет
  * вовсе: `/forgot` и `/reset` гостю открыты.
  *
- * Нужна прод-сборка (`npm run build`): манифест берётся из `.next`.
+ * Нужна прод-сборка (`npm run build`): манифест берётся из `.next`
+ * (см. `./actions.ts`).
  *
  * Запуск: npm run smoke:guest
  */
 
-const URL = process.env.SMOKE_URL ?? "http://localhost:3000";
+const URL = SMOKE_URL;
 const HOST_LOGIN = "smoke_ga_host";
-
-const require = createRequire(import.meta.url);
-
-type Encoded = string | FormData | URLSearchParams;
-const { encodeReply } =
-  require("next/dist/compiled/react-server-dom-webpack/client.node.js") as {
-    encodeReply: (value: unknown) => Promise<Encoded>;
-  };
-
-interface ActionEntry {
-  exportedName?: string;
-}
-const manifest = require(
-  `${process.cwd()}/.next/server/server-reference-manifest.json`,
-) as {
-  node: Record<string, ActionEntry>;
-};
 
 let failures = 0;
 
@@ -62,53 +46,9 @@ function check(label: string, condition: boolean, extra = "") {
   }
 }
 
-function actionId(name: string): string {
-  const found = Object.entries(manifest.node).find(
-    ([, entry]) => entry.exportedName === name,
-  );
-  if (!found) throw new Error(`Экшена ${name} нет в манифесте — собери заново`);
-  return found[0];
-}
-
-function form(fields: Record<string, string>): FormData {
-  const data = new FormData();
-  for (const [key, value] of Object.entries(fields)) data.set(key, value);
-  return data;
-}
-
-interface ActionReply {
-  status: number;
-  /** Куда экшен отправил редиректом, если отправил. */
-  redirect: string | null;
-  /** Тело ответа RSC как текст: сверяем по подстроке. */
-  body: string;
-}
-
-/** Позвать экшен так, как его зовёт браузер. */
-async function callAction(
-  name: string,
-  args: unknown[],
-  token: string,
-  /** С какой страницы звать. Посторонний выберет любую, по умолчанию `/`. */
-  path = "/",
-): Promise<ActionReply> {
-  const res = await fetch(`${URL}${path}`, {
-    method: "POST",
-    headers: {
-      "Next-Action": actionId(name),
-      Origin: URL,
-      Accept: "text/x-component",
-      Cookie: `pt_session=${token}`,
-    },
-    body: await encodeReply(args),
-    redirect: "manual",
-  });
-
-  return {
-    status: res.status,
-    redirect: res.headers.get("x-action-redirect"),
-    body: await res.text(),
-  };
+/** Позвать экшен с сессией; `path` — с какой страницы. */
+function callAction(name: string, args: unknown[], token: string, path = "/") {
+  return call(name, args, { token, path });
 }
 
 async function main() {
