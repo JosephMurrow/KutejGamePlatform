@@ -254,16 +254,14 @@ export function GameRoom({
             ) : null}
 
             {/*
-          Чат комнаты. Через него же говорят боты: их реплики приходят обычными
-          сообщениями от их имени (src/games/chess/docs/BOTS.md).
-        */}
-            <div className="h-72 lg:h-80">
-              <Chat
-                messages={room.chat}
-                youId={userId}
-                onSend={room.sendChat}
-              />
-            </div>
+              Чат комнаты. Через него же говорят боты: их реплики приходят
+              обычными сообщениями от их имени (src/games/chess/docs/BOTS.md).
+
+              Высоту чат держит сам: список ходит в свои пределы и дальше
+              листается. Коробка фиксированной высоты была ниже чата, и он
+              вылезал из неё на телефоне поверх подвала страницы.
+            */}
+            <Chat messages={room.chat} youId={userId} onSend={room.sendChat} />
           </aside>
         </main>
       )}
