@@ -30,7 +30,8 @@
     "audit:questions": "node --import tsx src/games/pricetitute/scripts/audit-questions.ts",
     "db:rename-questions": "node --env-file-if-exists=.env --import tsx src/games/pricetitute/scripts/rename-questions.ts",
     "mail:check": "node --env-file-if-exists=.env --import tsx scripts/mail-check.ts",
-    "twitch:check": "node --import tsx scripts/twitch-check.ts"
+    "twitch:check": "node --import tsx scripts/twitch-check.ts",
+    "agent:accounts": "node --env-file-if-exists=.env --import tsx scripts/agent-accounts.ts"
   },
   "dependencies": {
     "@node-rs/argon2": "^2.1.0",
