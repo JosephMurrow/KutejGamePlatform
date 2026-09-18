@@ -3,21 +3,23 @@
 import { useCallback, useEffect, useRef, useSyncExternalStore } from "react";
 
 /**
- * Звук партии: ход, взятие, шах, конец и последние секунды.
+ * Звук комнаты: ход, взятие, шах, конец, последние секунды и «твой ход».
+ *
+ * Звуки у всех игр одинаковые — так решил хозяин, — поэтому модуль
+ * платформенный, а не копия в каждой игре. Своё у игры только место, где
+ * лежит выбор «звук выключен»: ключ передаёт игра, и выбор, сделанный до
+ * переезда модуля сюда, никуда не делся.
  *
  * Тоны собираются на месте, а не берутся файлами: ходу нужен щелчок, а не
  * запись, и лишних килобайт в бандле от этого нет. Понадобятся настоящие
  * сэмплы — их можно подложить сюда, ничего снаружи не меняя.
  *
  * Первый звук браузер заблокирует до первого касания, поэтому звук
- * разблокируется заранее: на первое же действие человека в странице.
- *
- * Взято копией у шахмат (src/games/chess/components/sound.ts): игра не
- * импортирует игру. Свои звуки режимов — взрыв бомбы, стопка, телепорт —
- * добавятся на их этапах.
+ * разблокируется заранее: на первое же действие человека в странице
+ * (src/games/chess/docs/BACKLOG.md G).
  */
 
-export type Cue = "move" | "capture" | "check" | "end" | "lowTime";
+export type Cue = "move" | "capture" | "check" | "end" | "lowTime" | "turn";
 
 /** Из чего складывается каждый звук: частота, длительность и громкость. */
 const CUES: Record<Cue, { hz: number[]; ms: number; gain: number }> = {
@@ -26,9 +28,9 @@ const CUES: Record<Cue, { hz: number[]; ms: number; gain: number }> = {
   check: { hz: [660, 880], ms: 110, gain: 0.22 },
   end: { hz: [520, 390, 260], ms: 220, gain: 0.26 },
   lowTime: { hz: [900], ms: 45, gain: 0.16 },
+  // Зов, а не щелчок: слышно и из соседней вкладки, но не тревога.
+  turn: { hz: [587, 880], ms: 150, gain: 0.3 },
 };
-
-const STORAGE = "turbochess:sound";
 
 /**
  * Выбор про звук — внешнее для React состояние: он лежит в хранилище браузера и
@@ -44,9 +46,9 @@ function subscribe(listener: () => void): () => void {
   return () => listeners.delete(listener);
 }
 
-function stored(): boolean {
+function stored(key: string): boolean {
   try {
-    return window.localStorage.getItem(STORAGE) !== "off";
+    return window.localStorage.getItem(key) !== "off";
   } catch {
     // Приватное окно или запрет на хранилище: звук по умолчанию есть.
     return true;
@@ -59,8 +61,16 @@ export interface Sound {
   play: (cue: Cue) => void;
 }
 
-export function useSound(): Sound {
-  const on = useSyncExternalStore(subscribe, stored, () => true);
+/**
+ * @param storageKey где в хранилище браузера лежит выбор про звук. Ключ у
+ * каждой игры свой: `chess:sound`, `turbochess:sound`, `pricetitute:sound`.
+ */
+export function useSound(storageKey: string): Sound {
+  const on = useSyncExternalStore(
+    subscribe,
+    () => stored(storageKey),
+    () => true,
+  );
   const context = useRef<AudioContext | null>(null);
 
   // Браузер молчит, пока человек не тронул страницу. Заводим звук на первое же
@@ -82,12 +92,15 @@ export function useSound(): Sound {
 
   const toggle = useCallback(() => {
     try {
-      window.localStorage.setItem(STORAGE, stored() ? "off" : "on");
+      window.localStorage.setItem(
+        storageKey,
+        stored(storageKey) ? "off" : "on",
+      );
     } catch {
       // Не запомнить выбор неприятно, но звук от этого работать не перестаёт.
     }
     for (const listener of listeners) listener();
-  }, []);
+  }, [storageKey]);
 
   const play = useCallback(
     (cue: Cue) => {

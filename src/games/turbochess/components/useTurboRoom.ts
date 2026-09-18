@@ -14,6 +14,7 @@ import {
   type Ack,
   type ChatMessagePayload,
 } from "@/shared/protocol";
+import { listenChat } from "@/shared/chat-feed";
 import { wakeOnReturn } from "@/shared/socket-wake";
 import type { MarketOrder } from "../engine/game";
 import { GAME_EVENT, GAME_ID, type TurboStatePayload } from "../protocol";
@@ -126,12 +127,7 @@ export function useTurboRoom(
       setError(reason.message);
     });
 
-    socket.on(SERVER_EVENT.chatHistory, (history: ChatMessagePayload[]) => {
-      setChat(history);
-    });
-    socket.on(SERVER_EVENT.chatMessage, (message: ChatMessagePayload) => {
-      setChat((was) => [...was, message]);
-    });
+    listenChat(socket, setChat);
 
     socket.on(SERVER_EVENT.state, (payload: TurboStatePayload) => {
       setClockOffset(payload.serverTime - Date.now());

@@ -14,6 +14,7 @@ import {
   type Ack,
   type ChatMessagePayload,
 } from "@/shared/protocol";
+import { listenChat } from "@/shared/chat-feed";
 import { wakeOnReturn } from "@/shared/socket-wake";
 import {
   GAME_EVENT,
@@ -123,12 +124,7 @@ export function useChessRoom(
       setError(reason.message);
     });
 
-    socket.on(SERVER_EVENT.chatHistory, (history: ChatMessagePayload[]) => {
-      setChat(history);
-    });
-    socket.on(SERVER_EVENT.chatMessage, (message: ChatMessagePayload) => {
-      setChat((was) => [...was, message]);
-    });
+    listenChat(socket, setChat);
 
     socket.on(SERVER_EVENT.state, (payload: ChessStatePayload) => {
       setClockOffset(payload.serverTime - Date.now());

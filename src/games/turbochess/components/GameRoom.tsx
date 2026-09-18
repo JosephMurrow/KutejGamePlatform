@@ -44,7 +44,7 @@ import type { TurboPlayerPayload, TurboStatePayload } from "../protocol";
 import { Board } from "./Board";
 import { PIECE_NAME } from "./pieces";
 import { FlipIcon, IconButton, SoundIcon } from "./icons";
-import { useSound } from "./sound";
+import { useSound } from "@/components/room/sound";
 import { useTurboRoom } from "./useTurboRoom";
 
 /**
@@ -79,7 +79,7 @@ export function GameRoom({
   const [inviteOpen, setInviteOpen] = useState(false);
   /** Размер клетки на большой доске: её листают и приближают руками. */
   const [zoom, setZoom] = useState(36);
-  const sound = useSound();
+  const sound = useSound("turbochess:sound");
 
   // Ссылка — из адресной строки: снаружи и изнутри сети адрес разный, и
   // правильный тот, по которому человек сюда пришёл.

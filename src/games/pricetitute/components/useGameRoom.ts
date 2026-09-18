@@ -15,6 +15,7 @@ import {
   type Ack,
   type ChatMessagePayload,
 } from "@/shared/protocol";
+import { listenChat } from "@/shared/chat-feed";
 import { wakeOnReturn } from "@/shared/socket-wake";
 import { type GameStatePayload } from "@/games/pricetitute/protocol";
 import { GAME_EVENT, GAME_ID } from "@/games/pricetitute/protocol";
@@ -117,12 +118,7 @@ export function useGameRoom(
       // Переподключаться незачем — обратно всё равно не пустят.
       socket.disconnect();
     });
-    socket.on(SERVER_EVENT.chatHistory, (history: ChatMessagePayload[]) => {
-      setChat(history);
-    });
-    socket.on(SERVER_EVENT.chatMessage, (message: ChatMessagePayload) => {
-      setChat((previous) => [...previous, message].slice(-100));
-    });
+    listenChat(socket, setChat);
 
     // Вернулись в приложение с фона — проверяем связь сразу, не дожидаясь
     // очередной попытки socket.io: на сервере отсрочка всего пятнадцать

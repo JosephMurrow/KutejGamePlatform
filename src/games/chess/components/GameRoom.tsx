@@ -15,7 +15,7 @@ import { VIEWER_DELAY_LABEL } from "../rooms/settings";
 import type { ChessColor, ChessPlayerPayload } from "../protocol";
 import { Board } from "./Board";
 import { frames, START, taken } from "./replay";
-import { useSound } from "./sound";
+import { useSound } from "@/components/room/sound";
 import { LeaderboardModal } from "./leaderboard/Modal";
 import { useChessRoom } from "./useChessRoom";
 
@@ -43,7 +43,7 @@ export function GameRoom({
   const [ratingOpen, setRatingOpen] = useState(false);
   /** Какой полуход смотрим; `null` — партию как она есть. */
   const [at, setAt] = useState<number | null>(null);
-  const sound = useSound();
+  const sound = useSound("chess:sound");
 
   // Ссылка берётся из адресной строки: снаружи и изнутри сети адрес разный, и
   // правильный тот, по которому человек сюда пришёл.
