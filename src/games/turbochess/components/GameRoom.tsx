@@ -845,16 +845,20 @@ function Effects({
   return (
     <div className="mb-2 flex flex-wrap gap-1.5">
       {position.effects.map((effect) => (
+        // Что эффект делает — строкой в самой плашке, а не всплывающей
+        // подсказкой: на телефоне подсказки по наведению не бывает.
         <span
           key={`${effect.kind}${effect.side}`}
-          className="flex items-baseline gap-1.5 rounded-lg border border-accent bg-tint px-2.5 py-1 text-xs"
-          title={EFFECT_HINT[effect.kind]}
+          className="flex flex-col rounded-lg border border-accent bg-tint px-2.5 py-1 text-xs"
         >
-          <span className="font-semibold text-accent">
-            {EFFECT_LABEL[effect.kind]}
+          <span className="flex items-baseline gap-1.5">
+            <span className="font-semibold text-accent">
+              {EFFECT_LABEL[effect.kind]}
+            </span>
+            <span className="text-muted">{effectWhom(effect, mySide)}</span>
+            <span className="tabular text-muted">{effectLeft(effect)}</span>
           </span>
-          <span className="text-muted">{effectWhom(effect, mySide)}</span>
-          <span className="tabular text-muted">{effectLeft(effect)}</span>
+          <span className="text-muted">{EFFECT_HINT[effect.kind]}</span>
         </span>
       ))}
     </div>
