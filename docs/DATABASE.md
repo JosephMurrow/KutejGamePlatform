@@ -1,8 +1,8 @@
 # База
 
 PostgreSQL 17, Prisma 7. Схема разложена по файлам:
-`prisma/schema/platform.prisma`, `prisma/schema/pricetitute.prisma` и
-`prisma/schema/chess.prisma`.
+`prisma/schema/platform.prisma`, `prisma/schema/pricetitute.prisma`,
+`prisma/schema/chess.prisma` и `prisma/schema/turbochess.prisma`.
 
 ## У каждой игры своя схема
 
@@ -11,6 +11,7 @@ platform     users · one_time_links · private_rooms
 pricetitute  questions · rounds · round_bets · scores · room_question_queues
              room_settings
 chess        room_settings · matches · openings · ratings · pairs
+turbochess   room_settings · matches · match_seats
 public       только _prisma_migrations
 ```
 
@@ -26,6 +27,15 @@ public       только _prisma_migrations
 `round_bets.playerId`. Между базами ссылочной целостности нет, и «кто этот
 игрок» пришлось бы выяснять вторым запросом руками. Схемы дают ту же
 изоляцию — свои имена, свои права, отдельный дамп — и ключи при этом живут.
+
+**Бот за столом — не строка в `users`.** У шахмат и турбо-шахмат боты живут
+по-разному, и это не разнобой, а разные решения. Платитутка и шахматы завели
+флаг `isBot` в платформенной таблице; турбо-шахматы записи о боте не заводят
+вовсе: его место в `turbochess.match_seats` не попадает (там внешний ключ на
+живого пользователя), а кто из мест был программой, лежит в самой партии полем
+`matches.bots` — место, характер, уровень и ник. Причина простая: боты у
+турбо-шахмат меняются каждую партию и живут только в памяти процесса, а строка
+в `users` пережила бы их всех.
 
 **Чем ссылаться на комнату.** Строкой без внешнего ключа: так у `rounds`,
 `scores`, `room_question_queues` и `room_settings`. Причина историческая и

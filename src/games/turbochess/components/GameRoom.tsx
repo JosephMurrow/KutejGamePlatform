@@ -1,0 +1,1449 @@
+"use client";
+
+import { useEffect, useMemo, useRef, useState } from "react";
+import { Avatar } from "@/components/Avatar";
+import { UserMenu } from "@/components/UserMenu";
+import { Chat } from "@/components/room/Chat";
+import { InviteModal } from "@/components/rooms/InviteModal";
+import { Countdown } from "@/components/ui/Countdown";
+import { useExitWarning } from "@/components/games/ExitToShelf";
+import type { DropKind, MarketItem, MoveInput } from "../engine/game";
+import { REASON_TEXT } from "../engine/outcome";
+import type { Side } from "../engine/pieces";
+import type { Position } from "../engine/position";
+import { decodeReplay, type ReplayFrame } from "../engine/replay";
+import { STALL_WARN, stallLeft, takenCount } from "../modes/annihilation";
+import { BATTLE_SIDE_NAME } from "../modes/battle";
+import {
+  BINGE_RANKS,
+  BINGE_RANK_LABEL,
+  EFFECT_HINT,
+  EFFECT_LABEL,
+  blinded,
+  effectLeft,
+  effectWhom,
+  puppeted,
+  shaking,
+} from "../modes/binge";
+import { modeInfo } from "../modes/catalog";
+import { chanceReady } from "../modes/lastChance";
+import {
+  MARKET_HINT,
+  MARKET_ITEMS,
+  MARKET_LABEL,
+  marketPrice,
+  pointsLeft,
+  revivable,
+} from "../modes/market";
+import { VETOES } from "../modes/anarchy";
+import { nuclearCharge, nuclearThreshold } from "../modes/nuclear";
+import { rulesOf } from "../modes/rules";
+import type { ModeOptions } from "../rooms/settings";
+import { MENU_LINKS } from "../menu";
+import type { TurboPlayerPayload, TurboStatePayload } from "../protocol";
+import { Board } from "./Board";
+import { PIECE_NAME } from "./pieces";
+import { FlipIcon, IconButton, SoundIcon } from "./icons";
+import { useSound } from "./sound";
+import { useTurboRoom } from "./useTurboRoom";
+
+/**
+ * Комната турбо-шахмат: доска, места с часами, ходы и кнопки.
+ *
+ * Всё состояние приходит снимком с сервера — здесь только показ и ввод. Доска
+ * своё расхождение с сервером всегда решает в его пользу. Устроено по образцу
+ * шахматной комнаты, копией: игра не импортирует игру.
+ */
+
+const SIDE_NAME = ["белые", "чёрные"] as const;
+
+/** Как зовётся место: у двоих — по цвету, в битве — по краю доски. */
+function sideName(side: Side, seats = 2): string {
+  const name = seats > 2 ? BATTLE_SIDE_NAME[side] : SIDE_NAME[side];
+  return name ?? `сторона ${side + 1}`;
+}
+
+export function GameRoom({
+  roomCode,
+  userId,
+  nickname,
+  avatarId,
+}: {
+  roomCode: string;
+  userId: string;
+  nickname: string;
+  avatarId: number;
+}) {
+  const room = useTurboRoom(roomCode);
+  const [flipped, setFlipped] = useState<boolean | null>(null);
+  const [inviteOpen, setInviteOpen] = useState(false);
+  /** Размер клетки на большой доске: её листают и приближают руками. */
+  const [zoom, setZoom] = useState(36);
+  const sound = useSound();
+
+  // Ссылка — из адресной строки: снаружи и изнутри сети адрес разный, и
+  // правильный тот, по которому человек сюда пришёл.
+  const link =
+    typeof window === "undefined"
+      ? ""
+      : `${window.location.origin}/r/${roomCode}`;
+
+  const state = room.state;
+
+  // Перемотка: какой полуход сейчас на доске; `null` — живая партия. Кадры
+  // шлёт сервер (engine/replay.ts): сам клиент партию не восстановит.
+  const [viewing, setViewing] = useState<number | null>(null);
+  const replay = state?.replay ?? null;
+  const frames = useMemo(() => (replay ? decodeReplay(replay) : []), [replay]);
+  const lastPly = frames.length - 1;
+  // История укоротилась — новая партия или отменённый «НЕТ» ход: номер хода
+  // из старой истории в новой ничего не значит, возвращаемся к живой доске.
+  const [knownLast, setKnownLast] = useState(lastPly);
+  if (lastPly !== knownLast) {
+    setKnownLast(lastPly);
+    if (lastPly < knownLast) setViewing(null);
+  }
+  const past =
+    viewing !== null && viewing < lastPly ? (frames[viewing] ?? null) : null;
+  /** Перейти к полуходу; последний — это живая партия. */
+  const goTo = (ply: number) =>
+    setViewing(ply >= lastPly ? null : Math.max(0, ply));
+
+  // Стрелки листают ходы, если человек не пишет в чат.
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+      const target = event.target as HTMLElement | null;
+      if (target?.closest("input, textarea, select, [contenteditable]")) return;
+      if (lastPly <= 0) return;
+
+      event.preventDefault();
+      setViewing((was) => {
+        const at = was ?? lastPly;
+        const next = event.key === "ArrowLeft" ? Math.max(0, at - 1) : at + 1;
+        return next >= lastPly ? null : next;
+      });
+    };
+
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [lastPly]);
+
+  const me = state?.players.find((player) => player.id === userId) ?? null;
+  const mySide = me?.seat ?? null;
+  const playing = state?.phase === "playing";
+  /** «Вскрываемся»: до вскрытия ходов нет, фигуры меняются местами. */
+  const arranging = state?.phase === "setup" && mySide !== null;
+  /** «Чёрный рынок»: открыт магазин или покупка ждёт клетку. */
+  const [shopOpen, setShopOpen] = useState(false);
+  const [order, setOrder] = useState<{
+    item: MarketItem;
+    from?: string;
+    kind?: DropKind;
+  } | null>(null);
+
+  /** Покупка ждёт клетку: доска отдаёт нажатую сюда. */
+  function pickSquare(square: string) {
+    if (!order) return;
+
+    if (order.item === "shield") {
+      void room.buy({ item: "shield", from: square });
+      setOrder(null);
+      return;
+    }
+    if (order.item === "revive") {
+      void room.buy({ item: "revive", kind: order.kind, to: square });
+      setOrder(null);
+      return;
+    }
+    if (!order.from) {
+      setOrder({ ...order, from: square });
+      return;
+    }
+
+    void room.buy({ item: order.item, from: order.from, to: square });
+    setOrder(null);
+  }
+
+  // Звук по свежему ходу: щелчок, взятие, шах или конец партии.
+  const heard = useRef(0);
+  const moves = state?.moves;
+  useEffect(() => {
+    const now = moves?.length ?? 0;
+    const was = heard.current;
+    heard.current = now;
+    if (!moves || now <= was || was === 0) return;
+
+    const last = moves.at(-1) ?? "";
+    if (state?.phase === "over") sound.play("end");
+    else if (last.includes("#") || last.includes("+")) sound.play("check");
+    else if (last.includes("x")) sound.play("capture");
+    else sound.play("move");
+  }, [moves, sound, state?.phase]);
+
+  // Уход посреди партии стоит поражения — платформа спросит об этом на выходе.
+  useExitWarning(
+    (playing || state?.phase === "setup") && mySide !== null
+      ? "Партия идёт: уход засчитают за поражение."
+      : null,
+  );
+
+  // Зритель смотрит с белой стороны, игрок — со своей.
+  const orientation = flipped ?? mySide === 1;
+  /** Доска больше обычной — её показывают с прокруткой и приближением. */
+  const wide = (state?.position?.geometry.width ?? 8) > 8;
+
+  return (
+    <div className="mx-auto flex w-full max-w-5xl flex-1 flex-col gap-4 px-4 py-4">
+      {/*
+        Шапка. Выход на витрину рисует платформа — отдельной строкой над этой;
+        здесь то, что нужно игроку: звук, разворот и меню. Отступа под кнопку
+        выхода здесь нет: она не рядом, а выше, и отступ только сдвигал шапку.
+      */}
+      <header className="flex items-center justify-between gap-3">
+        <div className="flex items-center gap-2">
+          <IconButton
+            label={sound.on ? "Выключить звук" : "Включить звук"}
+            pressed={sound.on}
+            onClick={sound.toggle}
+          >
+            <SoundIcon on={sound.on} />
+          </IconButton>
+          <IconButton
+            label="Развернуть доску"
+            onClick={() => setFlipped(!orientation)}
+          >
+            <FlipIcon />
+          </IconButton>
+
+          {/* Доску 16×16 на телефоне не разглядеть без приближения. */}
+          {wide ? (
+            <div className="flex items-center gap-1">
+              <button
+                type="button"
+                aria-label="Отдалить доску"
+                onClick={() => setZoom(Math.max(20, zoom - 8))}
+                className="size-8 rounded-lg border border-line text-sm font-semibold text-muted transition hover:border-accent hover:text-accent"
+              >
+                −
+              </button>
+              <button
+                type="button"
+                aria-label="Приблизить доску"
+                onClick={() => setZoom(Math.min(72, zoom + 8))}
+                className="size-8 rounded-lg border border-line text-sm font-semibold text-muted transition hover:border-accent hover:text-accent"
+              >
+                +
+              </button>
+            </div>
+          ) : null}
+        </div>
+
+        <UserMenu nickname={nickname} avatarId={avatarId} links={MENU_LINKS} />
+      </header>
+
+      {room.kicked ? (
+        <Notice title="Комната закрыта" text={room.kicked} />
+      ) : !state || !state.position ? (
+        <Notice
+          title="Подключаемся"
+          text={room.error ?? "Ищем стол и расставляем фигуры."}
+        />
+      ) : (
+        <main className="flex flex-1 flex-col gap-4 lg:flex-row lg:items-start">
+          {/*
+            Доска — квадрат от меньшей стороны. Высота в svh, а не в vh: на
+            телефоне адресная строка то есть, то нет, и по vh доска не
+            помещается.
+          */}
+          <div
+            className={
+              wide
+                ? "max-h-[78svh] w-full overflow-auto"
+                : "mx-auto w-full max-w-[min(78svh,560px)]"
+            }
+          >
+            <Effects position={state.position} mySide={mySide} />
+            <div
+              style={
+                wide
+                  ? { width: (state.position.geometry.width ?? 8) * zoom }
+                  : undefined
+              }
+            >
+              <Board
+                position={past ? frameAt(state.position, past) : state.position}
+                // «Чужими руками»: за тебя ходит компьютер, и доска это знает.
+                // В перемотке доска только показывает: ходят с живой.
+                controls={
+                  playing &&
+                  !past &&
+                  mySide !== null &&
+                  !puppeted(state.position, mySide)
+                    ? [mySide]
+                    : []
+                }
+                lastMove={past ? past.lastMove : state.lastMove}
+                // «Тремор» переворачивает доску обоим — поверх того, как её
+                // развернул сам игрок (docs/MODES.md, режим 12).
+                flipped={orientation !== (!past && shaking(state.position))}
+                blind={!past && blinded(state.position, mySide)}
+                covered={state.covered}
+                onSwap={
+                  arranging ? (from, to) => void room.swap(from, to) : undefined
+                }
+                onPick={order ? pickSquare : undefined}
+                onMove={(input: MoveInput) =>
+                  room.move({ ...input, ply: state.moves.length })
+                }
+              />
+            </div>
+            <Rewind at={viewing} last={lastPly} onGo={goTo} />
+          </div>
+
+          <aside className="flex w-full flex-col gap-3 lg:w-72">
+            <ModeCard state={state} />
+            <ModeStatus
+              state={state}
+              mySide={mySide}
+              onBomb={room.bomb}
+              onChance={room.chance}
+              onVeto={room.veto}
+            />
+            {state.mode === "BLACK_MARKET" &&
+            mySide !== null &&
+            state.position &&
+            state.phase === "playing" ? (
+              <Market
+                position={state.position}
+                side={mySide}
+                open={shopOpen}
+                order={order}
+                onOpen={() => setShopOpen(true)}
+                onClose={() => setShopOpen(false)}
+                onChoose={(item, kind) => {
+                  setShopOpen(false);
+                  if (item === "extra") {
+                    void room.buy({ item });
+                    return;
+                  }
+                  setOrder({ item, ...(kind ? { kind } : {}) });
+                }}
+                onCancel={() => setOrder(null)}
+              />
+            ) : null}
+
+            {state.phase === "setup" ? (
+              <Setup
+                state={state}
+                mySide={mySide}
+                clockOffset={room.clockOffset}
+                onReady={room.ready}
+              />
+            ) : null}
+
+            {/* Вчетвером места идут по кругу, вдвоём — соперник сверху. */}
+            {state.seats > 2 ? (
+              <>
+                {Array.from({ length: state.seats }, (_, side) => (
+                  <Seat
+                    key={side}
+                    state={state}
+                    side={side}
+                    clockOffset={room.clockOffset}
+                    you={userId}
+                    onCallBot={room.callBot}
+                  />
+                ))}
+                <Moves
+                  moves={state.moves}
+                  vetoed={state.vetoed}
+                  seats={state.seats}
+                  at={past ? viewing : null}
+                  onPick={goTo}
+                />
+              </>
+            ) : (
+              <>
+                <Seat
+                  state={state}
+                  side={orientation ? 0 : 1}
+                  clockOffset={room.clockOffset}
+                  you={userId}
+                  onCallBot={room.callBot}
+                />
+                <Moves
+                  moves={state.moves}
+                  vetoed={state.vetoed}
+                  at={past ? viewing : null}
+                  onPick={goTo}
+                />
+                <Seat
+                  state={state}
+                  side={orientation ? 1 : 0}
+                  clockOffset={room.clockOffset}
+                  you={userId}
+                  onCallBot={room.callBot}
+                />
+              </>
+            )}
+
+            {state.phase === "waiting" ||
+            (state.phase === "over" && state.players.length < state.seats) ? (
+              <button
+                type="button"
+                onClick={() => setInviteOpen(true)}
+                className="rounded-lg bg-accent px-3 py-2 text-sm font-semibold text-surface transition hover:bg-deep"
+              >
+                Позвать соперника
+              </button>
+            ) : null}
+
+            {state.phase === "over" ? (
+              <Result state={state} mySide={mySide} onRematch={room.rematch} />
+            ) : playing && mySide !== null ? (
+              <Controls
+                claimable={state.claimable !== null}
+                offer={state.drawOffer}
+                mySide={mySide}
+                onClaim={room.claimDraw}
+                onOffer={room.offerDraw}
+                onDecline={room.declineDraw}
+                onResign={room.resign}
+              />
+            ) : null}
+
+            {mySide === null ? (
+              <p className="text-xs text-muted">
+                Ты смотришь: за столом места заняты.
+              </p>
+            ) : null}
+            {room.error ? (
+              <p className="rounded-lg bg-tint px-3 py-2 text-xs text-accent">
+                {room.error}
+              </p>
+            ) : null}
+            {!room.connected ? (
+              <p className="text-xs text-muted">
+                Связь потеряна, восстанавливаем…
+              </p>
+            ) : null}
+
+            {/*
+              Высоту чат держит сам: список ходит в свои пределы и дальше
+              листается. Коробка фиксированной высоты была ниже чата, и он
+              вылезал из неё на телефоне поверх подвала страницы.
+            */}
+            <Chat messages={room.chat} youId={userId} onSend={room.sendChat} />
+          </aside>
+        </main>
+      )}
+
+      {state?.binge ? <BingeCard state={state} mySide={mySide} /> : null}
+
+      {state?.toast ? (
+        <Toast
+          state={state}
+          mySide={mySide}
+          clockOffset={room.clockOffset}
+          onConfirm={room.toast}
+        />
+      ) : null}
+
+      <InviteModal
+        open={inviteOpen}
+        onClose={() => setInviteOpen(false)}
+        link={link}
+        hint="Наведи камеру телефона — и сядешь за эту же доску."
+      />
+    </div>
+  );
+}
+
+/**
+ * Режим и его правила.
+ *
+ * До первого хода правила развёрнуты: игрок садится за шахматы, а получает не
+ * шахматы, и узнать об этом должен до того, как потерял ферзя. Дальше —
+ * по кнопке, чтобы не занимать место у доски (docs/MODES.md, «Подсказки»).
+ */
+function ModeCard({ state }: { state: TurboStatePayload }) {
+  const [open, setOpen] = useState(false);
+  if (!state.mode) return null;
+
+  const info = modeInfo(state.mode);
+  const rules = rulesOf(state.mode, state.options ?? {});
+  const fresh = state.phase === "waiting" || state.moves.length === 0;
+  const shown = fresh || open;
+
+  return (
+    <div className="flex flex-col gap-2 rounded-xl border border-line bg-paper px-4 py-3">
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex flex-col">
+          <span className="text-sm font-semibold">{info.title}</span>
+          {rules.variant ? (
+            <span className="text-xs text-muted">{rules.variant}</span>
+          ) : null}
+        </div>
+        {fresh ? null : (
+          <button
+            type="button"
+            onClick={() => setOpen(!open)}
+            aria-expanded={open}
+            className="shrink-0 text-xs font-semibold text-accent transition hover:text-deep"
+          >
+            {open ? "Скрыть" : "Правила"}
+          </button>
+        )}
+      </div>
+
+      {shown ? (
+        <div className="flex flex-col gap-1.5">
+          {rules.lines.map((line) => (
+            <p key={line} className="text-xs leading-relaxed text-muted">
+              {line}
+            </p>
+          ))}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+/**
+ * Чёрный рынок: кнопка со счётом очков, окно с карточками и строка наведения,
+ * когда покупка ждёт клетку (docs/MODES.md, режим 13).
+ */
+function Market({
+  position,
+  side,
+  open,
+  order,
+  onOpen,
+  onClose,
+  onChoose,
+  onCancel,
+}: {
+  position: Position;
+  side: Side;
+  open: boolean;
+  order: { item: MarketItem; from?: string; kind?: DropKind } | null;
+  onOpen: () => void;
+  onClose: () => void;
+  onChoose: (item: MarketItem, kind?: DropKind) => void;
+  onCancel: () => void;
+}) {
+  const left = pointsLeft(position, side);
+  const dead = revivable(position, side);
+
+  const hint = !order
+    ? null
+    : order.item === "shield"
+      ? "Выбери свою фигуру — она переживёт одно взятие"
+      : order.item === "revive"
+        ? "Выбери клетку на своих двух горизонталях"
+        : order.from
+          ? "Теперь выбери вторую клетку"
+          : "Выбери свою фигуру";
+
+  return (
+    <div className="flex flex-col gap-2">
+      <button
+        type="button"
+        onClick={onOpen}
+        className="flex items-center justify-between rounded-xl border border-accent bg-tint px-3 py-2 text-sm font-semibold text-accent transition hover:bg-accent-soft/20"
+      >
+        Чёрный рынок
+        <span className="tabular text-xs">очков: {left}</span>
+      </button>
+
+      {hint ? (
+        <div className="flex items-center justify-between gap-2 rounded-lg bg-tint px-3 py-2 text-xs text-accent">
+          {hint}
+          <button
+            type="button"
+            onClick={onCancel}
+            className="shrink-0 font-semibold underline"
+          >
+            отмена
+          </button>
+        </div>
+      ) : null}
+
+      {open ? (
+        <div className="fixed inset-0 z-40 flex items-center justify-center bg-ink/60 px-4">
+          <div className="flex w-full max-w-sm flex-col gap-2 rounded-2xl border border-accent bg-paper px-4 py-4">
+            <div className="flex items-baseline justify-between">
+              <span className="text-base font-semibold">Чёрный рынок</span>
+              <span className="tabular text-xs text-muted">очков: {left}</span>
+            </div>
+
+            {MARKET_ITEMS.filter((item) => item !== "revive").map((item) => {
+              const price = marketPrice(item);
+              return (
+                <button
+                  key={item}
+                  type="button"
+                  disabled={price > left}
+                  onClick={() => onChoose(item)}
+                  className="flex items-start justify-between gap-3 rounded-lg border border-line px-3 py-2 text-left transition hover:border-accent disabled:opacity-40"
+                >
+                  <span className="text-sm">
+                    {MARKET_LABEL[item]}
+                    <span className="block text-xs text-muted">
+                      {MARKET_HINT[item]}
+                    </span>
+                  </span>
+                  <span className="tabular text-sm font-semibold">{price}</span>
+                </button>
+              );
+            })}
+
+            {dead.length === 0 ? (
+              <p className="text-xs text-muted">
+                Воскрешать пока некого: соперник у вас ничего не забирал.
+              </p>
+            ) : (
+              dead.map((kind) => {
+                const price = marketPrice("revive", kind);
+                return (
+                  <button
+                    key={kind}
+                    type="button"
+                    disabled={price > left}
+                    onClick={() => onChoose("revive", kind as DropKind)}
+                    className="flex items-start justify-between gap-3 rounded-lg border border-line px-3 py-2 text-left transition hover:border-accent disabled:opacity-40"
+                  >
+                    <span className="text-sm">
+                      Воскресить: {PIECE_NAME[kind]}
+                      <span className="block text-xs text-muted">
+                        {MARKET_HINT.revive}
+                      </span>
+                    </span>
+                    <span className="tabular text-sm font-semibold">
+                      {price}
+                    </span>
+                  </button>
+                );
+              })
+            )}
+
+            <button
+              type="button"
+              onClick={onClose}
+              className="mt-1 rounded-lg border border-line px-3 py-2 text-sm font-semibold text-muted transition hover:text-ink"
+            >
+              Закрыть
+            </button>
+          </div>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+/**
+ * Окно алко-шахмат: одному пить, другому подтверждать. Часы на это время
+ * стоят, а молчание считается отказом — и штраф прилетает обоим.
+ */
+function Toast({
+  state,
+  mySide,
+  clockOffset,
+  onConfirm,
+}: {
+  state: TurboStatePayload;
+  mySide: Side | null;
+  clockOffset: number;
+  onConfirm: () => void;
+}) {
+  const toast = state.toast;
+  if (!toast) return null;
+
+  const drinking = mySide === toast.drinker;
+  const pouring = mySide === toast.pourer;
+
+  return (
+    <div className="fixed inset-0 z-40 flex items-center justify-center bg-ink/60 px-4">
+      <div className="flex w-full max-w-sm flex-col gap-3 rounded-2xl border border-accent bg-paper px-5 py-5 text-center">
+        <span className="text-lg font-semibold">
+          {drinking
+            ? "Тебе необходимо выпить стопку"
+            : pouring
+              ? "Подтвердите, что игрок выпил"
+              : "Игрок пьёт стопку"}
+        </span>
+
+        <Countdown
+          deadline={state.deadline}
+          durationMs={state.phaseDurationMs}
+          clockOffset={clockOffset}
+        />
+
+        {pouring ? (
+          <button
+            type="button"
+            onClick={onConfirm}
+            className="rounded-lg bg-accent px-3 py-2 text-sm font-semibold text-surface transition hover:bg-deep"
+          >
+            Выпил, подтверждаю
+          </button>
+        ) : null}
+
+        <p className="text-xs text-muted">
+          Не подтвердил за полминуты — штраф обоим: с доски снимется по
+          случайной фигуре.
+        </p>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Расстановка «Вскрываемся»: часы, счёт готовых и кнопка «готов». Сами фигуры
+ * меняются местами на доске — здесь только то, что к ней не приклеить.
+ */
+function Setup({
+  state,
+  mySide,
+  clockOffset,
+  onReady,
+}: {
+  state: TurboStatePayload;
+  mySide: Side | null;
+  clockOffset: number;
+  onReady: () => void;
+}) {
+  const mine = mySide !== null && (state.setupReady[mySide] ?? false);
+  const ready = state.setupReady.filter(Boolean).length;
+
+  return (
+    <div className="flex flex-col gap-2 rounded-xl border border-accent bg-tint px-4 py-3">
+      <div className="flex items-baseline justify-between gap-3">
+        <span className="text-sm font-semibold text-accent">
+          Расставляйтесь
+        </span>
+        <span className="tabular text-xs text-muted">
+          готовы {ready} из {state.seats}
+        </span>
+      </div>
+
+      <Countdown
+        deadline={state.deadline}
+        durationMs={state.phaseDurationMs}
+        clockOffset={clockOffset}
+      />
+
+      {mySide === null ? (
+        <p className="text-xs text-muted">
+          Ты смотришь: до вскрытия закрыты обе половины.
+        </p>
+      ) : (
+        <>
+          <p className="text-xs text-muted">
+            Меняй свои фигуры местами прямо на доске. Король — только на первой
+            горизонтали. Чужая половина закрыта, вскроемся разом.
+          </p>
+          <button
+            type="button"
+            onClick={onReady}
+            disabled={mine}
+            className="rounded-lg bg-accent px-3 py-2 text-sm font-semibold text-surface transition hover:bg-deep disabled:opacity-50"
+          >
+            {mine ? "Ждём соперника" : "Готов"}
+          </button>
+        </>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Что режим показывает по ходу партии: остаток до остановки у «на
+ * уничтожение» и своя шкала заряда с кнопкой бомбы у «ядерных». Счёт взятых
+ * фигур стоит у мест, рядом с теми, кто их съел.
+ */
+function ModeStatus({
+  state,
+  mySide,
+  onBomb,
+  onChance,
+  onVeto,
+}: {
+  state: TurboStatePayload;
+  mySide: Side | null;
+  onBomb: () => void;
+  onChance: () => void;
+  onVeto: () => void;
+}) {
+  if (!state.position || state.phase !== "playing") return null;
+
+  // «Последний шанс»: кнопка появляется под шахом, в том числе под матом.
+  if (state.mode === "LAST_CHANCE" && mySide !== null) {
+    if (!chanceReady(state.position, mySide)) return null;
+
+    return (
+      <button
+        type="button"
+        onClick={onChance}
+        className="rounded-xl bg-[#c8281e] px-3 py-3 text-sm font-extrabold uppercase tracking-wide text-surface transition hover:bg-[#a71f16]"
+      >
+        Попробывать не умереть
+      </button>
+    );
+  }
+
+  // «Анархия»: отменить можно только новый чужой ход.
+  if (state.mode === "ANARCHY" && mySide !== null) {
+    const left = state.position.vetoes[mySide] ?? 0;
+    const can =
+      state.turn === mySide &&
+      left > 0 &&
+      state.moves.length > 0 &&
+      state.position.banned === null;
+
+    return (
+      <div className="flex flex-col gap-2">
+        <button
+          type="button"
+          onClick={onVeto}
+          disabled={!can}
+          className="rounded-xl bg-[#c8281e] px-3 py-3 text-lg font-extrabold text-surface transition hover:bg-[#a71f16] disabled:opacity-40"
+        >
+          НЕТ
+        </button>
+        <div className="flex items-center gap-1.5">
+          {Array.from({ length: VETOES }, (_, at) => (
+            <span
+              key={at}
+              className={`size-2.5 rounded-full ${at < left ? "bg-accent" : "bg-line"}`}
+            />
+          ))}
+          <span className="ml-1 text-xs text-muted">
+            осталось «НЕТ»: {left}
+          </span>
+        </div>
+      </div>
+    );
+  }
+
+  if (state.mode === "ANNIHILATION") {
+    const left = stallLeft(state.position);
+    if (left > STALL_WARN) return null;
+
+    return (
+      <p className="rounded-lg bg-tint px-3 py-2 text-xs text-accent">
+        Полуходов без взятий осталось: {left}. Потом партию остановят и
+        посчитают по взятым фигурам.
+      </p>
+    );
+  }
+
+  if (state.mode === "BINGE" && state.bingeLeft) {
+    const left = state.bingeLeft;
+
+    return (
+      <div className="flex flex-col gap-2 rounded-xl border border-line bg-paper px-4 py-3">
+        <span className="text-sm font-semibold">Колоды</span>
+        <div className="flex flex-col gap-1">
+          {BINGE_RANKS.map((rank) => (
+            <div
+              key={rank}
+              className="flex items-baseline justify-between gap-3 text-xs"
+            >
+              <span className="text-muted">{BINGE_RANK_LABEL[rank]}</span>
+              <span className="tabular font-semibold">
+                {left[rank] === 0 ? "пусто" : `осталось ${left[rank]}`}
+              </span>
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  }
+
+  if (state.mode === "NUCLEAR" && mySide !== null) {
+    return (
+      <Charge
+        position={state.position}
+        options={state.options ?? {}}
+        side={mySide}
+        myTurn={state.turn === mySide}
+        onBomb={onBomb}
+      />
+    );
+  }
+
+  return null;
+}
+
+/**
+ * «Загул»: полоса действующих эффектов над доской со счётчиком оставшихся
+ * ходов (docs/MODES.md, режим 12).
+ *
+ * Пусто — полосы нет вовсе: место над доской дорогое, и пустая строка съедала
+ * бы его во всех остальных режимах.
+ */
+function Effects({
+  position,
+  mySide,
+}: {
+  position: Position;
+  mySide: Side | null;
+}) {
+  if (position.effects.length === 0) return null;
+
+  return (
+    <div className="mb-2 flex flex-wrap gap-1.5">
+      {position.effects.map((effect) => (
+        // Что эффект делает — строкой в самой плашке, а не всплывающей
+        // подсказкой: на телефоне подсказки по наведению не бывает.
+        <span
+          key={`${effect.kind}${effect.side}`}
+          className="flex flex-col rounded-lg border border-accent bg-tint px-2.5 py-1 text-xs"
+        >
+          <span className="flex items-baseline gap-1.5">
+            <span className="font-semibold text-accent">
+              {EFFECT_LABEL[effect.kind]}
+            </span>
+            <span className="text-muted">{effectWhom(effect, mySide)}</span>
+            <span className="tabular text-muted">{effectLeft(effect)}</span>
+          </span>
+          <span className="text-muted">{EFFECT_HINT[effect.kind]}</span>
+        </span>
+      ))}
+    </div>
+  );
+}
+
+/**
+ * «Загул»: карточка события во весь экран (docs/MODES.md, режим 12).
+ *
+ * Висит пару секунд и закрывается сама — по тому же дедлайну, которым живёт
+ * комната, а не по своему таймеру: пока она висит, часы хода стоят и ходить
+ * нельзя, и кнопки «закрыть» у неё нет намеренно.
+ */
+function BingeCard({
+  state,
+  mySide,
+}: {
+  state: TurboStatePayload;
+  mySide: Side | null;
+}) {
+  const card = state.binge;
+  if (!card) return null;
+
+  const mine = mySide === card.by;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink/80 px-4">
+      <div className="flex w-full max-w-md flex-col gap-3 rounded-2xl border border-accent bg-paper px-6 py-7 text-center">
+        <span className="text-xs font-semibold uppercase tracking-wide text-muted">
+          {BINGE_RANK_LABEL[card.event.rank]} ·{" "}
+          {mine ? "твоя карта" : "карта соперника"}
+        </span>
+
+        <span className="text-2xl font-extrabold text-accent">
+          {card.event.title}
+        </span>
+
+        <p className="text-sm leading-relaxed text-muted">{card.event.text}</p>
+
+        {card.miss ? (
+          <p className="text-xs font-semibold text-ink">
+            Мимо: в этой позиции событию нечего делать. Карта всё равно сгорела.
+          </p>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Шкала заряда «Ядерных» — своя у каждого: соперник не должен понимать, в
+ * каком состоянии бомба. Так решил хозяин (docs/MODES.md, режим 8).
+ */
+function Charge({
+  position,
+  options,
+  side,
+  myTurn,
+  onBomb,
+}: {
+  position: Position;
+  options: ModeOptions;
+  side: Side;
+  myTurn: boolean;
+  onBomb: () => void;
+}) {
+  const [confirming, setConfirming] = useState(false);
+  const charge = nuclearCharge(position, side);
+  const threshold = nuclearThreshold(options);
+  const ready = charge >= threshold;
+
+  return (
+    <div className="flex flex-col gap-2 rounded-xl border border-line bg-paper px-4 py-3">
+      <div className="flex items-baseline justify-between gap-3">
+        <span className="text-sm font-semibold">Заряд</span>
+        <span className="tabular text-xs text-muted">
+          {charge} из {threshold}
+        </span>
+      </div>
+
+      <div
+        className="h-2 overflow-hidden rounded-full bg-tint"
+        role="progressbar"
+        aria-valuenow={Math.min(charge, threshold)}
+        aria-valuemin={0}
+        aria-valuemax={threshold}
+        aria-label="Заряд бомбы"
+      >
+        <div
+          className="h-full rounded-full bg-accent transition-[width]"
+          style={{ width: `${Math.min(100, (charge / threshold) * 100)}%` }}
+        />
+      </div>
+
+      {!ready ? (
+        <p className="text-xs text-muted">
+          Шкалу видишь только ты. Режь фигуры — за них дают очки.
+        </p>
+      ) : confirming ? (
+        <div className="flex gap-2">
+          <button
+            type="button"
+            onClick={onBomb}
+            className="flex-1 rounded-lg bg-accent px-3 py-2 text-sm font-semibold text-surface transition hover:bg-deep"
+          >
+            Сбросить
+          </button>
+          <button
+            type="button"
+            onClick={() => setConfirming(false)}
+            className="flex-1 rounded-lg border border-line px-3 py-2 text-sm font-semibold text-muted transition hover:text-ink"
+          >
+            Ещё поиграю
+          </button>
+        </div>
+      ) : (
+        <button
+          type="button"
+          onClick={() => setConfirming(true)}
+          disabled={!myTurn}
+          className="rounded-lg border border-accent bg-tint px-3 py-2 text-sm font-semibold text-accent transition hover:bg-accent-soft/20 disabled:opacity-50"
+        >
+          {myTurn ? "Бомба готова" : "Бомба готова — жди хода"}
+        </button>
+      )}
+    </div>
+  );
+}
+
+function Seat({
+  state,
+  side,
+  clockOffset,
+  you,
+  onCallBot,
+}: {
+  state: TurboStatePayload;
+  side: Side;
+  clockOffset: number;
+  you: string;
+  /** Позвать программу на это место; нет — звать некому. */
+  onCallBot?: () => Promise<void>;
+}) {
+  const player: TurboPlayerPayload | undefined = state.players.find(
+    (candidate) => candidate.seat === side,
+  );
+
+  if (!player) {
+    return (
+      <div className="flex items-center justify-between gap-3 rounded-xl border border-dashed border-line px-4 py-3 text-sm text-muted">
+        <span>{sideName(side, state.seats)}: ждём игрока</span>
+        {/* Звать бота имеет смысл, только пока партия не началась: садится он
+            на свободное место, а посреди партии свободных мест не бывает. */}
+        {onCallBot && state.phase === "waiting" ? (
+          <button
+            type="button"
+            onClick={() => void onCallBot()}
+            className="rounded-lg border border-line px-2 py-1 text-xs font-semibold text-accent hover:bg-tint"
+          >
+            Позвать бота
+          </button>
+        ) : null}
+      </div>
+    );
+  }
+
+  const active = state.phase === "playing" && state.turn === side;
+
+  return (
+    <div
+      className={`flex flex-col gap-2 rounded-xl border bg-paper p-3 ${active ? "border-accent" : "border-line"}`}
+    >
+      <div className="flex items-center gap-3">
+        <Avatar id={player.avatarId} size={36} />
+        <div className="flex-1">
+          <div className="text-sm font-semibold">
+            {player.nickname}
+            {player.id === you ? " (ты)" : ""}
+          </div>
+          <div className="text-xs text-muted">
+            {sideName(side, state.seats)}
+            {player.away ? " · вышел" : ""}
+            {state.phase === "setup" && state.setupReady[side]
+              ? " · готов"
+              : ""}
+            {/*
+              Счёт взятых — у места, а не общей строкой: считать в уме, кто
+              кого обогнал, посреди резни некогда.
+            */}
+            {state.mode === "ANNIHILATION" && state.position
+              ? ` · снял фигур: ${takenCount(state.position, side)}`
+              : ""}
+            {state.mode === "BOOZE"
+              ? ` · выпито: ${state.drinks[side] ?? 0}`
+              : ""}
+            {state.mode === "LAST_CHANCE" && state.position
+              ? (state.position.chances[side] ?? 0) > 0
+                ? " · шанс есть"
+                : " · шанс истрачен"
+              : ""}
+          </div>
+        </div>
+      </div>
+
+      {active ? (
+        <Countdown
+          deadline={state.deadline}
+          durationMs={state.phaseDurationMs}
+          clockOffset={clockOffset}
+        />
+      ) : null}
+    </div>
+  );
+}
+
+/** Ходы парами: белые слева, чёрные справа. Отменённые — перечёркнуты. */
+function Moves({
+  moves,
+  vetoed,
+  seats = 2,
+  at,
+  onPick,
+}: {
+  moves: string[];
+  vetoed: { ply: number; san: string }[];
+  /** Сколько мест за столом: вчетвером в строке четыре хода, а не два. */
+  seats?: number;
+  /** Какой полуход сейчас в перемотке; `null` — живая доска. */
+  at: number | null;
+  /** Показать доску после этого полухода. */
+  onPick: (ply: number) => void;
+}) {
+  /** Что отменили перед этим полуходом. */
+  const cancelled = (ply: number) =>
+    vetoed.filter((one) => one.ply === ply).map((one) => one.san);
+
+  return (
+    <div className="rounded-xl border border-line bg-paper px-4 py-3">
+      {moves.length === 0 ? (
+        <p className="text-sm text-muted">Ходов пока нет.</p>
+      ) : (
+        <ol
+          className="grid max-h-48 gap-x-3 gap-y-1 overflow-y-auto text-sm"
+          style={{
+            gridTemplateColumns: `auto repeat(${seats}, minmax(0, 1fr))`,
+          }}
+        >
+          {Array.from(
+            { length: Math.ceil(moves.length / seats) },
+            (_, round) => (
+              <li key={round} className="contents">
+                <span className="tabular text-muted">{round + 1}.</span>
+                {Array.from({ length: seats }, (_, seat) => {
+                  const ply = round * seats + seat;
+                  return (
+                    <span key={seat} className="tabular">
+                      {cancelled(ply + 1).map((san) => (
+                        <s key={san} className="mr-1 text-muted">
+                          {san}
+                        </s>
+                      ))}
+                      {moves[ply] ? (
+                        <button
+                          type="button"
+                          onClick={() => onPick(ply + 1)}
+                          aria-current={at === ply + 1 ? "step" : undefined}
+                          className={`rounded px-1 transition hover:bg-tint ${
+                            at === ply + 1 ? "bg-accent text-surface" : ""
+                          }`}
+                        >
+                          {moves[ply]}
+                        </button>
+                      ) : null}
+                    </span>
+                  );
+                })}
+              </li>
+            ),
+          )}
+        </ol>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Перемотка под доской: в начало, назад, вперёд, к живой партии. Пока
+ * смотришь прошлый ход, доска только показывает, а часы идут своим чередом —
+ * поэтому возврат к партии на виду, а не в углу.
+ */
+function Rewind({
+  at,
+  last,
+  onGo,
+}: {
+  at: number | null;
+  last: number;
+  onGo: (ply: number) => void;
+}) {
+  if (last <= 0) return null;
+
+  const current = at ?? last;
+  const step =
+    "flex size-10 items-center justify-center rounded-xl border border-line bg-paper text-lg font-semibold text-muted transition hover:border-accent hover:text-accent disabled:opacity-40";
+
+  return (
+    <div className="mt-2 flex items-center gap-2">
+      <button
+        type="button"
+        aria-label="К началу партии"
+        onClick={() => onGo(0)}
+        disabled={current === 0}
+        className={step}
+      >
+        «
+      </button>
+      <button
+        type="button"
+        aria-label="Ход назад"
+        onClick={() => onGo(current - 1)}
+        disabled={current === 0}
+        className={step}
+      >
+        ‹
+      </button>
+
+      {at === null ? (
+        <span className="flex-1 text-center text-xs text-muted">
+          партия идёт · стрелки листают ходы
+        </span>
+      ) : (
+        <button
+          type="button"
+          onClick={() => onGo(last)}
+          className="flex-1 rounded-xl bg-accent px-3 py-2 text-sm font-semibold text-surface transition hover:bg-deep"
+        >
+          <span className="tabular">
+            Ход {current} из {last}
+          </span>{" "}
+          · к партии
+        </button>
+      )}
+
+      <button
+        type="button"
+        aria-label="Ход вперёд"
+        onClick={() => onGo(current + 1)}
+        disabled={at === null}
+        className={step}
+      >
+        ›
+      </button>
+      <button
+        type="button"
+        aria-label="К последнему ходу"
+        onClick={() => onGo(last)}
+        disabled={at === null}
+        className={step}
+      >
+        »
+      </button>
+    </div>
+  );
+}
+
+/**
+ * Кадр перемотки как позиция для доски. Кадр знает только расстановку, ход и
+ * очередь, поэтому всё остальное — эффекты, резерв, рокировки — гасится:
+ * доска в перемотке показывает, как стояли фигуры, и не подсказывает ходов.
+ */
+function frameAt(position: Position, frame: ReplayFrame): Position {
+  return {
+    ...position,
+    board: frame.board,
+    turn: frame.turn,
+    effects: [],
+    enPassant: null,
+    castling: [],
+    reserve: position.reserve.map(() => []),
+    pending: [],
+  };
+}
+
+function Controls({
+  claimable,
+  offer,
+  mySide,
+  onClaim,
+  onOffer,
+  onDecline,
+  onResign,
+}: {
+  claimable: boolean;
+  /** Кто предложил ничью и ждёт ответа. */
+  offer: Side | null;
+  mySide: Side;
+  onClaim: () => void;
+  onOffer: () => void;
+  onDecline: () => void;
+  onResign: () => void;
+}) {
+  const [confirming, setConfirming] = useState(false);
+  const theirs = offer !== null && offer !== mySide;
+
+  return (
+    <div className="flex flex-col gap-2">
+      {claimable ? (
+        <button
+          type="button"
+          onClick={onClaim}
+          className="rounded-lg border border-accent bg-tint px-3 py-2 text-sm font-semibold text-accent transition hover:bg-accent-soft/20"
+        >
+          Требовать ничью
+        </button>
+      ) : null}
+
+      {theirs ? (
+        <div className="flex flex-col gap-2 rounded-lg border border-accent bg-tint px-3 py-2">
+          <span className="text-xs text-accent">Соперник предлагает ничью</span>
+          <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={onOffer}
+              className="flex-1 rounded-lg bg-accent px-3 py-1.5 text-sm font-semibold text-surface transition hover:bg-deep"
+            >
+              Согласиться
+            </button>
+            <button
+              type="button"
+              onClick={onDecline}
+              className="flex-1 rounded-lg border border-line px-3 py-1.5 text-sm font-semibold text-muted transition hover:text-ink"
+            >
+              Играем
+            </button>
+          </div>
+        </div>
+      ) : (
+        <button
+          type="button"
+          onClick={onOffer}
+          disabled={offer === mySide}
+          className="rounded-lg border border-line px-3 py-2 text-sm font-semibold text-muted transition hover:border-accent hover:text-accent disabled:opacity-50"
+        >
+          {offer === mySide ? "Ничья предложена" : "Предложить ничью"}
+        </button>
+      )}
+
+      {/*
+        Сдача стоит отдельно от ничьей и с подтверждением: рядом эти кнопки —
+        прямой путь к промаху пальцем, а цена промаха — партия.
+      */}
+      {confirming ? (
+        <div className="mt-3 flex gap-2">
+          <button
+            type="button"
+            onClick={onResign}
+            className="flex-1 rounded-lg bg-accent px-3 py-2 text-sm font-semibold text-surface transition hover:bg-deep"
+          >
+            Сдаюсь
+          </button>
+          <button
+            type="button"
+            onClick={() => setConfirming(false)}
+            className="flex-1 rounded-lg border border-line px-3 py-2 text-sm font-semibold text-muted transition hover:text-ink"
+          >
+            Играю
+          </button>
+        </div>
+      ) : (
+        <button
+          type="button"
+          onClick={() => setConfirming(true)}
+          className="mt-3 rounded-lg border border-line px-3 py-2 text-sm font-semibold text-muted transition hover:border-accent hover:text-accent"
+        >
+          Сдаться
+        </button>
+      )}
+    </div>
+  );
+}
+
+function Result({
+  state,
+  mySide,
+  onRematch,
+}: {
+  state: TurboStatePayload;
+  mySide: Side | null;
+  onRematch: () => void;
+}) {
+  const { result, reason } = state;
+  const title =
+    result === "draw"
+      ? "Ничья"
+      : result === null
+        ? "Партия кончилась"
+        : result === mySide
+          ? "Победа"
+          : mySide !== null
+            ? "Поражение"
+            : `Победа: ${sideName(result, state.seats)}`;
+  const full = state.players.length >= state.seats;
+
+  return (
+    <div className="flex flex-col gap-3 rounded-xl border border-accent bg-tint px-4 py-3">
+      <div>
+        <div className="text-sm font-semibold text-accent">{title}</div>
+        <div className="text-xs text-muted">
+          {reason ? REASON_TEXT[reason] : ""}
+        </div>
+      </div>
+
+      {mySide !== null && full ? (
+        <button
+          type="button"
+          onClick={onRematch}
+          className="rounded-lg bg-accent px-3 py-2 text-sm font-semibold text-surface transition hover:bg-deep"
+        >
+          Ещё партия, местами меняемся
+        </button>
+      ) : mySide !== null ? (
+        <p className="text-xs text-muted">
+          Соперник ушёл. Позови нового — партия начнётся, как только он сядет.
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
+function Notice({ title, text }: { title: string; text: string }) {
+  return (
+    <main className="flex flex-1 flex-col items-center justify-center gap-3 px-6 py-16 text-center">
+      <h1 className="text-xl font-semibold">{title}</h1>
+      <p className="max-w-sm text-balance text-sm text-muted">{text}</p>
+    </main>
+  );
+}

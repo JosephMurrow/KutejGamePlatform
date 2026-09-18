@@ -23,13 +23,22 @@ const CSS = readFileSync(
   // разбор блока на середине.
 ).replace(/\/\*[\s\S]*?\*\//g, "");
 
-/** Значение `--color-surface` в блоке с таким селектором. */
+/**
+ * Значение `--color-surface` в блоке с таким селектором. Селектор может стоять
+ * в списке через запятую: тема игры объявлена и для `body`, пока игра на
+ * странице (globals.css).
+ */
 function surfaceOf(selector: string): string | null {
-  const start = CSS.indexOf(`${selector} {`);
+  const start = CSS.indexOf(selector);
   if (start < 0) return null;
 
-  const end = CSS.indexOf("}", start);
-  const block = CSS.slice(start, end);
+  const open = CSS.indexOf("{", start);
+  // Между селектором и скобкой — только остальные селекторы списка, а не
+  // конец чужого блока.
+  if (open < 0 || CSS.slice(start, open).includes("}")) return null;
+
+  const end = CSS.indexOf("}", open);
+  const block = CSS.slice(open, end);
   return block.match(/--color-surface:\s*(#[0-9a-fA-F]{3,8})/)?.[1] ?? null;
 }
 

@@ -1,0 +1,389 @@
+import { CLASSIC, squareAt, type Geometry, type Vec } from "./geometry";
+import { piece, type Piece, type PieceKind, type Side } from "./pieces";
+
+/**
+ * Позиция — всё, что нужно правилам, чтобы решить, какие ходы есть.
+ *
+ * FEN тут не годится: он не описывает ни доску 16×16, ни четыре стороны, ни
+ * резерв, ни мега-фигуры (docs/BACKLOG.md B2). Поэтому позиция — объект, и он
+ * неизменяемый: ход даёт новую позицию, а старая остаётся, какой была. На
+ * этом держится и ход назад, и перебор ботов, и запись партии.
+ */
+
+/** Что правила знают о стороне, кроме её фигур. */
+export interface SideRules {
+  /** Куда ходят пешки: у белых вверх, у чёрных вниз. */
+  readonly forward: Vec;
+}
+
+/**
+ * Чем кончается партия. Отсюда же следует, королевский ли король: где цель не
+ * мат, он обычная фигура, которую бьют.
+ */
+export type Goal =
+  /** Обычная цель — мат. */
+  | "mate"
+  /** Снять с доски все фигуры соперника (docs/MODES.md, режим 3). */
+  | "wipe"
+  /** Скормить сопернику своего короля (docs/MODES.md, режим 11). */
+  | "feed"
+  /**
+   * Все против всех: заматованный выбывает и уносит фигуры, побеждает
+   * последний оставшийся (docs/MODES.md, режим 9).
+   */
+  | "battle";
+
+/**
+ * Правила режима, которые нужны самой доске.
+ *
+ * Лежат в позиции, а не в комнате, потому что законные ходы считает и клиент:
+ * доска подсказывает ходы тем же `legalMoves` по позиции из снимка
+ * (components/Board.tsx). Положи правило мимо позиции — и клиент подсветит не
+ * то, что примет сервер.
+ */
+export interface PositionRules {
+  readonly goal: Goal;
+  /** Есть чем взять — брать обязательно, как в шашках. */
+  readonly mustCapture: boolean;
+  /** Назад не ходят: из восьми направлений остаются пять (режим 6). */
+  readonly forwardOnly: boolean;
+  /** Ходов нет: ничья по пату или поражение тому, кому ходить нечем. */
+  readonly stalemate: "draw" | "loss";
+  /**
+   * Дошёл до первой горизонтали соперника — получил мега-форму, а король
+   * этим выигрывает. Превращения пешки в таких правилах нет (режим 4).
+   */
+  readonly mega: boolean;
+  /**
+   * Взятая фигура через три хода переходит срубившему в резерв
+   * (docs/MODES.md, режим 14).
+   */
+  readonly zombies: boolean;
+  /**
+   * Мат не кончает партию, пока у заматованного есть неистраченный шанс:
+   * он жмёт кнопку и телепортирует короля (docs/MODES.md, режим 7).
+   */
+  readonly lastChance: boolean;
+  /**
+   * Мат не кончает партию, пока есть чем сказать «НЕТ»: отменил ход —
+   * играешь дальше (docs/MODES.md, режим 15).
+   */
+  readonly anarchy: boolean;
+}
+
+/** Правила обычных шахмат: мат, взятие по желанию, мёртвые не встают. */
+export const CLASSIC_RULES: PositionRules = {
+  goal: "mate",
+  mustCapture: false,
+  forwardOnly: false,
+  stalemate: "draw",
+  mega: false,
+  zombies: false,
+  lastChance: false,
+  anarchy: false,
+};
+
+/**
+ * Чем правила партии отличаются от обычных прямо сейчас: событие «Загула»
+ * гнёт их на несколько ходов (docs/MODES.md, режим 12).
+ *
+ * Лежит в позиции по той же причине, что и остальные правила: законные ходы
+ * считает ещё и браузер, и подсветка должна совпадать с тем, что примет
+ * сервер. Показные эффекты — перевёрнутая доска, потушенная подсветка, урезанное
+ * время — лежат там же: они живут по тому же счётчику ходов, и разносить их по
+ * двум местам значило бы считать одно и то же дважды.
+ */
+export type EffectKind =
+  /** «Разгон»: пешки ходят на три клетки. */
+  | "rush"
+  /** «Похмелье»: ходить обязан той же фигурой, что и прошлый раз. */
+  | "hangover"
+  /** «Тремор»: доска показана вверх ногами — обоим. */
+  | "tremor"
+  /** «Слепота»: ходы не подсвечиваются. */
+  | "blind"
+  /** «Заплетается»: пешки ходят вбок на одну клетку без взятия. */
+  | "stagger"
+  /** «Занос»: кони ходят как слоны, слоны — как кони. */
+  | "skid"
+  /** «Кураж»: ближайшее взятие даёт лишний ход. */
+  | "swagger"
+  /** «Кабак закрыт»: ни рокировки, ни взятия на проходе. */
+  | "closed"
+  /** «Сушняк»: меньше времени на ход. Правил не гнёт — их гнут часы у стола. */
+  | "thirst"
+  /**
+   * «Чужими руками»: ход за эту сторону делает компьютер. Правил тоже не
+   * гнёт — ходит комната, и ходит тем же законным ходом.
+   */
+  | "puppet";
+
+export interface Effect {
+  readonly kind: EffectKind;
+  /**
+   * Кого касается. `null` — обе стороны, и тогда счёт идёт по всем полуходам;
+   * иначе считаются только ходы этой стороны, чтобы лишний ход соперника не
+   * съедал чужой эффект.
+   */
+  readonly side: Side | null;
+  /** Сколько ходов ещё действует. У «Куража» это взятия, а не ходы. */
+  readonly left: number;
+  /** Клетка фигуры, которой обязаны ходить («Похмелье»). */
+  readonly square?: number;
+}
+
+/**
+ * Действует ли сейчас такой эффект. Без стороны — вопрос «есть ли вообще»,
+ * со стороной — «касается ли он этой стороны»: общий эффект касается всех.
+ */
+export function bent(
+  position: Position,
+  kind: EffectKind,
+  side?: Side,
+): Effect | null {
+  return (
+    position.effects.find(
+      (effect) =>
+        effect.kind === kind &&
+        (effect.side === null || side === undefined || effect.side === side),
+    ) ?? null
+  );
+}
+
+/** Сколько своих ходов хозяину ждать, прежде чем зомби встанет в резерв. */
+export const ZOMBIE_DELAY = 3;
+
+/** Фигура в очереди на воскрешение. */
+export interface Zombie {
+  readonly kind: PieceKind;
+  /** Кто её срубил — к тому она и придёт, и его цветом. */
+  readonly side: Side;
+  /** Сколько ходов хозяину ещё сделать; ноль — уже в резерве. */
+  readonly left: number;
+}
+
+/**
+ * Сколько полуходов без взятия останавливают партию там, где цель — снять всё.
+ * Без этого две уцелевшие фигуры бегали бы друг от друга вечно.
+ */
+export const STALL_PLIES = 50;
+
+/**
+ * Король королевский: ходить под шах нельзя, из-под шаха обязан выйти, мат
+ * кончает партию. Где цель другая, шаха нет как понятия — ни в отсеве ходов,
+ * ни в записи, ни в подсветке.
+ */
+export function kingIsRoyal(position: Position): boolean {
+  const goal = position.rules.goal;
+  return goal === "mate" || goal === "battle";
+}
+
+/**
+ * Право рокировки: какой король с какой ладьёй и куда они встают.
+ *
+ * Клетками, а не буквами `KQkq`: так рокировка не привязана ни к углам доски
+ * 8×8, ни к двум сторонам.
+ */
+export interface CastleRight {
+  readonly side: Side;
+  readonly king: number;
+  readonly rook: number;
+  readonly kingTo: number;
+  readonly rookTo: number;
+}
+
+/** Пешка только что прошла на два поля — её можно взять на проходе. */
+export interface EnPassant {
+  /** Поле, через которое она прошла: туда и бьют. */
+  readonly target: number;
+  /** Где она стоит. */
+  readonly victim: number;
+}
+
+export interface Position {
+  readonly geometry: Geometry;
+  readonly sides: readonly SideRules[];
+  /** Правила режима, которые нужны доске: цель партии и обязательное взятие. */
+  readonly rules: PositionRules;
+  readonly board: readonly (Piece | null)[];
+  readonly turn: Side;
+  readonly castling: readonly CastleRight[];
+  readonly enPassant: EnPassant | null;
+  /**
+   * Полуходы без взятий и ходов пешкой — по ним правила пятидесяти и
+   * семидесяти пяти ходов.
+   */
+  readonly quiet: number;
+  /**
+   * Полуходы без взятий — по ним останавливается партия там, где цель снять
+   * все фигуры. Не то же, что `quiet`: тот сбрасывается и ходом пешки.
+   */
+  readonly sinceCapture: number;
+  /**
+   * Что забрала каждая сторона, по порядку. По этому списку доска рисует
+   * взятые фигуры, а режимы считают убийства, очки и резерв
+   * (docs/MODES.md, режимы 3, 8, 13, 14).
+   */
+  readonly taken: readonly (readonly Piece[])[];
+  /**
+   * Что каждая сторона может выставить на доску вместо хода: подкрепление и
+   * доспевшие зомби (docs/MODES.md, режимы 2 и 14).
+   */
+  readonly reserve: readonly (readonly PieceKind[])[];
+  /** Зомби, которым до резерва ещё несколько ходов их нового хозяина. */
+  readonly pending: readonly Zombie[];
+  /**
+   * Сколько последних шансов осталось каждой стороне. Пусто — их нет вовсе
+   * (docs/MODES.md, режим 7).
+   */
+  readonly chances: readonly number[];
+  /** Сколько «НЕТ» осталось каждой стороне; пусто — их нет вовсе. */
+  readonly vetoes: readonly number[];
+  /**
+   * Сколько очков каждая сторона уже потратила на чёрном рынке: набранное
+   * считается по взятым фигурам, а это — расход (docs/MODES.md, режим 13).
+   */
+  readonly spent: readonly number[];
+  /** Купленные дополнительные ходы: пока их банк не пуст, очередь не уходит. */
+  readonly extra: readonly number[];
+  /**
+   * Ход, который только что отменили: повторить его нельзя, соперник обязан
+   * сходить иначе (docs/MODES.md, режим 15).
+   */
+  readonly banned: BannedMove | null;
+  /** Что «Загул» согнул в правилах прямо сейчас (docs/MODES.md, режим 12). */
+  readonly effects: readonly Effect[];
+}
+
+/** Отменённый ход: те же клетки и та же фигура превращения. */
+export interface BannedMove {
+  readonly from: number;
+  readonly to: number;
+  readonly promotion: PieceKind | null;
+}
+
+/** Белые ходят вверх, чёрные вниз. */
+export const TWO_SIDES: readonly SideRules[] = [
+  { forward: [0, 1] },
+  { forward: [0, -1] },
+];
+
+/**
+ * Четыре стороны королевской битвы: юг, запад, север, восток. Порядок хода —
+ * по часовой, как решил хозяин, и он же порядок этого списка.
+ */
+export const FOUR_SIDES: readonly SideRules[] = [
+  { forward: [0, 1] },
+  { forward: [1, 0] },
+  { forward: [0, -1] },
+  { forward: [-1, 0] },
+];
+
+/** Жива ли сторона: выбывшая уносит фигуры, и короля у неё нет. */
+export function alive(position: Position, side: Side): boolean {
+  return position.board.some(
+    (cell) => cell?.kind === "k" && cell.side === side,
+  );
+}
+
+const BACK_RANK: readonly PieceKind[] = [
+  "r",
+  "n",
+  "b",
+  "q",
+  "k",
+  "b",
+  "n",
+  "r",
+];
+
+/** Обычная начальная расстановка. */
+export function classicPosition(): Position {
+  const geometry = CLASSIC;
+  const board: (Piece | null)[] = Array.from(
+    { length: geometry.width * geometry.height },
+    () => null,
+  );
+
+  BACK_RANK.forEach((kind, x) => {
+    board[squareAt(geometry, x, 0)] = piece(kind, 0);
+    board[squareAt(geometry, x, 1)] = piece("p", 0);
+    board[squareAt(geometry, x, 6)] = piece("p", 1);
+    board[squareAt(geometry, x, 7)] = piece(kind, 1);
+  });
+
+  return {
+    geometry,
+    sides: TWO_SIDES,
+    rules: CLASSIC_RULES,
+    board,
+    turn: 0,
+    castling: classicCastling(geometry, [0, 1]),
+    enPassant: null,
+    quiet: 0,
+    sinceCapture: 0,
+    taken: [[], []],
+    reserve: [[], []],
+    pending: [],
+    chances: [],
+    vetoes: [],
+    spent: [],
+    extra: [],
+    banned: null,
+    effects: [],
+  };
+}
+
+/**
+ * Обычные права рокировки: король с вертикали `e`, ладьи в углах, король
+ * встаёт на `g` или `c`, ладья — рядом с ним.
+ */
+export function classicCastling(
+  geometry: Geometry,
+  sides: readonly Side[],
+): CastleRight[] {
+  return sides.flatMap((side) => {
+    const y = side === 0 ? 0 : geometry.height - 1;
+    const at = (x: number) => squareAt(geometry, x, y);
+
+    return [
+      { side, king: at(4), rook: at(7), kingTo: at(6), rookTo: at(5) },
+      { side, king: at(4), rook: at(0), kingTo: at(2), rookTo: at(3) },
+    ];
+  });
+}
+
+/**
+ * Права рокировки для расстановки: обычные права, но только там, где король и
+ * ладья и правда стоят на своих местах. Одновидовые шахматы без ладей в углах
+ * рокировки не имеют — так же, как её не даёт FEN без букв `KQkq`.
+ */
+export function castlingFor(
+  geometry: Geometry,
+  board: readonly (Piece | null)[],
+): CastleRight[] {
+  return classicCastling(geometry, [0, 1]).filter((right) => {
+    const king = board[right.king];
+    const rook = board[right.rook];
+    return (
+      king?.kind === "k" &&
+      king.side === right.side &&
+      rook?.kind === "r" &&
+      rook.side === right.side
+    );
+  });
+}
+
+/** Чья очередь после этой стороны — по кругу, мимо выбывших. */
+export function nextSide(position: Position, side: Side): Side {
+  const sides = position.sides.length;
+  if (position.rules.goal !== "battle") return (side + 1) % sides;
+
+  // В битве стол обходится по часовой и перешагивает тех, кто уже выбыл.
+  for (let step = 1; step <= sides; step++) {
+    const next = (side + step) % sides;
+    if (alive(position, next)) return next;
+  }
+
+  return side;
+}

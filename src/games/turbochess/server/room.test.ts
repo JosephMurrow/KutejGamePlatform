@@ -1,0 +1,1823 @@
+import assert from "node:assert/strict";
+import { describe, it } from "node:test";
+import type { GameRoomContext, GameRoomEvent } from "@/lib/games/engine";
+import { squareName } from "../engine/geometry";
+import { attacked, legalMoves, play, type Move } from "../engine/moves";
+import type { Position } from "../engine/position";
+import { decodeReplay, type Replay } from "../engine/replay";
+import { TurboGame } from "../engine/game";
+import { PIECE_VALUE, nuclearCharge } from "../modes/nuclear";
+import { BINGE_CARD_MS, bingeLeft, freshDecks, puppeted } from "../modes/binge";
+import { TOAST_MS } from "../modes/booze";
+import { modeInfo, type TurboMode } from "../modes/catalog";
+import { BOT_AVATAR_OFFSET } from "../bots/avatars";
+import type { LevelId } from "../bots/levels";
+import { makeBots } from "../bots/seat";
+import { SHOWDOWN_SETUP_MS } from "../modes/showdown";
+import type {
+  ModeOptions,
+  TimeControl,
+  TurboRoomSettings,
+} from "../rooms/settings";
+import { GAME_EVENT } from "../protocol";
+import { createTurboServer } from ".";
+import { ClosedHall } from "./hall";
+import { TurboRoom, type MatchDraft } from "./room";
+
+/**
+ * Комната без сети: платформу изображает поддельный контекст, время —
+ * управляемые монотонные часы. Так проверяется весь стык, кроме сокета, а
+ * сокет проверяет смоук.
+ */
+
+function setup(timeControl: TimeControl = "SEC_30") {
+  let at = 1000;
+  const changes: number[] = [];
+  const events: GameRoomEvent[] = [];
+  const drafts: MatchDraft[] = [];
+  const settings: TurboRoomSettings = {
+    mode: "CLASSIC",
+    timeControl,
+    options: {},
+    bots: 0,
+    botLevel: "normal",
+  };
+  const context: GameRoomContext = {
+    key: "turbo-test",
+    ownerId: "host",
+    isPrivate: true,
+    settings,
+    connections: () => 2,
+    introduce: () => {},
+    forget: () => {},
+    emitted: (list) => events.push(...list),
+    changed: () => changes.push(at),
+  };
+  const room = new TurboRoom(
+    context,
+    settings,
+    () => at,
+    (draft) => drafts.push(draft),
+  );
+
+  return {
+    room,
+    changes,
+    events,
+    drafts,
+    pass: (ms: number) => {
+      at += ms;
+    },
+  };
+}
+
+/** Посадить двоих: первый — белые, второй — чёрные. */
+function seated(timeControl?: TimeControl) {
+  const table = setup(timeControl);
+  table.room.join("white");
+  table.room.join("black");
+  return table;
+}
+
+function view(room: TurboRoom, viewer = "white") {
+  return room.snapshot({ kind: "player", id: viewer }).extra;
+}
+
+function move(
+  room: TurboRoom,
+  player: string,
+  from: string,
+  to: string,
+  promotion?: string,
+) {
+  const ply = (view(room).moves as string[]).length;
+  return room.act(GAME_EVENT.move, player, {
+    from,
+    to,
+    ply,
+    ...(promotion ? { promotion } : {}),
+  });
+}
+
+/**
+ * Как ходить за человека в проверках, где важно не «кто выиграл», а что
+ * фигуры встретились: взятие, размен, чужой ход в ответ.
+ *
+ * Бот ходит по зерну комнаты, а оно у каждой партии своё, — поэтому ждать
+ * встречи «когда-нибудь само» нельзя: так проверка падала раз в шесть
+ * прогонов. Человек её устраивает нарочно.
+ */
+
+/** Взять, если есть чем. */
+function grab(position: Position): Move | null {
+  return legalMoves(position).find((move) => move.captured) ?? null;
+}
+
+/**
+ * Ход, после которого сопернику есть что срубить даром: отбивать его взятие
+ * будет нечем, и даже слабый бот на такое польстится.
+ */
+function offer(position: Position): Move | null {
+  let best: { move: Move; gain: number } | null = null;
+
+  for (const move of legalMoves(position)) {
+    if (move.from < 0) continue;
+    const after = play(position, move);
+
+    for (const answer of legalMoves(after)) {
+      if (!answer.captured) continue;
+
+      const gain = PIECE_VALUE[answer.captured.kind] ?? 0;
+      if (gain <= (best?.gain ?? 0)) continue;
+      // Даром — значит отбивать нечем: размен бот посчитает и брать не станет.
+      if (attacked(play(after, answer), answer.to, after.turn)) continue;
+
+      best = { move, gain };
+    }
+  }
+
+  return best?.move ?? null;
+}
+
+/** Ход, после которого мы сами кого-нибудь бьём: фигуры идут на сближение. */
+function approach(position: Position): Move | null {
+  let best: { move: Move; hits: number } | null = null;
+
+  for (const move of legalMoves(position)) {
+    if (move.from < 0) continue;
+    const after = play(position, move);
+    const hits = after.board.filter(
+      (cell, square) =>
+        cell?.side === after.turn && attacked(after, square, after.turn),
+    ).length;
+
+    if (hits > (best?.hits ?? 0)) best = { move, hits };
+  }
+
+  return best?.move ?? null;
+}
+
+/** Отправить ход человека — тот, что выбрали помощники выше. */
+function send(room: TurboRoom, position: Position, pick: Move, ply: number) {
+  return room.act(GAME_EVENT.move, "human", {
+    from: squareName(position.geometry, pick.from),
+    to: squareName(position.geometry, pick.to),
+    ply,
+    ...(pick.promotion ? { promotion: pick.promotion } : {}),
+  });
+}
+
+describe("посадка", () => {
+  it("садятся двое, третий смотрит; партия начинается, когда стол полон", () => {
+    const { room } = setup();
+    room.join("white");
+    assert.equal(view(room).phase, "waiting");
+    assert.equal(view(room).turn, null, "ходить ещё некому");
+
+    room.join("black");
+    room.join("watcher");
+
+    assert.deepEqual(room.seated(), ["white", "black"]);
+    assert.equal(view(room).phase, "playing");
+    assert.equal(view(room).turn, 0);
+    assert.equal(view(room).seats, 2);
+  });
+
+  it("до партии ушедший освобождает место", () => {
+    const { room } = setup();
+    room.join("white");
+    room.leave("white");
+    room.join("black");
+
+    assert.deepEqual(room.seated(), ["black"]);
+    assert.equal(view(room, "black").phase, "waiting");
+  });
+
+  it("позиция в снимке есть и до начала партии", () => {
+    const { room } = setup();
+    room.join("white");
+
+    const position = view(room).position as { board: unknown[] };
+    assert.equal(position.board.length, 64);
+  });
+});
+
+describe("ходы", () => {
+  it("принятый ход меняет очередь и попадает в запись", () => {
+    const { room, changes } = seated();
+    const before = changes.length;
+
+    assert.deepEqual(move(room, "white", "e2", "e4"), { accepted: true });
+    assert.deepEqual(view(room).moves, ["e4"]);
+    assert.deepEqual(view(room).lastMove, { from: "e2", to: "e4" });
+    assert.equal(view(room).turn, 1);
+    assert.ok(changes.length > before, "платформа узнала о ходе");
+  });
+
+  it("в снимке — кадры перемотки, по одному на ход", () => {
+    const { room } = seated();
+    move(room, "white", "e2", "e4");
+    move(room, "black", "e7", "e5");
+
+    const frames = decodeReplay(view(room).replay as Replay);
+    assert.equal(frames.length, 3, "начало и два хода");
+    assert.deepEqual(frames.at(-1)?.lastMove, { from: "e7", to: "e5" });
+  });
+
+  it("отказы — внятным текстом", () => {
+    const { room } = seated();
+
+    assert.equal(move(room, "watcher", "e2", "e4").reason, "Ты не за доской");
+    assert.equal(move(room, "black", "e7", "e5").reason, "Сейчас не твой ход");
+    assert.equal(move(room, "white", "e2", "e5").reason, "Так не ходят");
+    assert.equal(
+      room.act(GAME_EVENT.move, "white", { from: "e2", to: "e4", ply: 5 })
+        .reason,
+      "Этот ход уже сделан",
+    );
+    assert.equal(
+      room.act(GAME_EVENT.move, "white", { from: 1, to: "e4", ply: 0 }).reason,
+      "Непонятный ход",
+    );
+    assert.equal(
+      room.act(GAME_EVENT.move, "white", "e2e4").reason,
+      "Непонятный ход",
+    );
+  });
+
+  it("до второго игрока ходить нельзя", () => {
+    const { room } = setup();
+    room.join("white");
+
+    assert.equal(move(room, "white", "e2", "e4").reason, "Соперник ещё не сел");
+  });
+
+  it("считает, сколько думали над ходом", () => {
+    const { room, pass, drafts } = seated();
+    pass(1500);
+    move(room, "white", "e2", "e4");
+    pass(700);
+    move(room, "black", "e7", "e5");
+    room.act(GAME_EVENT.resign, "white", {});
+
+    assert.deepEqual(drafts[0]?.times, [1500, 700]);
+  });
+});
+
+describe("часы", () => {
+  it("идут только в партии; без лимита будильника нет вовсе", () => {
+    const waiting = setup();
+    waiting.room.join("white");
+    assert.equal(waiting.room.deadline(), null);
+
+    assert.notEqual(seated("SEC_30").room.deadline(), null);
+    assert.equal(seated("UNLIMITED").room.deadline(), null);
+  });
+
+  it("флаг — поражение того, чья очередь", () => {
+    const { room, pass, drafts } = seated("SEC_10");
+    move(room, "white", "e2", "e4");
+    pass(10_000);
+    room.tick();
+
+    assert.equal(view(room).phase, "over");
+    assert.equal(view(room).result, 0);
+    assert.equal(view(room).reason, "flag");
+    assert.equal(drafts.length, 1);
+  });
+
+  it("после хода счёт начинается заново", () => {
+    const { room, pass } = seated("SEC_10");
+    pass(9000);
+    move(room, "white", "e2", "e4");
+    pass(9000);
+    room.tick();
+
+    assert.equal(view(room).phase, "playing");
+  });
+});
+
+describe("уход и возврат", () => {
+  it("посреди партии место держится, соперник видит, что игрок вышел", () => {
+    const { room } = seated("UNLIMITED");
+    room.leave("black");
+
+    assert.deepEqual(room.seated(), ["white", "black"]);
+    const black = room
+      .snapshot({ kind: "screen" })
+      .players.find((player) => player.id === "black");
+    assert.equal(black?.extra.away, true);
+    assert.notEqual(room.deadline(), null, "будильник на ожидание заведён");
+  });
+
+  it("вернулся — ждать перестали", () => {
+    const { room, pass } = seated("UNLIMITED");
+    room.leave("black");
+    pass(60_000);
+    room.join("black");
+    pass(60_000);
+    room.tick();
+
+    assert.equal(view(room).phase, "playing");
+    assert.equal(room.deadline(), null);
+  });
+
+  it("не вернулся за полторы минуты — партия достаётся сопернику", () => {
+    const { room, pass } = seated("UNLIMITED");
+    move(room, "white", "e2", "e4");
+    room.leave("black");
+    pass(90_000);
+    room.tick();
+
+    assert.equal(view(room).result, 0);
+    assert.equal(view(room).reason, "abandoned");
+  });
+});
+
+describe("ничьи", () => {
+  it("предложение видят только сидящие, а принятое — ничья", () => {
+    const { room } = seated();
+    assert.deepEqual(room.act(GAME_EVENT.offerDraw, "white", {}), {
+      accepted: true,
+    });
+
+    assert.equal(view(room, "black").drawOffer, 0);
+    assert.equal(room.snapshot({ kind: "screen" }).extra.drawOffer, null);
+
+    room.act(GAME_EVENT.offerDraw, "black", {});
+    assert.equal(view(room).result, "draw");
+    assert.equal(view(room).reason, "agreement");
+  });
+
+  it("отказ снимает предложение; повторить сразу нельзя", () => {
+    const { room } = seated();
+    room.act(GAME_EVENT.offerDraw, "white", {});
+    room.act(GAME_EVENT.declineDraw, "black", {});
+
+    assert.equal(view(room).drawOffer, null);
+    assert.equal(
+      room.act(GAME_EVENT.offerDraw, "white", {}).reason,
+      "Ничью только что предлагали",
+    );
+  });
+
+  it("предложение живёт до следующего хода", () => {
+    const { room } = seated();
+    room.act(GAME_EVENT.offerDraw, "black", {});
+    move(room, "white", "e2", "e4");
+
+    assert.equal(view(room).drawOffer, null);
+  });
+
+  it("требовать ничью без основания нельзя, с повторением — можно", () => {
+    const { room } = seated();
+    assert.equal(
+      room.act(GAME_EVENT.claimDraw, "white", {}).reason,
+      "Требовать ничью пока не на чем",
+    );
+
+    for (let round = 0; round < 2; round++) {
+      move(room, "white", "g1", "f3");
+      move(room, "black", "g8", "f6");
+      move(room, "white", "f3", "g1");
+      move(room, "black", "f6", "g8");
+    }
+    assert.equal(view(room).claimable, "threefold");
+
+    // Требовать может и тот, чья очередь не его.
+    room.act(GAME_EVENT.claimDraw, "black", {});
+    assert.equal(view(room).reason, "threefold");
+  });
+});
+
+describe("сдача, реванш и новая партия", () => {
+  it("сдача отдаёт партию сопернику; партия без ходов не пишется", () => {
+    const { room, drafts } = seated();
+    room.act(GAME_EVENT.resign, "black", {});
+
+    assert.equal(view(room).result, 0);
+    assert.equal(drafts.length, 0, "ни одного хода — нечего записывать");
+  });
+
+  it("реванш меняет места и начинает новую партию с новой записью", () => {
+    const { room, drafts } = seated();
+    move(room, "white", "e2", "e4");
+    room.act(GAME_EVENT.resign, "black", {});
+
+    assert.equal(room.act(GAME_EVENT.rematch, "white", {}).accepted, true);
+    assert.deepEqual(room.seated(), ["black", "white"]);
+    assert.equal(view(room).phase, "playing");
+    assert.deepEqual(view(room).moves, []);
+
+    move(room, "black", "d2", "d4");
+    room.act(GAME_EVENT.resign, "white", {});
+    assert.equal(drafts.length, 2);
+    assert.notEqual(drafts[0]?.id, drafts[1]?.id);
+    assert.deepEqual(drafts[1]?.seats, ["black", "white"]);
+  });
+
+  it("реванш посреди партии не бывает", () => {
+    const { room } = seated();
+    assert.equal(
+      room.act(GAME_EVENT.rematch, "white", {}).reason,
+      "Партия ещё идёт",
+    );
+  });
+
+  it("ушёл после партии — на его место садится новый, и партия новая", () => {
+    const { room, drafts } = seated();
+    move(room, "white", "e2", "e4");
+    room.act(GAME_EVENT.resign, "black", {});
+    room.leave("black");
+    assert.deepEqual(room.seated(), ["white"]);
+
+    room.join("newcomer");
+    assert.equal(view(room).phase, "playing");
+    assert.deepEqual(view(room).moves, []);
+
+    move(room, "white", "d2", "d4");
+    room.act(GAME_EVENT.resign, "newcomer", {});
+    assert.notEqual(drafts[0]?.id, drafts[1]?.id);
+  });
+
+  it("партия упирается в потолок по времени", () => {
+    const { room, pass } = seated("UNLIMITED");
+    pass(3 * 60 * 60 * 1000);
+    move(room, "white", "e2", "e4");
+
+    assert.equal(view(room).reason, "tooLong");
+    assert.equal(view(room).result, "draw");
+  });
+});
+
+describe("запись партии", () => {
+  it("несёт режим, зерно, места, ходы и итог", () => {
+    const { room, drafts, events } = seated("MIN_1");
+    for (const [player, from, to] of [
+      ["white", "e2", "e4"],
+      ["black", "e7", "e5"],
+      ["white", "f1", "c4"],
+      ["black", "b8", "c6"],
+      ["white", "d1", "h5"],
+      ["black", "g8", "f6"],
+      ["white", "h5", "f7"],
+    ] as const) {
+      move(room, player, from, to);
+    }
+
+    const draft = drafts[0];
+    assert.ok(draft, "партия записана");
+    assert.equal(draft.mode, "CLASSIC");
+    assert.equal(draft.timeControl, "MIN_1");
+    assert.deepEqual(draft.seats, ["white", "black"]);
+    assert.equal(draft.moves.at(-1), "Qxf7#");
+    assert.equal(draft.winner, 0);
+    assert.equal(draft.reason, "checkmate");
+    assert.ok(Number.isInteger(draft.seed) && draft.seed >= 0);
+    assert.equal(events.at(-1)?.type, "turbochess_finished");
+  });
+});
+
+describe("режим", () => {
+  it("партия встаёт расстановкой режима, и реванш её сохраняет", () => {
+    const settings: TurboRoomSettings = {
+      mode: "ONE_KIND",
+      timeControl: "SEC_30",
+      options: { kind: "n" },
+      bots: 0,
+      botLevel: "normal",
+    };
+    const context: GameRoomContext = {
+      key: "turbo-knights",
+      ownerId: "white",
+      isPrivate: true,
+      settings,
+      connections: () => 2,
+      introduce: () => {},
+      forget: () => {},
+      emitted: () => {},
+      changed: () => {},
+    };
+    const room = new TurboRoom(context, settings);
+    room.join("white");
+    room.join("black");
+
+    const knights = () =>
+      (
+        view(room).position as { board: ({ kind: string } | null)[] }
+      ).board.filter((cell) => cell?.kind === "n").length;
+    assert.equal(knights(), 30);
+    assert.deepEqual(view(room).options, { kind: "n" });
+
+    move(room, "white", "b1", "c3");
+    room.act(GAME_EVENT.resign, "black", {});
+    room.act(GAME_EVENT.rematch, "white", {});
+    assert.equal(knights(), 30, "реванш — те же кони");
+  });
+});
+
+describe("подкрепление", () => {
+  it("выставление из запаса идёт через ход и проверяется сервером", () => {
+    const settings: TurboRoomSettings = {
+      mode: "REINFORCEMENTS",
+      timeControl: "SEC_30",
+      options: {},
+      bots: 0,
+      botLevel: "normal",
+    };
+    const context: GameRoomContext = {
+      key: "turbo-reserve",
+      ownerId: "white",
+      isPrivate: true,
+      settings,
+      connections: () => 2,
+      introduce: () => {},
+      forget: () => {},
+      emitted: () => {},
+      changed: () => {},
+    };
+    const room = new TurboRoom(context, settings);
+    room.join("white");
+    room.join("black");
+
+    const position = view(room).position as Position;
+    assert.deepEqual(position.reserve, [
+      ["q", "r", "b", "n", "p"],
+      ["q", "r", "b", "n", "p"],
+    ]);
+    assert.equal(
+      room.act(GAME_EVENT.move, "white", { drop: "q", to: "a2", ply: 0 })
+        .reason,
+      "Так не ходят",
+      "в начале ставить некуда",
+    );
+
+    move(room, "white", "b1", "c3");
+    move(room, "black", "b8", "c6");
+
+    assert.equal(
+      room.act(GAME_EVENT.move, "white", { drop: "q", to: "b1", ply: 2 })
+        .accepted,
+      true,
+    );
+    assert.equal((view(room).moves as string[]).at(-1), "Q@b1");
+    assert.equal(view(room).turn, 1, "выставление стоит хода");
+    assert.deepEqual(
+      (view(room).position as Position).reserve[0],
+      ["r", "b", "n", "p"],
+      "ферзь ушёл из запаса",
+    );
+  });
+});
+
+describe("вскрываемся", () => {
+  function showdownTable() {
+    let at = 1000;
+    const settings: TurboRoomSettings = {
+      mode: "SHOWDOWN",
+      timeControl: "SEC_30",
+      options: {},
+      bots: 0,
+      botLevel: "normal",
+    };
+    const drafts: MatchDraft[] = [];
+    const context: GameRoomContext = {
+      key: "turbo-showdown",
+      ownerId: "white",
+      isPrivate: true,
+      settings,
+      connections: () => 2,
+      introduce: () => {},
+      forget: () => {},
+      emitted: () => {},
+      changed: () => {},
+    };
+    const room = new TurboRoom(
+      context,
+      settings,
+      () => at,
+      (draft) => drafts.push(draft),
+    );
+    room.join("white");
+    room.join("black");
+
+    return {
+      room,
+      drafts,
+      pass: (ms: number) => {
+        at += ms;
+      },
+    };
+  }
+
+  const kindAt = (room: TurboRoom, viewer: string, square: string) =>
+    new TurboGame(view(room, viewer).position as Position).pieceAt(square)
+      ?.kind ?? null;
+
+  it("пока расставляются вслепую, перемотки нет", () => {
+    const { room } = showdownTable();
+
+    assert.equal(view(room).phase, "setup");
+    assert.equal(view(room).replay, null, "иначе видно чужую расстановку");
+  });
+
+  it("стол начинается с расстановки, а не с партии", () => {
+    const { room } = showdownTable();
+
+    assert.equal(view(room).phase, "setup");
+    assert.equal(view(room).turn, null);
+    assert.equal(move(room, "white", "e2", "e4").reason, "Ещё расставляемся");
+
+    const covered = view(room).covered as string[];
+    assert.equal(covered.length, 16, "закрыта чужая половина");
+    assert.ok(
+      covered.every((square) => square.endsWith("7") || square.endsWith("8")),
+      "белым закрыта именно чёрная половина",
+    );
+    assert.equal(kindAt(room, "white", "e1"), "k", "своя половина видна");
+    assert.equal(kindAt(room, "white", "e8"), null, "чужая — нет");
+    assert.equal(
+      (room.snapshot({ kind: "screen" }).extra.covered as string[]).length,
+      32,
+      "экрану закрыты обе: трансляцию смотрит и соперник",
+    );
+  });
+
+  it("переставляет только свои и только по правилам", () => {
+    const { room } = showdownTable();
+
+    assert.equal(
+      room.act(GAME_EVENT.swap, "white", { from: "a1", to: "b1" }).accepted,
+      true,
+    );
+    assert.equal(kindAt(room, "white", "a1"), "n");
+    assert.equal(kindAt(room, "white", "b1"), "r");
+
+    assert.equal(
+      room.act(GAME_EVENT.swap, "white", { from: "e1", to: "e2" }).reason,
+      "Так не переставить",
+      "король остаётся на первой горизонтали",
+    );
+    assert.equal(
+      room.act(GAME_EVENT.swap, "white", { from: "a8", to: "b8" }).reason,
+      "Так не переставить",
+      "чужая зона не своя",
+    );
+    assert.equal(
+      room.act(GAME_EVENT.swap, "watcher", { from: "a1", to: "b1" }).reason,
+      "Ты не за доской",
+    );
+  });
+
+  it("оба готовы — вскрываемся досрочно и играем", () => {
+    const { room } = showdownTable();
+    room.act(GAME_EVENT.swap, "white", { from: "a1", to: "b1" });
+
+    assert.equal(room.act(GAME_EVENT.ready, "white", {}).accepted, true);
+    assert.equal(view(room).phase, "setup", "ждём второго");
+    assert.deepEqual(view(room).setupReady, [true, false]);
+    assert.equal(
+      room.act(GAME_EVENT.swap, "white", { from: "c1", to: "d1" }).reason,
+      "Ты уже сказал «готов»",
+    );
+
+    assert.equal(room.act(GAME_EVENT.ready, "black", {}).accepted, true);
+    assert.equal(view(room).phase, "playing");
+    assert.equal(view(room).turn, 0, "после вскрытия ходят белые");
+    assert.equal(
+      kindAt(room, "watcher", "a1"),
+      "n",
+      "вскрытая расстановка видна всем",
+    );
+    assert.equal(
+      room.act(GAME_EVENT.swap, "white", { from: "a1", to: "b1" }).reason,
+      "Расстановка кончилась",
+    );
+    assert.deepEqual(move(room, "white", "b2", "b4"), { accepted: true });
+  });
+
+  it("время вышло — вскрываемся с тем, что стоит", () => {
+    const { room, pass } = showdownTable();
+    room.act(GAME_EVENT.swap, "black", { from: "a8", to: "b8" });
+
+    pass(SHOWDOWN_SETUP_MS);
+    room.tick();
+
+    assert.equal(view(room).phase, "playing");
+    assert.equal(kindAt(room, "white", "a8"), "n", "чужая половина вскрылась");
+  });
+
+  it("расстановка уезжает в запись партии", () => {
+    const { room, drafts } = showdownTable();
+    room.act(GAME_EVENT.swap, "white", { from: "a1", to: "b1" });
+    room.act(GAME_EVENT.ready, "white", {});
+    room.act(GAME_EVENT.ready, "black", {});
+
+    move(room, "white", "b2", "b4");
+    room.act(GAME_EVENT.resign, "black", {});
+
+    assert.equal(
+      drafts.at(-1)?.options.setup,
+      "nrbqkbnrpppppppp/rnbqkbnrpppppppp",
+    );
+  });
+});
+
+describe("кнопки режимов", () => {
+  function table(mode: TurboMode) {
+    let at = 1000;
+    const settings: TurboRoomSettings = {
+      mode,
+      timeControl: "SEC_30",
+      options: {},
+      bots: 0,
+      botLevel: "normal",
+    };
+    const drafts: MatchDraft[] = [];
+    const context: GameRoomContext = {
+      key: `turbo-${mode}`,
+      ownerId: "white",
+      isPrivate: true,
+      settings,
+      connections: () => 2,
+      introduce: () => {},
+      forget: () => {},
+      emitted: () => {},
+      changed: () => {},
+    };
+    const room = new TurboRoom(
+      context,
+      settings,
+      () => at,
+      (draft) => drafts.push(draft),
+    );
+    room.join("white");
+    room.join("black");
+
+    return {
+      room,
+      drafts,
+      pass: (ms: number) => {
+        at += ms;
+      },
+    };
+  }
+
+  const pieces = (room: TurboRoom) =>
+    (view(room).position as Position).board.filter(Boolean).length;
+
+  it("алко: после взятия висит окно, а подтверждение считает выпитое", () => {
+    const { room } = table("BOOZE");
+    move(room, "white", "e2", "e4");
+    move(room, "black", "d7", "d5");
+    move(room, "white", "e4", "d5");
+
+    assert.deepEqual(view(room).toast, { drinker: 1, pourer: 0 });
+    assert.equal(
+      move(room, "black", "d8", "d5").reason,
+      "Сначала выпейте",
+      "ходить, пока не выпили, нельзя",
+    );
+    assert.equal(
+      room.act(GAME_EVENT.toast, "black", {}).reason,
+      "Подтверждает тот, кто срубил",
+    );
+
+    assert.equal(room.act(GAME_EVENT.toast, "white", {}).accepted, true);
+    assert.equal(view(room).toast, null);
+    assert.deepEqual(view(room).drinks, [0, 1]);
+    assert.deepEqual(move(room, "black", "d8", "d5"), { accepted: true });
+  });
+
+  it("алко: молчание — штраф обоим", () => {
+    const { room, pass } = table("BOOZE");
+    move(room, "white", "e2", "e4");
+    move(room, "black", "d7", "d5");
+    move(room, "white", "e4", "d5");
+    const before = pieces(room);
+
+    pass(TOAST_MS);
+    room.tick();
+
+    assert.equal(view(room).toast, null);
+    assert.equal(pieces(room), before - 2, "сняли по фигуре у обоих");
+    assert.deepEqual(view(room).drinks, [0, 0], "выпитым это не считается");
+  });
+
+  it("последний шанс: под шахом король прыгает, и шанс тратится", () => {
+    const { room } = table("LAST_CHANCE");
+    move(room, "white", "e2", "e4");
+    move(room, "black", "d7", "d5");
+    move(room, "white", "f1", "b5");
+
+    assert.equal(
+      room.act(GAME_EVENT.chance, "white", {}).reason,
+      "Сейчас не твой ход",
+    );
+    assert.equal(room.act(GAME_EVENT.chance, "black", {}).accepted, true);
+
+    assert.equal(view(room).turn, 0, "ход перешёл белым");
+    assert.equal((view(room).position as Position).chances[1], 0);
+    assert.match((view(room).moves as string[]).at(-1) ?? "", /^K\*/);
+  });
+
+  it("анархия: «НЕТ» отменяет ход и возвращает время", () => {
+    const { room, drafts, pass } = table("ANARCHY");
+    pass(1000);
+    move(room, "white", "e2", "e4");
+    pass(2000);
+    move(room, "black", "e7", "e5");
+
+    assert.equal(room.act(GAME_EVENT.veto, "white", {}).accepted, true);
+    assert.deepEqual(view(room).moves, ["e4"], "ход снят с записи");
+    assert.deepEqual(view(room).vetoed, [{ ply: 2, san: "e5" }]);
+    assert.equal(view(room).turn, 1, "ходить снова чёрным");
+    assert.equal(
+      move(room, "black", "e7", "e5").reason,
+      "Так не ходят",
+      "повторить отменённое нельзя",
+    );
+
+    pass(3000);
+    assert.deepEqual(move(room, "black", "e7", "e6"), { accepted: true });
+    room.act(GAME_EVENT.resign, "white", {});
+    assert.deepEqual(
+      drafts.at(-1)?.times,
+      [1000, 3000],
+      "за отменённый ход время вернулось",
+    );
+  });
+
+  it("рынок: покупка списывает очки и не тратит ход", () => {
+    const { room } = table("BLACK_MARKET");
+
+    assert.equal(
+      room.act(GAME_EVENT.buy, "white", { item: "extra" }).reason,
+      "Не хватает очков",
+      "в начале партии очков нет",
+    );
+
+    // Пешка и конь — ровно четыре очка, цена дополнительного хода.
+    move(room, "white", "e2", "e4");
+    move(room, "black", "d7", "d5");
+    move(room, "white", "e4", "d5");
+    move(room, "black", "g8", "f6");
+    move(room, "white", "b1", "c3");
+    move(room, "black", "f6", "d5");
+    move(room, "white", "c3", "d5");
+    move(room, "black", "e7", "e6");
+
+    assert.equal(
+      room.act(GAME_EVENT.buy, "black", { item: "extra" }).reason,
+      "Покупают в свой ход",
+    );
+    assert.equal(
+      room.act(GAME_EVENT.buy, "white", { item: "shield", from: "a2" }).reason,
+      "Не хватает очков",
+      "щит стоит пять, а набрано четыре",
+    );
+
+    assert.equal(
+      room.act(GAME_EVENT.buy, "white", { item: "extra" }).accepted,
+      true,
+    );
+    assert.equal(view(room).turn, 0, "покупка ходом не считается");
+    assert.equal((view(room).position as Position).spent[0], 4, "очки списаны");
+
+    move(room, "white", "d1", "h5");
+    assert.equal(view(room).turn, 0, "дополнительный ход остался за белыми");
+    move(room, "white", "h5", "h4");
+    assert.equal(view(room).turn, 1, "а дальше как обычно");
+  });
+
+  it("загул: взятие тянет карту, и пока она висит, ходить нельзя", () => {
+    const { room, pass } = table("BINGE");
+    move(room, "white", "e2", "e4");
+    move(room, "black", "d7", "d5");
+
+    const before = view(room).bingeLeft as Record<string, number>;
+    move(room, "white", "e4", "d5");
+
+    const card = view(room).binge as {
+      event: { rank: string };
+      by: number;
+      miss: boolean;
+    } | null;
+    assert.ok(card, "карточка висит");
+    assert.equal(card.by, 0, "тянет тот, кто срубил");
+    assert.equal(card.event.rank, "pawn", "срубили пешку — колода пешечная");
+    assert.equal(
+      (view(room).bingeLeft as Record<string, number>).pawn,
+      (before.pawn ?? 0) - 1,
+      "карта выбыла из колоды",
+    );
+
+    assert.equal(
+      move(room, "black", "d8", "d5").reason,
+      "Сначала карточка",
+      "под карточкой доски не видно, ходить нечестно",
+    );
+
+    pass(BINGE_CARD_MS);
+    room.tick();
+
+    assert.equal(view(room).binge, null, "карточку дочитали");
+    // Какое событие выпало, решает зерно партии, и оно у каждой комнаты своё:
+    // доска после карточки может быть какой угодно. Проверяется не она, а то,
+    // что стол разблокировался — ход отбивается уже по правилам, а не окном.
+    assert.notEqual(
+      move(room, "black", "d8", "d5").reason,
+      "Сначала карточка",
+      "и партия пошла дальше",
+    );
+  });
+
+  it("загул: «Чужими руками» — за человека ходит компьютер", () => {
+    // Какая карта выпадет, решает зерно комнаты, и снаружи его не задать —
+    // поэтому ищется стол, где первой пешечной картой вышла эта. Карт в колоде
+    // десять: двести столов промахиваются реже, чем раз на миллиард.
+    for (let attempt = 0; attempt < 200; attempt++) {
+      const { room, pass } = table("BINGE");
+      move(room, "white", "e2", "e4");
+      move(room, "black", "d7", "d5");
+      move(room, "white", "e4", "d5");
+
+      const card = view(room).binge as { event: { id: string } } | null;
+      if (card?.event.id !== "puppet") continue;
+
+      pass(BINGE_CARD_MS);
+      room.tick();
+      assert.equal(
+        move(room, "black", "d8", "d5").reason,
+        "За тебя ходит компьютер",
+        "свой ход человеку не дают",
+      );
+
+      // Компьютер думает, как бот, — пауза и перебор, — и ходит сам.
+      const played = () => (view(room).moves as string[]).length;
+      for (let wait = 0; wait < 10 && played() < 4; wait++) {
+        pass(10_000);
+        room.tick();
+      }
+      assert.equal(played(), 4, "ход за чёрных сделан");
+      // Отбив пешку, компьютер мог и сам вытянуть карту — поэтому проверяется
+      // не «эффектов нет», а что истаял именно этот.
+      assert.equal(
+        puppeted(view(room).position as Position, 1),
+        false,
+        "«Чужими руками» истаяло",
+      );
+      return;
+    }
+
+    assert.fail("за двести столов «Чужими руками» не выпало ни разу");
+  });
+
+  it("загул: без взятия карты не тянут, а в чужом режиме их нет вовсе", () => {
+    const { room } = table("BINGE");
+    move(room, "white", "e2", "e4");
+
+    assert.equal(view(room).binge, null, "ход без взятия события не даёт");
+    assert.deepEqual(
+      view(room).bingeLeft,
+      bingeLeft(freshDecks()),
+      "колоды свежие",
+    );
+
+    const other = table("CLASSIC");
+    move(other.room, "white", "e2", "e4");
+    move(other.room, "black", "d7", "d5");
+    move(other.room, "white", "e4", "d5");
+
+    assert.equal(view(other.room).binge, null);
+    assert.equal(view(other.room).bingeLeft, null, "колод вне загула нет");
+  });
+
+  it("чужие кнопки в чужом режиме не работают", () => {
+    const { room } = table("ANARCHY");
+
+    assert.equal(
+      room.act(GAME_EVENT.chance, "white", {}).reason,
+      "В этом режиме шансов нет",
+    );
+    assert.equal(
+      room.act(GAME_EVENT.toast, "white", {}).reason,
+      "Наливать некому",
+    );
+    assert.equal(
+      room.act(GAME_EVENT.veto, "white", {}).reason,
+      "Отменять нечего",
+      "первого хода ещё не было",
+    );
+  });
+});
+
+describe("королевская битва", () => {
+  it("стол на четверых: круг хода, выбывание и победа последнего", () => {
+    const settings: TurboRoomSettings = {
+      mode: "BATTLE_ROYALE",
+      timeControl: "SEC_30",
+      options: {},
+      bots: 0,
+      botLevel: "normal",
+    };
+    const drafts: MatchDraft[] = [];
+    const context: GameRoomContext = {
+      key: "turbo-battle",
+      ownerId: "south",
+      isPrivate: true,
+      settings,
+      connections: () => 4,
+      introduce: () => {},
+      forget: () => {},
+      emitted: () => {},
+      changed: () => {},
+    };
+    const room = new TurboRoom(context, settings, undefined, (draft) =>
+      drafts.push(draft),
+    );
+
+    room.join("south");
+    room.join("west");
+    assert.equal(view(room, "south").phase, "waiting", "вдвоём не начинаем");
+
+    room.join("north");
+    room.join("east");
+    assert.equal(view(room, "south").phase, "playing");
+    assert.equal(view(room, "south").seats, 4);
+
+    assert.deepEqual(move(room, "south", "e2", "e4"), { accepted: true });
+    assert.equal(view(room, "south").turn, 1, "ход по часовой");
+    assert.equal(
+      move(room, "north", "e15", "e13").reason,
+      "Сейчас не твой ход",
+    );
+    assert.equal(
+      room.act(GAME_EVENT.offerDraw, "south", {}).reason,
+      "Вчетвером ничьих не бывает",
+    );
+
+    room.act(GAME_EVENT.resign, "west", {});
+    assert.equal(view(room, "south").phase, "playing", "партия идёт втроём");
+    assert.equal(view(room, "south").turn, 2, "запад пропущен");
+
+    room.act(GAME_EVENT.resign, "north", {});
+    room.act(GAME_EVENT.resign, "east", {});
+
+    assert.equal(view(room, "south").phase, "over");
+    assert.equal(view(room, "south").result, 0, "юг остался один");
+    assert.equal(view(room, "south").reason, "lastStanding");
+    assert.equal(drafts.at(-1)?.seats.length, 4, "в записи четыре места");
+  });
+});
+
+describe("двойной агент", () => {
+  it("свой агент — секрет от хозяина, чужой виден, зрителю — ни одного", () => {
+    const settings: TurboRoomSettings = {
+      mode: "DOUBLE_AGENT",
+      timeControl: "SEC_30",
+      options: {},
+      bots: 0,
+      botLevel: "normal",
+    };
+    const context: GameRoomContext = {
+      key: "turbo-agent",
+      ownerId: "white",
+      isPrivate: true,
+      settings,
+      connections: () => 2,
+      introduce: () => {},
+      forget: () => {},
+      emitted: () => {},
+      changed: () => {},
+    };
+    const room = new TurboRoom(context, settings);
+    room.join("white");
+    room.join("black");
+
+    const seen = (viewer: string) =>
+      (
+        (view(room, viewer).position as Position).board.filter(
+          (cell) => cell?.agent,
+        ) as { side: number }[]
+      ).map((cell) => cell.side);
+
+    assert.deepEqual(seen("white"), [1], "белым виден только чёрный агент");
+    assert.deepEqual(seen("black"), [0], "чёрным — только белый");
+    assert.deepEqual(
+      (
+        room.snapshot({ kind: "screen" }).extra.position as Position
+      ).board.filter((cell) => cell?.agent),
+      [],
+      "экрану — ни одного",
+    );
+  });
+});
+
+describe("бомба", () => {
+  function nuclearTable(options: ModeOptions = { threshold: 20 }) {
+    const settings: TurboRoomSettings = {
+      mode: "NUCLEAR",
+      timeControl: "SEC_30",
+      options,
+      bots: 0,
+      botLevel: "normal",
+    };
+    const drafts: MatchDraft[] = [];
+    const events: GameRoomEvent[] = [];
+    const context: GameRoomContext = {
+      key: "turbo-nuke",
+      ownerId: "white",
+      isPrivate: true,
+      settings,
+      connections: () => 2,
+      introduce: () => {},
+      forget: () => {},
+      emitted: (list) => events.push(...list),
+      changed: () => {},
+    };
+    const room = new TurboRoom(context, settings, undefined, (draft) =>
+      drafts.push(draft),
+    );
+    room.join("white");
+    room.join("black");
+
+    return { room, drafts, events };
+  }
+
+  /** Во сколько очков обходится взятие этим ходом. */
+  function gain(move: Move): number {
+    return move.captured ? (PIECE_VALUE[move.captured.kind] ?? 0) : 0;
+  }
+
+  /** Самое дорогое взятие, какое есть у того, чья очередь. */
+  function best(position: Position): number {
+    return legalMoves(position).reduce(
+      (most, move) => Math.max(most, gain(move)),
+      0,
+    );
+  }
+
+  /**
+   * Довести белых до порога настоящей партией: позицию комнате не подсунуть,
+   * а заряд она обязана насчитать сама. Белые берут самое дорогое, чёрные
+   * подставляют самое дорогое — так порог набирается за десяток ходов.
+   *
+   * Матовать белые не станут: партия должна дожить до бомбы, а жадность к
+   * шестнадцатому полуходу ставит мат раньше, чем набирается заряд.
+   */
+  function feed(room: TurboRoom, threshold: number): void {
+    for (let step = 0; step < 200; step++) {
+      const state = view(room);
+      const position = state.position as Position;
+      if (state.phase !== "playing") return;
+      if (position.turn === 0 && nuclearCharge(position, 0) >= threshold) {
+        return;
+      }
+
+      const legal = legalMoves(position);
+      const alive = legal.filter(
+        (move) => legalMoves(play(position, move)).length > 0,
+      );
+      const chosen =
+        position.turn === 0
+          ? (alive.length > 0 ? alive : legal).sort(
+              (one, other) => gain(other) - gain(one),
+            )[0]
+          : legal.sort(
+              (one, other) =>
+                best(play(position, other)) - best(play(position, one)),
+            )[0];
+      if (!chosen) return;
+
+      move(
+        room,
+        position.turn === 0 ? "white" : "black",
+        squareName(position.geometry, chosen.from),
+        squareName(position.geometry, chosen.to),
+        chosen.promotion ?? undefined,
+      );
+    }
+  }
+
+  it("без заряда, не в свой ход и не за доской бомбу не сбросить", () => {
+    const { room } = nuclearTable();
+
+    assert.equal(room.act(GAME_EVENT.bomb, "watcher", {}).accepted, false);
+    assert.equal(
+      room.act(GAME_EVENT.bomb, "black", {}).reason,
+      "Сейчас не твой ход",
+    );
+    assert.equal(
+      room.act(GAME_EVENT.bomb, "white", {}).reason,
+      "Заряд ещё не набран",
+    );
+  });
+
+  it("в другом режиме бомбы нет вовсе", () => {
+    const { room } = seated();
+
+    assert.equal(
+      room.act(GAME_EVENT.bomb, "white", {}).reason,
+      "В этом режиме бомбы нет",
+    );
+  });
+
+  it("набрал порог — сбросил, и партия записалась взрывом", () => {
+    const { room, drafts, events } = nuclearTable();
+    feed(room, 20);
+
+    const position = view(room).position as Position;
+    assert.ok(
+      nuclearCharge(position, 0) >= 20,
+      "белые набрали заряд настоящими взятиями",
+    );
+
+    assert.equal(room.act(GAME_EVENT.bomb, "white", {}).accepted, true);
+    assert.equal(view(room).phase, "over");
+    assert.equal(view(room).result, 0);
+    assert.equal(view(room).reason, "nuke");
+    assert.equal(drafts.at(-1)?.reason, "nuke");
+    assert.equal(drafts.at(-1)?.winner, 0);
+    assert.ok(
+      events.some((event) => event.type === "turbochess_finished"),
+      "платформе о конце партии сказали",
+    );
+  });
+});
+
+describe("выгнать", () => {
+  it("может только хозяин; посреди партии это то же, что уйти", () => {
+    const { room } = setup();
+    room.join("host");
+    room.join("guest");
+
+    assert.equal(room.remove("guest", "host").accepted, false);
+    assert.equal(room.remove("host", "guest").accepted, true);
+    assert.equal(view(room, "host").reason, "abandoned");
+    assert.equal(view(room, "host").result, 0);
+  });
+});
+
+describe("закрытая дверь вместо общего зала", () => {
+  it("никого не сажает и всё отбивает", () => {
+    const hall = new ClosedHall();
+
+    hall.join();
+    assert.deepEqual(hall.seated(), []);
+    assert.equal(hall.act().accepted, false);
+    assert.equal(hall.snapshot().extra.phase, "closed");
+  });
+
+  it("сервер ставит её за ключом общего зала, а свою комнату — столом", async () => {
+    const server = createTurboServer();
+    const context = (isPrivate: boolean): GameRoomContext => ({
+      key: "turbo-test",
+      ownerId: "host",
+      isPrivate,
+      settings: null,
+      connections: () => 0,
+      introduce: () => {},
+      forget: () => {},
+      emitted: () => {},
+      changed: () => {},
+    });
+
+    const hall = await server.createRoom(context(false));
+    const room = await server.createRoom(context(true));
+
+    assert.ok(hall instanceof ClosedHall);
+    assert.ok(room instanceof TurboRoom);
+    assert.equal(
+      room.snapshot({ kind: "screen" }).extra.mode,
+      "ONE_KIND",
+      "комната без настроек играет умолчанием",
+    );
+    server.stop();
+  });
+});
+
+describe("бот за столом", () => {
+  /**
+   * Стол с ботами: режим, сколько программ сажать и какого уровня.
+   *
+   * Комната ботов не выдумывает — их приносит серверная часть, и здесь это тот
+   * же запас, только собранный руками, чтобы тест знал их номера.
+   */
+  function withBots(
+    count: number,
+    mode: TurboMode = "CLASSIC",
+    level: LevelId = "easy",
+  ) {
+    let at = 1000;
+    const changes: number[] = [];
+    const drafts: MatchDraft[] = [];
+    const introduced: { id: string; nickname: string }[] = [];
+    const settings: TurboRoomSettings = {
+      mode,
+      timeControl: "SEC_30",
+      options: {},
+      bots: count,
+      botLevel: level,
+    };
+    const context: GameRoomContext = {
+      key: "turbo-bots",
+      ownerId: "host",
+      isPrivate: true,
+      settings,
+      connections: () => 1,
+      introduce: (player) =>
+        introduced.push({ id: player.id, nickname: player.nickname }),
+      forget: () => {},
+      emitted: () => {},
+      changed: () => changes.push(at),
+    };
+    const pool = makeBots(modeInfo(mode).seats - 1, level, 12345);
+    const room = new TurboRoom(
+      context,
+      settings,
+      () => at,
+      (draft) => drafts.push(draft),
+      pool,
+    );
+
+    return {
+      room,
+      pool,
+      introduced,
+      drafts,
+      changes,
+      pass: (ms: number) => {
+        at += ms;
+      },
+    };
+  }
+
+  it("бот садится после человека: первый ход остаётся людям", () => {
+    const { room, introduced } = withBots(1);
+    room.join("human");
+
+    const seats = room.seated();
+    assert.equal(seats.length, 2);
+    assert.equal(seats[0], "human");
+    assert.ok(seats[1]?.startsWith("bot:"), "второе место — за программой");
+    // Платформа знает бота как игрока: ник и лицо она допишет в снимок сама.
+    assert.equal(introduced.length, 1);
+    assert.ok((introduced[0]?.nickname.length ?? 0) > 0);
+    assert.equal(view(room, "human").phase, "playing");
+  });
+
+  it("без просьбы бот не садится, но приходит по зову", () => {
+    const { room } = withBots(0);
+    room.join("human");
+
+    assert.deepEqual(room.seated(), ["human"]);
+    assert.equal(view(room, "human").phase, "waiting");
+
+    const called = room.act(GAME_EVENT.bot, "human", {});
+    assert.equal(called.accepted, true);
+    assert.equal(room.seated().length, 2);
+    assert.equal(view(room, "human").phase, "playing");
+  });
+
+  it("зовёт тот, кто за столом или завёл комнату; посреди партии — никто", () => {
+    const { room } = withBots(0);
+    room.join("human");
+
+    assert.equal(room.act(GAME_EVENT.bot, "чужой", {}).accepted, false);
+    assert.equal(room.act(GAME_EVENT.bot, "host", {}).accepted, true);
+    // Стол полон, звать некуда.
+    assert.equal(room.act(GAME_EVENT.bot, "human", {}).accepted, false);
+  });
+
+  it("бот думает и ходит сам — по будильнику комнаты, а не по таймеру", () => {
+    const { room, pass } = withBots(1);
+    room.join("human");
+
+    // Ход человека: бота ждать незачем.
+    assert.equal(move(room, "human", "e2", "e4").accepted, true);
+
+    const before = (view(room, "human").moves as string[]).length;
+    const wait = room.deadline();
+    assert.ok(wait !== null, "комната просит себя разбудить");
+
+    // Раньше срока бот не ходит.
+    pass(200);
+    room.tick();
+    assert.equal((view(room, "human").moves as string[]).length, before);
+
+    pass(7_000);
+    room.tick();
+    const moves = view(room, "human").moves as string[];
+    assert.equal(moves.length, before + 1, "бот сходил");
+    assert.equal(view(room, "human").turn, 0, "очередь вернулась человеку");
+  });
+
+  it("ход бота законный: его принимает тот же движок, что и человека", () => {
+    const { room, pass } = withBots(1);
+    room.join("human");
+
+    for (let half = 0; half < 6; half++) {
+      const before = (view(room, "human").moves as string[]).length;
+      if (view(room, "human").turn === 0) {
+        const legal = new TurboGame(
+          view(room, "human").position as Position,
+        ).legal()[0];
+        assert.ok(legal);
+        assert.equal(
+          room.act(GAME_EVENT.move, "human", { ...legal, ply: before })
+            .accepted,
+          true,
+        );
+      } else {
+        pass(8_000);
+        room.tick();
+      }
+      assert.equal(
+        (view(room, "human").moves as string[]).length,
+        before + 1,
+        `полуход ${half}`,
+      );
+    }
+  });
+
+  it("в королевской битве стол добирают трое, четвёртое место человеку", () => {
+    const { room } = withBots(3, "BATTLE_ROYALE");
+    room.join("human");
+
+    const seats = room.seated();
+    assert.equal(seats.length, 4);
+    assert.equal(seats.filter((id) => id.startsWith("bot:")).length, 3);
+    assert.equal(view(room, "human").phase, "playing");
+  });
+
+  it("характеры за столом разные, а лица берутся из своего диапазона", () => {
+    const { pool } = withBots(3, "BATTLE_ROYALE");
+
+    assert.equal(pool.length, 3);
+    assert.equal(new Set(pool.map((bot) => bot.character)).size, 3);
+    assert.equal(new Set(pool.map((bot) => bot.nickname)).size, 3);
+    for (const bot of pool) {
+      assert.ok(bot.avatarId >= BOT_AVATAR_OFFSET, "лицо из своего диапазона");
+      assert.ok(bot.id.startsWith("bot:"));
+    }
+  });
+
+  it("в записи партии бот не место, а отдельная строчка", () => {
+    const { room, pass, drafts } = withBots(1);
+    room.join("human");
+
+    // Детский мат людям недоступен — сдаёмся, чтобы партия кончилась быстро.
+    assert.equal(move(room, "human", "e2", "e4").accepted, true);
+    pass(8_000);
+    room.tick();
+    assert.equal(room.act(GAME_EVENT.resign, "human", {}).accepted, true);
+
+    const draft = drafts.at(-1);
+    assert.ok(draft, "партия записана");
+    assert.equal(draft.bots.length, 1);
+    assert.equal(draft.bots[0]?.seat, 1);
+    assert.equal(draft.bots[0]?.level, "easy");
+    assert.ok(draft.seats[1]?.startsWith("bot:"));
+  });
+});
+
+describe("бот жмёт кнопки режимов", () => {
+  /** Стол с одним ботом в нужном режиме и с нужными ручками. */
+  function botTable(
+    mode: TurboMode,
+    options: ModeOptions = {},
+    level: LevelId = "expert",
+  ) {
+    let at = 1000;
+    const settings: TurboRoomSettings = {
+      mode,
+      timeControl: "MIN_3",
+      options,
+      bots: 1,
+      botLevel: level,
+    };
+    const context: GameRoomContext = {
+      key: `turbo-${mode}`,
+      ownerId: "human",
+      isPrivate: true,
+      settings,
+      connections: () => 1,
+      introduce: () => {},
+      forget: () => {},
+      emitted: () => {},
+      changed: () => {},
+    };
+    const pool = makeBots(1, level, 4242);
+    const room = new TurboRoom(context, settings, () => at, undefined, pool);
+    room.join("human");
+
+    return {
+      room,
+      bot: pool[0]!,
+      pass: (ms: number) => {
+        at += ms;
+      },
+      /** Дать боту доиграть паузу и сделать своё дело. */
+      let: (ms = 40_000) => {
+        at += ms;
+        room.tick();
+      },
+    };
+  }
+
+  it("алко: бот подтверждает чужую стопку, и она идёт в счётчик", () => {
+    const table = botTable("BOOZE");
+    const { room } = table;
+
+    // Играем, пока бот не срубит: окно подтверждения висит у срубившего, и
+    // отвечать на него будет он. Человек нарочно подставляет фигуру — какую
+    // именно, зависит от того, как ходит бот, поэтому ход выбирается на месте.
+    let toast: { drinker: number; pourer: number } | null = null;
+    for (let half = 0; half < 40 && !toast; half++) {
+      const state = view(room, "human");
+      if (state.phase !== "playing") break;
+
+      if (state.turn === 0) {
+        const position = state.position as Position;
+        // Сам человек не рубит: стопку наливает срубивший, а проверяем мы
+        // именно бота за этим окном.
+        const pick = offer(position) ?? legalMoves(position)[0];
+        assert.ok(pick, "человеку есть чем ходить");
+
+        send(room, position, pick, (state.moves as string[]).length);
+      } else {
+        table.let(20_000);
+      }
+
+      const after = view(room, "human").toast as {
+        drinker: number;
+        pourer: number;
+      } | null;
+      if (after) toast = after;
+    }
+
+    assert.ok(toast, "бот что-то срубил, и окно повисло");
+    assert.equal(toast.pourer, 1, "подтверждает срубивший — бот");
+
+    const before = (view(room, "human").drinks as number[])[0] ?? 0;
+    const pieces = (view(room, "human").position as Position).board.filter(
+      Boolean,
+    ).length;
+
+    // Бот держит паузу, а потом подтверждает. Пауза у него своя: обычно
+    // несколько секунд, но иногда он тянет почти всё окно — поэтому ждём до
+    // последней его четверти секунды, и всё равно раньше штрафа.
+    table.let(TOAST_MS - 250);
+    const state = view(room, "human");
+    assert.equal(state.toast, null, "окно закрылось");
+    assert.equal(
+      (state.drinks as number[])[0],
+      before + 1,
+      "стопка засчитана человеку",
+    );
+    assert.equal(
+      (state.position as Position).board.filter(Boolean).length,
+      pieces,
+      "штрафа не было: фигуры на месте",
+    );
+  });
+
+  it("часы в снимке — лимит хода, а не пауза бота", () => {
+    const table = botTable("CLASSIC");
+    const { room } = table;
+    assert.equal(move(room, "human", "e2", "e4").accepted, true);
+
+    // Ход бота: будить комнату надо по его паузе, а показывать — лимит хода.
+    const shown = room.snapshot({ kind: "player", id: "human" }).deadline;
+    const wake = room.deadline();
+    assert.ok(shown !== null && wake !== null);
+    assert.ok(shown - Date.now() > 170_000, "на часах три минуты хода");
+    assert.ok(wake < shown, "а будят комнату раньше — к ходу бота");
+  });
+
+  it("реплика бота доходит до экрана, людская — нет", () => {
+    const table = botTable("CLASSIC");
+    const { room, bot } = table;
+
+    room.heard(bot.id, "Тяну не глядя. Как всегда.");
+    room.heard("human", "это личное");
+
+    const said = view(room, "human").said as Record<string, string>;
+    assert.equal(said[bot.id], "Тяну не глядя. Как всегда.");
+    assert.equal(said.human, undefined, "чат людей экрану не достаётся");
+  });
+
+  it("ядерные: без заряда бот бомбу не жмёт, а просто ходит", () => {
+    const table = botTable("NUCLEAR", { threshold: 20 });
+    const { room } = table;
+
+    assert.equal(move(room, "human", "e2", "e4").accepted, true);
+    table.let(20_000);
+
+    const state = view(room, "human");
+    assert.equal(state.phase, "playing", "партия не кончилась взрывом");
+    assert.equal((state.moves as string[]).length, 2, "бот сходил как обычно");
+  });
+
+  it("вскрываемся: бот расставляется по своей заготовке и говорит «готов»", () => {
+    const table = botTable("SHOWDOWN");
+    const { room } = table;
+
+    const setup = view(room, "human");
+    assert.equal(setup.phase, "setup");
+    assert.equal((setup.setupReady as boolean[])[1], false);
+
+    // Бот думает над расстановкой десять-тридцать секунд.
+    table.pass(5_000);
+    room.tick();
+    assert.equal((view(room, "human").setupReady as boolean[])[1], false);
+
+    table.let(30_000);
+    assert.equal(
+      (view(room, "human").setupReady as boolean[])[1],
+      true,
+      "бот готов",
+    );
+  });
+
+  it("анархия: бот отменяет мат, пока у него есть «НЕТ»", () => {
+    const table = botTable("ANARCHY");
+    const { room } = table;
+
+    // Детский мат: бот играет чёрными и должен отменить последний ход.
+    const mate: [string, string][] = [
+      ["e2", "e4"],
+      ["f1", "c4"],
+      ["d1", "h5"],
+      ["h5", "f7"],
+    ];
+
+    for (const [from, to] of mate) {
+      const done = move(room, "human", from, to);
+      if (!done.accepted) break;
+      table.let(20_000);
+    }
+
+    const state = view(room, "human");
+    // Либо мат отменён и партия идёт, либо бот увернулся раньше — но партия
+    // точно не кончилась матом, пока «НЕТ» целы.
+    const vetoes = (state.position as Position).vetoes[1] ?? 0;
+    if (state.phase === "over") {
+      assert.ok(vetoes === 0, "мат засчитан только с пустыми «НЕТ»");
+    } else {
+      assert.equal(state.phase, "playing");
+    }
+  });
+});
+
+describe("бот разговаривает", () => {
+  /** Стол с одним говорящим ботом: реплики складываем в список. */
+  function talkingTable(mode: TurboMode = "CLASSIC") {
+    let at = 1000;
+    const said: { moment: string; ply: number }[] = [];
+    const settings: TurboRoomSettings = {
+      mode,
+      timeControl: "MIN_3",
+      options: {},
+      bots: 1,
+      botLevel: "easy",
+    };
+    const context: GameRoomContext = {
+      key: "turbo-talk",
+      ownerId: "human",
+      isPrivate: true,
+      settings,
+      connections: () => 1,
+      introduce: () => {},
+      forget: () => {},
+      emitted: () => {},
+      changed: () => {},
+    };
+    const pool = makeBots(1, "easy", 2024).map((bot) => ({
+      ...bot,
+      speak: (moment: string, ply: number) => said.push({ moment, ply }),
+      restart: () => said.push({ moment: "restart", ply: -1 }),
+    }));
+    const room = new TurboRoom(
+      context,
+      settings,
+      () => at,
+      undefined,
+      pool as never,
+    );
+
+    return {
+      room,
+      said,
+      moments: () => said.map((one) => one.moment),
+      pass: (ms: number) => {
+        at += ms;
+      },
+      let: (ms = 30_000) => {
+        at += ms;
+        room.tick();
+      },
+    };
+  }
+
+  it("сел за стол — поздоровался", () => {
+    const table = talkingTable();
+    table.room.join("human");
+
+    // Перед приветствием бот забывает прошлую партию: колода снова полная.
+    assert.deepEqual(table.moments(), ["restart", "greeting"]);
+  });
+
+  it("забрал фигуру — сказал про взятие, потерял — про потерю", () => {
+    const table = talkingTable();
+    const { room } = table;
+    room.join("human");
+
+    // Играем, пока бот не срубит и пока у него не срубят.
+    for (let half = 0; half < 40; half++) {
+      const state = view(room, "human");
+      if (state.phase !== "playing") break;
+
+      if (state.turn === 0) {
+        const position = state.position as Position;
+        // Боту нужно и срубить, и потерять. Сперва человек берёт сам — бот
+        // отобьётся, и получится размен; брать нечего — идёт на сближение,
+        // и только если и сближаться не с кем, подставляет фигуру даром.
+        const pick =
+          grab(position) ??
+          approach(position) ??
+          offer(position) ??
+          legalMoves(position)[0];
+        assert.ok(pick, "человеку есть чем ходить");
+
+        send(room, position, pick, (state.moves as string[]).length);
+      } else {
+        table.let(20_000);
+      }
+
+      const moments = table.moments();
+      if (
+        moments.includes("botCapture") &&
+        (moments.includes("botLosesPiece") || moments.includes("botLosesQueen"))
+      ) {
+        break;
+      }
+    }
+
+    const moments = table.moments();
+    assert.ok(
+      moments.includes("botCapture"),
+      `сказанное: ${moments.join(", ")}`,
+    );
+    assert.ok(
+      moments.includes("botLosesPiece") || moments.includes("botLosesQueen"),
+      `сказанное: ${moments.join(", ")}`,
+    );
+  });
+
+  it("в начале партии говорит про дебют, а не про настроение", () => {
+    const table = talkingTable();
+    const { room } = table;
+    room.join("human");
+
+    assert.equal(move(room, "human", "d2", "d4").accepted, true);
+    table.let(20_000);
+
+    assert.ok(table.moments().includes("opening"));
+  });
+
+  it("проиграл — сказал про поражение, а не про мат", () => {
+    const table = talkingTable();
+    const { room } = table;
+    room.join("human");
+
+    assert.equal(move(room, "human", "e2", "e4").accepted, true);
+    table.let(20_000);
+    assert.equal(room.act(GAME_EVENT.resign, "human", {}).accepted, true);
+
+    const moments = table.moments();
+    assert.ok(moments.includes("botWins"), moments.join(", "));
+    assert.equal(moments.includes("botMates"), false, "матом тут не пахло");
+  });
+
+  it("новая партия — бот забывает сказанное и здоровается заново", () => {
+    const table = talkingTable();
+    const { room } = table;
+    room.join("human");
+
+    assert.equal(move(room, "human", "e2", "e4").accepted, true);
+    table.let(20_000);
+    assert.equal(room.act(GAME_EVENT.resign, "human", {}).accepted, true);
+    assert.equal(room.act(GAME_EVENT.rematch, "human", {}).accepted, true);
+
+    const moments = table.moments();
+    assert.ok(moments.includes("restart"), "колода сброшена");
+    assert.ok(moments.includes("rematch"));
+    assert.equal(
+      moments.filter((one) => one === "greeting").length,
+      2,
+      "поздоровался в обеих партиях",
+    );
+  });
+});
