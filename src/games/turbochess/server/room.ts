@@ -206,6 +206,15 @@ export class TurboRoom implements GameRoomState {
    * лишнем ходе подряд соседние записи оказываются одного игрока.
    */
   private lastTo: (number | null)[] = [];
+  /**
+   * Последняя реплика каждого бота — для экрана трансляции.
+   *
+   * Чат комнаты экрану не достаётся: платформа шлёт его только сидящим, и
+   * реплики людей так и остаются между ними. Бот же говорит на публику — его
+   * болтовня и есть контент для стрима (docs/BACKLOG.md E5), — поэтому его
+   * последнюю фразу комната держит у себя и отдаёт в снимок.
+   */
+  private said = new Map<string, string>();
   /** Боты за столом по их номеру игрока. Пустая — за столом одни живые. */
   private readonly bots = new Map<string, BotSeat>();
   /**
@@ -390,11 +399,21 @@ export class TurboRoom implements GameRoomState {
    * остатка: настенные часы прыгают при синхронизации.
    */
   deadline(): number | null {
-    const showing = this.showing();
-    return showing === null ? null : Date.now() + showing;
+    const waits = [this.showing(), this.botWait()].filter(
+      (wait): wait is number => wait !== null,
+    );
+    return waits.length === 0 ? null : Date.now() + Math.min(...waits);
   }
 
-  /** Сколько осталось — по расстановке, часам хода или ожиданию ушедшего. */
+  /**
+   * Сколько осталось из того, что человек считает глазами: карточка, стопка,
+   * расстановка, часы хода или ожидание ушедшего.
+   *
+   * Пауза бота сюда не входит. Будить комнату по ней надо, а показывать — нет:
+   * иначе во время хода бота часы на экране отсчитывали бы не его лимит, а
+   * секунды до его хода. Будить и показывать — разные вещи; так же разведено
+   * у шахмат (src/games/chess/docs/STREAM.md).
+   */
   private showing(): number | null {
     if (!this.playing()) return null;
 
@@ -412,10 +431,6 @@ export class TurboRoom implements GameRoomState {
     if (this.absence) {
       waits.push(Math.max(0, ABANDON_MS - (this.now() - this.absence.since)));
     }
-    // Ход бота — такой же срок, как часы: комната будится по нему и ходит в
-    // `tick`, а не по своему таймеру.
-    const bot = this.botWait();
-    if (bot !== null) waits.push(bot);
 
     return waits.length === 0 ? null : Math.min(...waits);
   }
@@ -602,6 +617,7 @@ export class TurboRoom implements GameRoomState {
         ? { event: this.card.event, by: this.card.by, miss: this.card.miss }
         : null,
       bingeLeft: this.decks ? bingeLeft(this.decks) : null,
+      said: Object.fromEntries(this.said),
       vetoed: [...this.vetoed],
       moves: this.game.history(),
       lastMove: this.game.lastMove(),
@@ -1081,6 +1097,7 @@ export class TurboRoom implements GameRoomState {
     this.card = null;
     this.decks = this.settings.mode === "BINGE" ? freshDecks() : null;
     this.lastTo = Array.from({ length: this.capacity }, () => null);
+    this.said.clear();
     this.forgetBots();
     this.greet();
 
@@ -1322,6 +1339,17 @@ export class TurboRoom implements GameRoomState {
     this.botBought.reverse();
     this.botSeen.reverse();
     this.botStanding.reverse();
+  }
+
+  /**
+   * Бот сказал реплику в чат — запомнить её для экрана. Зовёт серверная часть
+   * игры, когда реплика «допечаталась» и ушла в чат.
+   */
+  heard(botId: string, text: string): void {
+    if (!this.bots.has(botId)) return;
+
+    this.said.set(botId, text);
+    this.context.changed();
   }
 
   /** Карточку дочитали: часы хода пошли снова. */

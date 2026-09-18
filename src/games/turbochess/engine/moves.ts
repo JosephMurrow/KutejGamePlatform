@@ -647,7 +647,7 @@ export function legalMoves(position: Position): Move[] {
   const banned = position.banned;
   const moves = pseudoMoves(position).filter(
     (move) =>
-      !inCheck(position, position.turn, boardAfter(position, move)) &&
+      !exposes(position, move) &&
       // Отменённый «НЕТ» ход повторять нельзя: соперник обязан сходить иначе
       // (docs/MODES.md, режим 15).
       !(
@@ -662,6 +662,26 @@ export function legalMoves(position: Position): Move[] {
 
   const captures = allowed.filter((move) => move.captured);
   return captures.length > 0 ? captures : allowed;
+}
+
+/**
+ * Подставляет ли ход своего короля.
+ *
+ * Бьют по королю уже после хода — значит, и правила берутся те, что будут
+ * после него. Разница есть, когда на этом ходу тает эффект загула: под
+ * «Заносом» слон бьёт конём, и король может встать на его диагональ, — но
+ * занос истает этим же ходом, слон снова станет слоном и съест короля. Так и
+ * случилось в живой партии (docs/PLAN.md, этап 15в).
+ */
+function exposes(position: Position, move: Move): boolean {
+  const board = boardAfter(position, move);
+  if (position.effects.length === 0) {
+    return inCheck(position, position.turn, board);
+  }
+
+  const took = move.captured !== null && !stopped(move);
+  const after = { ...position, effects: effectsAfter(position, move, took) };
+  return inCheck(after, position.turn, board);
 }
 
 /**
@@ -756,17 +776,28 @@ export function play(position: Position, move: Move): Position {
   const bank = position.extra[mover] ?? 0;
   // «Кураж» загула: взятие даёт лишний ход, и платит за него он, а не банк.
   const swagger = took && bent(position, "swagger", mover) !== null;
+  const board = boardAfter(position, move);
+  const effects = effectsAfter(position, move, took);
+  // Шах кончает двойной ход — правило всех шахмат с лишним ходом: иначе
+  // вторым ходом объявивший шах просто съел бы короля. Лишний ход при этом
+  // сгорает, как если бы его сделали.
+  const checks =
+    (swagger || bank > 0) &&
+    position.sides.some(
+      (_, side) =>
+        side !== mover && inCheck({ ...position, board, effects }, side, board),
+    );
 
   return {
     ...position,
     ...reserveAfter(position, move),
-    board: boardAfter(position, move),
-    turn: swagger || bank > 0 ? mover : nextSide(position, mover),
+    board,
+    turn: (swagger || bank > 0) && !checks ? mover : nextSide(position, mover),
     extra:
       bank > 0 && !swagger
         ? position.extra.map((left, at) => (at === mover ? left - 1 : left))
         : position.extra,
-    effects: effectsAfter(position, move, took),
+    effects,
     // Король сходил — сгорают все права его стороны; ладья ушла или её
     // забрали — сгорает право с этой ладьёй. Отбитый щитом никуда не ходил.
     castling: stopped(move)

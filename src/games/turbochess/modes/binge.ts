@@ -216,13 +216,18 @@ function reshaped(
 }
 
 /**
- * Очередь остаётся за тянувшим ещё на столько ходов.
+ * Очередь остаётся за тянувшим ещё на столько ходов; `null` — нельзя.
  *
  * Ход, которым тянули карту, уже сделан и очередь уже ушла, поэтому первый
  * лишний ход — это просто возврат очереди, а остальные ложатся в тот же банк,
  * которым живёт купленный на рынке дополнительный ход.
  */
-function again(position: Position, side: Side, moves: number): Position {
+function again(position: Position, side: Side, moves: number): Position | null {
+  // Соперник под шахом — лишний ход отдал бы тянувшему его короля. Шах
+  // кончает двойной ход, как и в движке, и карта сгорает впустую.
+  const enemy = rival(position, side);
+  if (enemy >= 0 && inCheck(position, enemy)) return null;
+
   const spare = position.turn === side ? moves : moves - 1;
 
   return {

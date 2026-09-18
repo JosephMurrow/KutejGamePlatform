@@ -592,3 +592,49 @@ describe("загул: стороны и резерв", () => {
     }
   });
 });
+
+describe("загул: король не достаётся даром", () => {
+  it("король не встаёт на поле, которое станет битым, когда занос истает", () => {
+    // Чёрный слон c6 под заносом ходит конём и f3 не бьёт, но занос тает
+    // этим же ходом белых — и слон снова бьёт диагональ c6–f3.
+    const skid = bentPosition("4k3/8/2b5/8/8/8/4K3/8 w", {
+      kind: "skid",
+      side: null,
+      left: 1,
+    });
+
+    assert.ok(!targets(skid, "e2").includes("f3"), "на f3 король не пойдёт");
+  });
+
+  it("шах кончает лишний ход «Куража»", () => {
+    // Белая ладья берёт на e7 с шахом: кураж сгорает, а очередь уходит.
+    const game = new TurboGame(
+      bentPosition("4k3/4p3/8/8/8/8/8/K3R3 w", {
+        kind: "swagger",
+        side: 0,
+        left: 1,
+      }),
+    );
+
+    assert.equal(game.move({ from: "e1", to: "e7" }, 0).ok, true);
+    assert.equal(game.turn(), 1, "ход ушёл чёрным — королю есть куда бежать");
+    assert.deepEqual(game.position().effects, [], "кураж сгорел");
+  });
+
+  it("шах кончает и купленный лишний ход", () => {
+    const game = new TurboGame({
+      ...fromFen("4k3/8/8/8/8/8/8/K3R3 w"),
+      extra: [1, 0],
+    });
+
+    assert.equal(game.move({ from: "e1", to: "e7" }, 0).ok, true);
+    assert.equal(game.turn(), 1);
+    assert.deepEqual(game.position().extra, [0, 0], "лишний ход сгорел");
+  });
+
+  it("«Второе дыхание» при шахе сопернику — мимо", () => {
+    // Чёрный король под шахом ладьи: второй ход съел бы его.
+    assert.equal(deal("4k3/8/8/8/8/8/8/K3R3 b", "secondWind"), null);
+    assert.equal(deal("4k3/8/8/8/8/8/8/K3R3 b", "spree"), null);
+  });
+});

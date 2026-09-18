@@ -1565,6 +1565,31 @@ describe("бот жмёт кнопки режимов", () => {
     );
   });
 
+  it("часы в снимке — лимит хода, а не пауза бота", () => {
+    const table = botTable("CLASSIC");
+    const { room } = table;
+    assert.equal(move(room, "human", "e2", "e4").accepted, true);
+
+    // Ход бота: будить комнату надо по его паузе, а показывать — лимит хода.
+    const shown = room.snapshot({ kind: "player", id: "human" }).deadline;
+    const wake = room.deadline();
+    assert.ok(shown !== null && wake !== null);
+    assert.ok(shown - Date.now() > 170_000, "на часах три минуты хода");
+    assert.ok(wake < shown, "а будят комнату раньше — к ходу бота");
+  });
+
+  it("реплика бота доходит до экрана, людская — нет", () => {
+    const table = botTable("CLASSIC");
+    const { room, bot } = table;
+
+    room.heard(bot.id, "Тяну не глядя. Как всегда.");
+    room.heard("human", "это личное");
+
+    const said = view(room, "human").said as Record<string, string>;
+    assert.equal(said[bot.id], "Тяну не глядя. Как всегда.");
+    assert.equal(said.human, undefined, "чат людей экрану не достаётся");
+  });
+
   it("ядерные: без заряда бот бомбу не жмёт, а просто ходит", () => {
     const table = botTable("NUCLEAR", { threshold: 20 });
     const { room } = table;

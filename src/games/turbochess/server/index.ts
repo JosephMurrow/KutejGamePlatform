@@ -51,13 +51,22 @@ class TurboServer implements GameServer {
       seedFor(context.key),
     );
 
+    // Реплика бота уходит в чат и заодно — на экран трансляции: чат экрану не
+    // достаётся, а болтовня бота там и нужна. Комната рождается после ботов,
+    // поэтому голос узнаёт о ней по ссылке.
+    const heard = { room: null as TurboRoom | null };
     const room = new TurboRoom(
       context,
       settings,
       undefined,
       record,
-      pool.map((bot) => this.voiced(bot, context.key)),
+      pool.map((bot) =>
+        this.voiced(bot, context.key, (text) =>
+          heard.room?.heard(bot.id, text),
+        ),
+      ),
     );
+    heard.room = room;
     this.rooms.set(context.key, room);
 
     return Promise.resolve(room);
@@ -82,7 +91,12 @@ class TurboServer implements GameServer {
    * партии, и потерять реплику при перезапуске не страшно, а второй источник
    * времени внутри комнаты сломал бы её воспроизводимость.
    */
-  private voiced(bot: BotSeat, roomKey: string): BotSeat {
+  private voiced(
+    bot: BotSeat,
+    roomKey: string,
+    /** Реплика ушла в чат — сказать об этом комнате, для экрана. */
+    onSaid?: (text: string) => void,
+  ): BotSeat {
     const host = this.host;
     if (!host) return bot;
 
@@ -104,6 +118,7 @@ class TurboServer implements GameServer {
             text: line,
             at: Date.now(),
           });
+          onSaid?.(line);
         }, typingMs(line));
 
         this.typing.add(pending);

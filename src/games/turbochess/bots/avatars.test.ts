@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { CHARACTERS } from "./characters";
 import {
@@ -53,6 +53,23 @@ describe("аватары ботов", () => {
         existsSync(join(process.cwd(), "public", src)),
         `нет файла лица: ${src}`,
       );
+    }
+  });
+
+  it("ни у одного элемента лица нет повторённых атрибутов", () => {
+    // Браузер рисует SVG картинкой строгим XML-разбором: повторённый атрибут
+    // для него — ошибка, и лицо не показывается вовсе. Так лицо кальянщика
+    // полтора этапа было пустым местом (docs/PLAN.md, этап 15в).
+    for (let at = 0; at < CHARACTERS.length; at++) {
+      const src = botAvatarSrc(botAvatarId(at));
+      const svg = readFileSync(join(process.cwd(), "public", src), "utf8");
+
+      for (const tag of svg.match(/<[a-zA-Z][^>]*>/g) ?? []) {
+        const names = [...tag.matchAll(/\s([a-zA-Z:-]+)="/g)].map(
+          (found) => found[1],
+        );
+        assert.equal(new Set(names).size, names.length, `${src}: ${tag}`);
+      }
     }
   });
 });

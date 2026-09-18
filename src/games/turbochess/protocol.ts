@@ -126,6 +126,11 @@ export interface TurboStatePayload extends RoomStatePayload<TurboPlayerPayload> 
   } | null;
   /** «Загул»: сколько карт осталось в каждой колоде; вне режима — null. */
   bingeLeft: Record<BingeRank, number> | null;
+  /**
+   * Последняя реплика каждого бота, по номеру игрока. Для экрана трансляции:
+   * чат ему не достаётся, а болтовня бота там — часть зрелища.
+   */
+  said: Record<string, string>;
   /** «Анархия»: отменённые ходы — их показывают перечёркнутыми. */
   vetoed: { ply: number; san: string }[];
   /** Есть ли прямо сейчас основание требовать ничью. */
