@@ -196,10 +196,11 @@ export function GameRoom({
   return (
     <div className="mx-auto flex w-full max-w-5xl flex-1 flex-col gap-4 px-4 py-4">
       {/*
-        Шапка. Выход на витрину рисует платформа — он висит в углу над этой
-        строкой; здесь то, что нужно игроку: звук, разворот и меню.
+        Шапка. Выход на витрину рисует платформа — отдельной строкой над этой;
+        здесь то, что нужно игроку: звук, разворот и меню. Отступа под кнопку
+        выхода здесь нет: она не рядом, а выше, и отступ только сдвигал шапку.
       */}
-      <header className="flex items-center justify-between gap-3 pl-12">
+      <header className="flex items-center justify-between gap-3">
         <div className="flex items-center gap-2">
           <IconButton
             label={sound.on ? "Выключить звук" : "Включить звук"}
@@ -428,13 +429,12 @@ export function GameRoom({
               </p>
             ) : null}
 
-            <div className="h-72 lg:h-80">
-              <Chat
-                messages={room.chat}
-                youId={userId}
-                onSend={room.sendChat}
-              />
-            </div>
+            {/*
+              Высоту чат держит сам: список ходит в свои пределы и дальше
+              листается. Коробка фиксированной высоты была ниже чата, и он
+              вылезал из неё на телефоне поверх подвала страницы.
+            */}
+            <Chat messages={room.chat} youId={userId} onSend={room.sendChat} />
           </aside>
         </main>
       )}
