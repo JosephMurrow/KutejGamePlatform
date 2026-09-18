@@ -1,3 +1,4 @@
+import type { ReplayStep } from "./replay";
 import { parseSquare, squareName } from "./geometry";
 import { marked, piece, type Piece, type PieceKind, type Side } from "./pieces";
 import {
@@ -201,6 +202,18 @@ export class TurboGame {
   pieceAt(square: string): Piece | null {
     const index = parseSquare(this.top.position.geometry, square);
     return index === null ? null : (this.top.position.board[index] ?? null);
+  }
+
+  /**
+   * Позиция после каждого хода, от начальной, — по ней считаются кадры
+   * перемотки (engine/replay.ts). Событие загула правит позицию своего хода на
+   * месте, поэтому кадр хода показывает доску уже после события.
+   */
+  timeline(): ReplayStep[] {
+    return this.steps.map((step) => ({
+      position: step.position,
+      move: step.record ? { from: step.record.from, to: step.record.to } : null,
+    }));
   }
 
   /** Откуда и куда пошли последний раз; `null` — ходов ещё не было. */

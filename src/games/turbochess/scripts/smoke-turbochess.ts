@@ -49,6 +49,8 @@ interface TurboState extends RoomStatePayload {
   moves: string[];
   result: number | "draw" | null;
   reason: string | null;
+  /** Кадры перемотки: по одному на ход (engine/replay.ts). */
+  replay: { start: string; frames: string[] } | null;
 }
 
 class Client {
@@ -274,6 +276,11 @@ async function main() {
     "состояние восстановлено",
   );
   check("после реконнекта пришла вся партия", restored.moves.length === 2);
+  check(
+    "и перемотка на всю партию — кадр на каждый ход",
+    restored.replay?.frames.length === 2,
+    String(restored.replay?.frames.length),
+  );
   check("место осталось за игроком", restored.playerCount === 2);
   check("партия идёт", restored.phase === "playing", restored.phase);
 

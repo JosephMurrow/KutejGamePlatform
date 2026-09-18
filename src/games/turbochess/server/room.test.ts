@@ -4,6 +4,7 @@ import type { GameRoomContext, GameRoomEvent } from "@/lib/games/engine";
 import { squareName } from "../engine/geometry";
 import { attacked, legalMoves, play, type Move } from "../engine/moves";
 import type { Position } from "../engine/position";
+import { decodeReplay, type Replay } from "../engine/replay";
 import { TurboGame } from "../engine/game";
 import { PIECE_VALUE, nuclearCharge } from "../modes/nuclear";
 import { BINGE_CARD_MS, bingeLeft, freshDecks, puppeted } from "../modes/binge";
@@ -211,6 +212,16 @@ describe("ходы", () => {
     assert.deepEqual(view(room).lastMove, { from: "e2", to: "e4" });
     assert.equal(view(room).turn, 1);
     assert.ok(changes.length > before, "платформа узнала о ходе");
+  });
+
+  it("в снимке — кадры перемотки, по одному на ход", () => {
+    const { room } = seated();
+    move(room, "white", "e2", "e4");
+    move(room, "black", "e7", "e5");
+
+    const frames = decodeReplay(view(room).replay as Replay);
+    assert.equal(frames.length, 3, "начало и два хода");
+    assert.deepEqual(frames.at(-1)?.lastMove, { from: "e7", to: "e5" });
   });
 
   it("отказы — внятным текстом", () => {
@@ -602,6 +613,13 @@ describe("вскрываемся", () => {
   const kindAt = (room: TurboRoom, viewer: string, square: string) =>
     new TurboGame(view(room, viewer).position as Position).pieceAt(square)
       ?.kind ?? null;
+
+  it("пока расставляются вслепую, перемотки нет", () => {
+    const { room } = showdownTable();
+
+    assert.equal(view(room).phase, "setup");
+    assert.equal(view(room).replay, null, "иначе видно чужую расстановку");
+  });
 
   it("стол начинается с расстановки, а не с партии", () => {
     const { room } = showdownTable();

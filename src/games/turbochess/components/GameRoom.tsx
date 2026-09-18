@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Avatar } from "@/components/Avatar";
 import { UserMenu } from "@/components/UserMenu";
 import { Chat } from "@/components/room/Chat";
@@ -11,6 +11,7 @@ import type { DropKind, MarketItem, MoveInput } from "../engine/game";
 import { REASON_TEXT } from "../engine/outcome";
 import type { Side } from "../engine/pieces";
 import type { Position } from "../engine/position";
+import { decodeReplay, type ReplayFrame } from "../engine/replay";
 import { STALL_WARN, stallLeft, takenCount } from "../modes/annihilation";
 import { BATTLE_SIDE_NAME } from "../modes/battle";
 import {
@@ -88,6 +89,46 @@ export function GameRoom({
       : `${window.location.origin}/r/${roomCode}`;
 
   const state = room.state;
+
+  // Перемотка: какой полуход сейчас на доске; `null` — живая партия. Кадры
+  // шлёт сервер (engine/replay.ts): сам клиент партию не восстановит.
+  const [viewing, setViewing] = useState<number | null>(null);
+  const replay = state?.replay ?? null;
+  const frames = useMemo(() => (replay ? decodeReplay(replay) : []), [replay]);
+  const lastPly = frames.length - 1;
+  // История укоротилась — новая партия или отменённый «НЕТ» ход: номер хода
+  // из старой истории в новой ничего не значит, возвращаемся к живой доске.
+  const [knownLast, setKnownLast] = useState(lastPly);
+  if (lastPly !== knownLast) {
+    setKnownLast(lastPly);
+    if (lastPly < knownLast) setViewing(null);
+  }
+  const past =
+    viewing !== null && viewing < lastPly ? (frames[viewing] ?? null) : null;
+  /** Перейти к полуходу; последний — это живая партия. */
+  const goTo = (ply: number) =>
+    setViewing(ply >= lastPly ? null : Math.max(0, ply));
+
+  // Стрелки листают ходы, если человек не пишет в чат.
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+      const target = event.target as HTMLElement | null;
+      if (target?.closest("input, textarea, select, [contenteditable]")) return;
+      if (lastPly <= 0) return;
+
+      event.preventDefault();
+      setViewing((was) => {
+        const at = was ?? lastPly;
+        const next = event.key === "ArrowLeft" ? Math.max(0, at - 1) : at + 1;
+        return next >= lastPly ? null : next;
+      });
+    };
+
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [lastPly]);
+
   const me = state?.players.find((player) => player.id === userId) ?? null;
   const mySide = me?.seat ?? null;
   const playing = state?.phase === "playing";
@@ -230,20 +271,22 @@ export function GameRoom({
               }
             >
               <Board
-                position={state.position}
+                position={past ? frameAt(state.position, past) : state.position}
                 // «Чужими руками»: за тебя ходит компьютер, и доска это знает.
+                // В перемотке доска только показывает: ходят с живой.
                 controls={
                   playing &&
+                  !past &&
                   mySide !== null &&
                   !puppeted(state.position, mySide)
                     ? [mySide]
                     : []
                 }
-                lastMove={state.lastMove}
+                lastMove={past ? past.lastMove : state.lastMove}
                 // «Тремор» переворачивает доску обоим — поверх того, как её
                 // развернул сам игрок (docs/MODES.md, режим 12).
-                flipped={orientation !== shaking(state.position)}
-                blind={blinded(state.position, mySide)}
+                flipped={orientation !== (!past && shaking(state.position))}
+                blind={!past && blinded(state.position, mySide)}
                 covered={state.covered}
                 onSwap={
                   arranging ? (from, to) => void room.swap(from, to) : undefined
@@ -254,6 +297,7 @@ export function GameRoom({
                 }
               />
             </div>
+            <Rewind at={viewing} last={lastPly} onGo={goTo} />
           </div>
 
           <aside className="flex w-full flex-col gap-3 lg:w-72">
@@ -314,6 +358,8 @@ export function GameRoom({
                   moves={state.moves}
                   vetoed={state.vetoed}
                   seats={state.seats}
+                  at={past ? viewing : null}
+                  onPick={goTo}
                 />
               </>
             ) : (
@@ -325,7 +371,12 @@ export function GameRoom({
                   you={userId}
                   onCallBot={room.callBot}
                 />
-                <Moves moves={state.moves} vetoed={state.vetoed} />
+                <Moves
+                  moves={state.moves}
+                  vetoed={state.vetoed}
+                  at={past ? viewing : null}
+                  onPick={goTo}
+                />
                 <Seat
                   state={state}
                   side={orientation ? 1 : 0}
@@ -1079,11 +1130,17 @@ function Moves({
   moves,
   vetoed,
   seats = 2,
+  at,
+  onPick,
 }: {
   moves: string[];
   vetoed: { ply: number; san: string }[];
   /** Сколько мест за столом: вчетвером в строке четыре хода, а не два. */
   seats?: number;
+  /** Какой полуход сейчас в перемотке; `null` — живая доска. */
+  at: number | null;
+  /** Показать доску после этого полухода. */
+  onPick: (ply: number) => void;
 }) {
   /** Что отменили перед этим полуходом. */
   const cancelled = (ply: number) =>
@@ -1114,7 +1171,18 @@ function Moves({
                           {san}
                         </s>
                       ))}
-                      {moves[ply] ?? ""}
+                      {moves[ply] ? (
+                        <button
+                          type="button"
+                          onClick={() => onPick(ply + 1)}
+                          aria-current={at === ply + 1 ? "step" : undefined}
+                          className={`rounded px-1 transition hover:bg-tint ${
+                            at === ply + 1 ? "bg-accent text-surface" : ""
+                          }`}
+                        >
+                          {moves[ply]}
+                        </button>
+                      ) : null}
                     </span>
                   );
                 })}
@@ -1125,6 +1193,104 @@ function Moves({
       )}
     </div>
   );
+}
+
+/**
+ * Перемотка под доской: в начало, назад, вперёд, к живой партии. Пока
+ * смотришь прошлый ход, доска только показывает, а часы идут своим чередом —
+ * поэтому возврат к партии на виду, а не в углу.
+ */
+function Rewind({
+  at,
+  last,
+  onGo,
+}: {
+  at: number | null;
+  last: number;
+  onGo: (ply: number) => void;
+}) {
+  if (last <= 0) return null;
+
+  const current = at ?? last;
+  const step =
+    "flex size-10 items-center justify-center rounded-xl border border-line bg-paper text-lg font-semibold text-muted transition hover:border-accent hover:text-accent disabled:opacity-40";
+
+  return (
+    <div className="mt-2 flex items-center gap-2">
+      <button
+        type="button"
+        aria-label="К началу партии"
+        onClick={() => onGo(0)}
+        disabled={current === 0}
+        className={step}
+      >
+        «
+      </button>
+      <button
+        type="button"
+        aria-label="Ход назад"
+        onClick={() => onGo(current - 1)}
+        disabled={current === 0}
+        className={step}
+      >
+        ‹
+      </button>
+
+      {at === null ? (
+        <span className="flex-1 text-center text-xs text-muted">
+          партия идёт · стрелки листают ходы
+        </span>
+      ) : (
+        <button
+          type="button"
+          onClick={() => onGo(last)}
+          className="flex-1 rounded-xl bg-accent px-3 py-2 text-sm font-semibold text-surface transition hover:bg-deep"
+        >
+          <span className="tabular">
+            Ход {current} из {last}
+          </span>{" "}
+          · к партии
+        </button>
+      )}
+
+      <button
+        type="button"
+        aria-label="Ход вперёд"
+        onClick={() => onGo(current + 1)}
+        disabled={at === null}
+        className={step}
+      >
+        ›
+      </button>
+      <button
+        type="button"
+        aria-label="К последнему ходу"
+        onClick={() => onGo(last)}
+        disabled={at === null}
+        className={step}
+      >
+        »
+      </button>
+    </div>
+  );
+}
+
+/**
+ * Кадр перемотки как позиция для доски. Кадр знает только расстановку, ход и
+ * очередь, поэтому всё остальное — эффекты, резерв, рокировки — гасится:
+ * доска в перемотке показывает, как стояли фигуры, и не подсказывает ходов.
+ */
+function frameAt(position: Position, frame: ReplayFrame): Position {
+  return {
+    ...position,
+    board: frame.board,
+    turn: frame.turn,
+    effects: [],
+    enPassant: null,
+    castling: [],
+    reserve: position.reserve.map(() => []),
+    pending: [],
+  };
 }
 
 function Controls({

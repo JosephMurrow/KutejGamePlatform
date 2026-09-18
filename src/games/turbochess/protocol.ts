@@ -2,6 +2,7 @@ import type { PlayerPayload, RoomStatePayload } from "@/shared/protocol";
 import type { Result, EndReason } from "./engine/outcome";
 import type { Side } from "./engine/pieces";
 import type { Position } from "./engine/position";
+import type { Replay } from "./engine/replay";
 import type { BingeEvent, BingeRank } from "./modes/binge";
 import type { TurboMode } from "./modes/catalog";
 import type { ModeOptions, TimeControl } from "./rooms/settings";
@@ -131,6 +132,11 @@ export interface TurboStatePayload extends RoomStatePayload<TurboPlayerPayload> 
    * чат ему не достаётся, а болтовня бота там — часть зрелища.
    */
   said: Record<string, string>;
+  /**
+   * Перемотка: доска после каждого полухода, сжатая до разницы с прошлым
+   * кадром (engine/replay.ts). Во время расстановки вслепую — null.
+   */
+  replay: Replay | null;
   /** «Анархия»: отменённые ходы — их показывают перечёркнутыми. */
   vetoed: { ply: number; san: string }[];
   /** Есть ли прямо сейчас основание требовать ничью. */

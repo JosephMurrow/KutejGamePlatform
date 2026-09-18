@@ -33,6 +33,7 @@ import {
   type MoveRejection,
 } from "../engine/game";
 import { inCheck, legalMoves, play } from "../engine/moves";
+import { encodeReplay } from "../engine/replay";
 import type { EndReason, Outcome } from "../engine/outcome";
 import type { PieceKind, Side } from "../engine/pieces";
 import { alive, type Position } from "../engine/position";
@@ -618,6 +619,17 @@ export class TurboRoom implements GameRoomState {
         : null,
       bingeLeft: this.decks ? bingeLeft(this.decks) : null,
       said: Object.fromEntries(this.said),
+      // Перемотка: кадры такие, какими доску видит это место, — чужой
+      // двойной агент спрятан и в прошлых ходах. Пока идёт расстановка
+      // вслепую, перематывать нечего: партия ещё не началась.
+      replay: setup
+        ? null
+        : encodeReplay(
+            this.game.timeline().map((step) => ({
+              ...step,
+              position: hideAgents(step.position, seat),
+            })),
+          ),
       vetoed: [...this.vetoed],
       moves: this.game.history(),
       lastMove: this.game.lastMove(),
