@@ -16,6 +16,7 @@ import type { ChessColor, ChessPlayerPayload } from "../protocol";
 import { Board } from "./Board";
 import { frames, START, taken } from "./replay";
 import { useSound } from "@/components/room/sound";
+import { TurnAlert } from "@/components/room/TurnAlert";
 import { LeaderboardModal } from "./leaderboard/Modal";
 import { useChessRoom } from "./useChessRoom";
 
@@ -95,8 +96,21 @@ export function GameRoom({
   // Доска есть не всегда: в общем зале до посадки человек стоит в очереди.
   const board = state !== null && state.phase !== "queue";
 
+  // Чья очередь — для зова к ходу. Метка — цвет того, кто ходит.
+  const turn =
+    state === null ? undefined : state.phase === "playing" ? state.turn : null;
+  const mover = state?.players.find((player) => player.color === state.turn);
+
   return (
     <div className="mx-auto flex w-full max-w-5xl flex-1 flex-col gap-4 px-4 py-4">
+      <TurnAlert
+        turn={turn}
+        mine={myColor !== null && state?.turn === myColor}
+        watcher={myColor === null ? (mover?.nickname ?? null) : null}
+        sound={sound}
+        popup
+      />
+
       {/*
         Шапка. Выход на витрину рисует платформа — он висит в углу над этой
         строкой; здесь то, что нужно игроку: звук, разворот доски и меню, из

@@ -13,6 +13,8 @@ import { MENU_LINKS } from "../menu";
 import type { GameStatePayload } from "@/games/pricetitute/protocol";
 import { BetInput } from "./BetInput";
 import { Chat } from "@/components/room/Chat";
+import { useSound } from "@/components/room/sound";
+import { TurnAlert } from "@/components/room/TurnAlert";
 import { Countdown } from "@/components/ui/Countdown";
 import { Finished } from "./Finished";
 import { LonelyNotice } from "./LonelyNotice";
@@ -21,6 +23,9 @@ import { Reveal } from "./Reveal";
 import { RoomPanel } from "./RoomPanel";
 import { useGameRoom } from "./useGameRoom";
 import { ROUTES } from "../manifest";
+
+/** За сколько до конца срока ещё раз позвать того, кто не сделал ход. */
+const REMIND_BEFORE_MS = 10_000;
 
 export function GameRoom({
   nickname,
@@ -45,6 +50,25 @@ export function GameRoom({
 
   const phase = state?.phase ?? null;
   const actionable = needsInput(state);
+  const sound = useSound("pricetitute:sound");
+
+  // Зов к ходу: стал ведущим или пора ставить, а ставки нет. Попапа здесь нет —
+  // на экране и так крупно написано, что делать; зовём звуком и вкладкой, только
+  // когда человек не на странице. Метка «ведущий» живёт и чтение, и ввод суммы:
+  // зовём один раз на раунд, а не на каждую фазу.
+  const turn =
+    state === null
+      ? undefined
+      : actionable
+        ? state.hostId === state.youId
+          ? "host"
+          : "bet"
+        : null;
+  // Не поставил, а время на исходе — напоминаем ещё раз.
+  const remindAt =
+    actionable && state?.deadline != null
+      ? state.deadline - room.clockOffset - REMIND_BEFORE_MS
+      : null;
 
   // Посреди партии уход рвёт сокет и высаживает из круга ходов. Кнопку выхода
   // рисует платформа, а про идущую партию знаем только мы — вторую строку
@@ -82,6 +106,14 @@ export function GameRoom({
 
   return (
     <div className="mx-auto flex w-full max-w-5xl flex-1 flex-col gap-4 px-4 py-5">
+      <TurnAlert
+        turn={turn}
+        mine={actionable}
+        sound={sound}
+        popup={false}
+        remindAt={remindAt}
+      />
+
       <header className="flex items-center justify-between gap-3">
         <Link href="/">
           <GameBrand className="text-xl" />

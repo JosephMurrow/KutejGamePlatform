@@ -45,6 +45,7 @@ import { Board } from "./Board";
 import { PIECE_NAME } from "./pieces";
 import { FlipIcon, IconButton, SoundIcon } from "./icons";
 import { useSound } from "@/components/room/sound";
+import { TurnAlert } from "@/components/room/TurnAlert";
 import { useTurboRoom } from "./useTurboRoom";
 
 /**
@@ -193,8 +194,26 @@ export function GameRoom({
   /** Доска больше обычной — её показывают с прокруткой и приближением. */
   const wide = (state?.position?.geometry.width ?? 8) > 8;
 
+  // Чья очередь — для зова к ходу. Метка — место того, кто ходит: купленный
+  // лишний ход её не меняет, и второй раз подряд никого не зовут.
+  const turn =
+    state === null
+      ? undefined
+      : playing && state.turn !== null
+        ? String(state.turn)
+        : null;
+  const mover = state?.players.find((player) => player.seat === state.turn);
+
   return (
     <div className="mx-auto flex w-full max-w-5xl flex-1 flex-col gap-4 px-4 py-4">
+      <TurnAlert
+        turn={turn}
+        mine={mySide !== null && state?.turn === mySide}
+        watcher={mySide === null ? (mover?.nickname ?? null) : null}
+        sound={sound}
+        popup
+      />
+
       {/*
         Шапка. Выход на витрину рисует платформа — отдельной строкой над этой;
         здесь то, что нужно игроку: звук, разворот и меню. Отступа под кнопку
