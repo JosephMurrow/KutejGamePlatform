@@ -21,6 +21,7 @@ import {
   blinded,
   effectLeft,
   effectWhom,
+  puppeted,
   shaking,
 } from "../modes/binge";
 import { modeInfo } from "../modes/catalog";
@@ -230,7 +231,14 @@ export function GameRoom({
             >
               <Board
                 position={state.position}
-                controls={playing && mySide !== null ? [mySide] : []}
+                // «Чужими руками»: за тебя ходит компьютер, и доска это знает.
+                controls={
+                  playing &&
+                  mySide !== null &&
+                  !puppeted(state.position, mySide)
+                    ? [mySide]
+                    : []
+                }
                 lastMove={state.lastMove}
                 // «Тремор» переворачивает доску обоим — поверх того, как её
                 // развернул сам игрок (docs/MODES.md, режим 12).

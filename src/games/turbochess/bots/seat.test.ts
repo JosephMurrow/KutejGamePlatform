@@ -3,7 +3,7 @@ import { describe, it } from "node:test";
 import { BOT_AVATAR_OFFSET } from "./avatars";
 import { CHARACTER_TRAITS } from "./characters";
 import { LEVELS } from "./levels";
-import { isBot, makeBots } from "./seat";
+import { computerSeat, isBot, makeBots } from "./seat";
 
 /**
  * Кто садится за стол. Главное здесь — что боты с одним зерном получаются
@@ -60,5 +60,19 @@ describe("боты за столом", () => {
     assert.ok(bot);
     assert.equal(isBot(bot.id), true);
     assert.equal(isBot("cme8s9a0k0000abcd"), false);
+  });
+});
+
+describe("компьютер за игрока", () => {
+  it("ходит от имени игрока, без характера и без голоса", () => {
+    const computer = computerSeat("human", "hard");
+
+    assert.equal(computer.id, "human", "стучится в дверь от имени игрока");
+    assert.equal(computer.level.id, "hard", "силы — как у программ комнаты");
+    assert.equal(computer.speak, undefined, "у чужого хода голоса нет");
+    assert.ok(
+      Object.values(computer.traits.style).every((taste) => taste === 0),
+      "вкуса к ходам у него нет",
+    );
   });
 });

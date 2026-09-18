@@ -6,7 +6,7 @@ import type {
   GameRoomState,
   GameViewer,
 } from "@/lib/games/engine";
-import type { BotRecord, BotSeat } from "../bots/seat";
+import { computerSeat, type BotRecord, type BotSeat } from "../bots/seat";
 import {
   bombCall,
   chanceCall,
@@ -44,6 +44,7 @@ import {
   bingeSwapsSeats,
   drawBinge,
   freshDecks,
+  puppeted,
   thirstCut,
   type BingeDecks,
   type BingeEvent,
@@ -719,10 +720,21 @@ export class TurboRoom implements GameRoomState {
   /** Бот, чья сейчас очередь; `null` — ход человека или партия стоит. */
   private botToMove(): BotSeat | null {
     if (!this.playing() || this.toast || this.setupUntil !== null) return null;
+    // Под карточкой не ходит никто, и компьютер тоже: доски не видно.
+    if (this.card) return null;
 
     const at = this.game.turn();
     const id = this.seats[at];
-    return id === undefined ? null : (this.bots.get(id) ?? null);
+    if (id === undefined) return null;
+
+    // «Чужими руками»: за эту сторону ходит компьютер, кто бы за ней ни сидел
+    // (docs/MODES.md, режим 12). Он идёт той же дорогой, что и бот, — пауза,
+    // перебор, дверь хода, — только без характера и без голоса.
+    if (puppeted(this.game.position(), at)) {
+      return computerSeat(id, this.settings.botLevel);
+    }
+
+    return this.bots.get(id) ?? null;
   }
 
   /**
@@ -902,7 +914,7 @@ export class TurboRoom implements GameRoomState {
 
     // Оценка после своего хода запоминается до чужого: по разнице потом видно,
     // во сколько обошёлся ход соперника.
-    this.makeMove(bot.id, { ...thought.input, ply: this.game.ply() });
+    this.makeMove(bot.id, { ...thought.input, ply: this.game.ply() }, true);
     this.botEdge[seat] = evaluate(this.game.position(), seat);
   }
 
@@ -1143,7 +1155,12 @@ export class TurboRoom implements GameRoomState {
     this.resetOffers();
   }
 
-  private makeMove(actorId: string, payload: unknown): ActionOutcome {
+  private makeMove(
+    actorId: string,
+    payload: unknown,
+    /** Ход сделала программа — бот за себя или компьютер за человека. */
+    byComputer = false,
+  ): ActionOutcome {
     const side = this.sideOf(actorId);
     if (side === null) return { accepted: false, reason: "Ты не за доской" };
     if (this.game.isOver()) {
@@ -1159,6 +1176,9 @@ export class TurboRoom implements GameRoomState {
     if (this.card) return { accepted: false, reason: "Сначала карточка" };
     if (side !== this.game.turn()) {
       return { accepted: false, reason: "Сейчас не твой ход" };
+    }
+    if (!byComputer && puppeted(this.game.position(), side)) {
+      return { accepted: false, reason: "За тебя ходит компьютер" };
     }
 
     const input = parseMove(payload);
@@ -1267,7 +1287,21 @@ export class TurboRoom implements GameRoomState {
       miss: deal.position === null,
       until: at + BINGE_CARD_MS,
     };
+    // Карта — новость громче взятия: про неё говорят раньше, а про взятие
+    // бот промолчит — пауза после реплики у него общая.
+    for (let seat = 0; seat < this.capacity; seat++) {
+      this.tell(
+        seat,
+        !deal.position
+          ? "bingeMiss"
+          : seat === side
+            ? "bingeDraw"
+            : "bingeSuffer",
+      );
+    }
+
     // «Обмен любезностями»: доски событие не касается, а стол — касается.
+    // Пересаживаем после реплик: иначе про свою карту сказал бы не тот.
     if (deal.position && bingeSwapsSeats(deal.event)) this.swapSeats();
 
     return deal.position ? this.game.reshape(deal.position) : null;

@@ -73,6 +73,45 @@ export function makeBots(
   }));
 }
 
+/**
+ * Компьютер без характера: делает ход за игрока по «Чужими руками» загула
+ * (docs/MODES.md, режим 12).
+ *
+ * Не персонаж. Ни ника, ни лица, ни голоса: он не садится за стол, а ходит за
+ * того, кто уже сидит, — поэтому и номер игрока у него чужой, и в дверь
+ * комнаты он стучится от имени этого игрока. Вкуса у него нет — из равных
+ * ходов он не выбирает ни взятие, ни рокировку, — а сила та, что выбрана для
+ * программ этой комнаты. Характер ему всё равно нужен по форме записи: взят
+ * самый ровный, стратег, с обнулённой манерой.
+ */
+export function computerSeat(playerId: string, level: LevelId): BotSeat {
+  const calm = CHARACTER_TRAITS.strategist;
+
+  return {
+    id: playerId,
+    nickname: "Компьютер",
+    avatarId: 0,
+    level: LEVELS[level],
+    character: calm.id,
+    traits: {
+      ...calm,
+      style: {
+        capture: 0,
+        check: 0,
+        promotion: 0,
+        castle: 0,
+        drop: 0,
+        advance: 0,
+        retreat: 0,
+        edge: 0,
+      },
+      tempo: 1,
+      sloppy: 0,
+      fade: 0,
+    },
+  };
+}
+
 /** Номер лица характера: лицо рисуется под характер, а не под место за столом. */
 function index(character: Character): number {
   return CHARACTERS.indexOf(character);

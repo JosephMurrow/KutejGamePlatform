@@ -6,7 +6,7 @@ import { attacked, legalMoves, play, type Move } from "../engine/moves";
 import type { Position } from "../engine/position";
 import { TurboGame } from "../engine/game";
 import { PIECE_VALUE, nuclearCharge } from "../modes/nuclear";
-import { BINGE_CARD_MS, bingeLeft, freshDecks } from "../modes/binge";
+import { BINGE_CARD_MS, bingeLeft, freshDecks, puppeted } from "../modes/binge";
 import { TOAST_MS } from "../modes/booze";
 import { modeInfo, type TurboMode } from "../modes/catalog";
 import { BOT_AVATAR_OFFSET } from "../bots/avatars";
@@ -912,6 +912,47 @@ describe("кнопки режимов", () => {
       "Сначала карточка",
       "и партия пошла дальше",
     );
+  });
+
+  it("загул: «Чужими руками» — за человека ходит компьютер", () => {
+    // Какая карта выпадет, решает зерно комнаты, и снаружи его не задать —
+    // поэтому ищется стол, где первой пешечной картой вышла эта. Карт в колоде
+    // десять: двести столов промахиваются реже, чем раз на миллиард.
+    for (let attempt = 0; attempt < 200; attempt++) {
+      const { room, pass } = table("BINGE");
+      move(room, "white", "e2", "e4");
+      move(room, "black", "d7", "d5");
+      move(room, "white", "e4", "d5");
+
+      const card = view(room).binge as { event: { id: string } } | null;
+      if (card?.event.id !== "puppet") continue;
+
+      pass(BINGE_CARD_MS);
+      room.tick();
+      assert.equal(
+        move(room, "black", "d8", "d5").reason,
+        "За тебя ходит компьютер",
+        "свой ход человеку не дают",
+      );
+
+      // Компьютер думает, как бот, — пауза и перебор, — и ходит сам.
+      const played = () => (view(room).moves as string[]).length;
+      for (let wait = 0; wait < 10 && played() < 4; wait++) {
+        pass(10_000);
+        room.tick();
+      }
+      assert.equal(played(), 4, "ход за чёрных сделан");
+      // Отбив пешку, компьютер мог и сам вытянуть карту — поэтому проверяется
+      // не «эффектов нет», а что истаял именно этот.
+      assert.equal(
+        puppeted(view(room).position as Position, 1),
+        false,
+        "«Чужими руками» истаяло",
+      );
+      return;
+    }
+
+    assert.fail("за двести столов «Чужими руками» не выпало ни разу");
   });
 
   it("загул: без взятия карты не тянут, а в чужом режиме их нет вовсе", () => {

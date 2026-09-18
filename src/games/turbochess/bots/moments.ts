@@ -102,7 +102,13 @@ export type ModeMoment =
   /** Королевская битва: сосед выбыл. */
   | "knockout"
   /** Мега-шахматы: фигура получила мега-форму. */
-  | "mega";
+  | "mega"
+  /** Загул: срубил — и вытянул событие сам. */
+  | "bingeDraw"
+  /** Загул: событие вытянул соперник, и бьёт оно, скорее всего, по боту. */
+  | "bingeSuffer"
+  /** Загул: карта сгорела впустую — в позиции ей нечего было делать. */
+  | "bingeMiss";
 
 export type Moment = BaseMoment | ModeMoment;
 
@@ -146,6 +152,7 @@ export const MODE_MOMENTS: Partial<Record<TurboMode, readonly ModeMoment[]>> = {
   SHOWDOWN: ["ready", "reveal"],
   BATTLE_ROYALE: ["knockout"],
   MEGA: ["mega"],
+  BINGE: ["bingeDraw", "bingeSuffer", "bingeMiss"],
 };
 
 /** Сколько реплик просит момент: базовые — колодой, режимные — горстью. */

@@ -19,6 +19,7 @@ import {
   drawBinge,
   effectLeft,
   freshDecks,
+  puppeted,
   shaking,
   thirstCut,
   type BingeDecks,
@@ -158,6 +159,7 @@ describe("загул: колоды", () => {
 
     assert.match(lines, /колод/i);
     assert.match(lines, /мимо/i);
+    assert.equal(BINGE_EVENTS.length, 28, "все события постановки на месте");
     assert.deepEqual(
       bingePosition().extra,
       [0, 0],
@@ -486,6 +488,20 @@ describe("загул: согнутые правила", () => {
       }),
       null,
     );
+  });
+
+  it("«Чужими руками» отдаёт следующий ход соперника компьютеру", () => {
+    const after = deal("4k3/8/8/8/8/8/8/R3K3 b", "puppet");
+    assert.ok(after);
+
+    assert.equal(puppeted(after, 1), true, "за соперника ходит компьютер");
+    assert.equal(puppeted(after, 0), false, "за тянувшего — нет");
+    assert.equal(puppeted(after, null), false, "у зрителя стороны нет");
+
+    // Эффект направленный: тает на ходе того, за кого ходили.
+    const game = new TurboGame(after);
+    assert.equal(game.move({ from: "e8", to: "e7" }, 0).ok, true);
+    assert.equal(puppeted(game.position(), 1), false);
   });
 
   it("счётчик эффекта читается человеческим текстом", () => {

@@ -33,13 +33,6 @@ import {
  */
 export const BINGE_CARD_MS = 2_500;
 
-/**
- * Сколько событий у режима по постановке. Написаны пока не все: остальные
- * доезжают подэтапами этого же этапа, и до тех пор карточка правил говорит об
- * этом прямо — обещать двадцать восемь и дать половину нечестно.
- */
-export const BINGE_TOTAL = 28;
-
 /** Ранг колоды: у каждого — свои события и своя цена входа. */
 export type BingeRank = "pawn" | "minor" | "rook" | "queen";
 
@@ -339,6 +332,16 @@ const CARDS: readonly Card[] = [
     title: "Заплетается",
     text: "Пешки обеих сторон ходят вбок на одну клетку без взятия. Два хода.",
     play: bends(() => ({ kind: "stagger", side: null, left: 2 })),
+  },
+  {
+    id: "puppet",
+    rank: "pawn",
+    title: "Чужими руками",
+    text: "Следующий ход соперника делает компьютер.",
+    play: bends((position, side) => {
+      const enemy = rival(position, side);
+      return enemy < 0 ? null : { kind: "puppet", side: enemy, left: 1 };
+    }),
   },
   {
     id: "thirst",
@@ -910,6 +913,7 @@ export const EFFECT_LABEL: Record<EffectKind, string> = {
   swagger: "Кураж",
   closed: "Кабак закрыт",
   thirst: "Сушняк",
+  puppet: "Чужими руками",
 };
 
 /** И что он делает — одной короткой строкой, рядом с названием. */
@@ -923,6 +927,7 @@ export const EFFECT_HINT: Record<EffectKind, string> = {
   swagger: "взятие даст лишний ход",
   closed: "без рокировки и взятия на проходе",
   thirst: "меньше времени на ход",
+  puppet: "ходит компьютер",
 };
 
 /** Сколько эффекту осталось — человеческим текстом для полосы. */
@@ -944,6 +949,14 @@ export function effectWhom(effect: Effect, mySide: Side | null): string {
 /** «Слепота»: этой стороне ходы не подсвечиваются. */
 export function blinded(position: Position, side: Side | null): boolean {
   return side !== null && bent(position, "blind", side) !== null;
+}
+
+/**
+ * «Чужими руками»: ход за эту сторону сейчас сделает компьютер, а не тот, кто
+ * за ней сидит.
+ */
+export function puppeted(position: Position, side: Side | null): boolean {
+  return side !== null && bent(position, "puppet", side) !== null;
 }
 
 /** «Тремор»: доска показана вверх ногами — обоим сразу. */
@@ -976,10 +989,5 @@ export function bingeRules(): string[] {
     "Сыгравшая карта выбывает до конца партии, и колоды общие на двоих: что выпало одному, второму уже не выпадет. Кончилась колода — взятия этого ранга событий больше не дают.",
     "Событие, которому в этой позиции нечего делать, сгорает впустую: карточка покажет «мимо».",
     "Сколько карт осталось в каждой колоде — видно обоим.",
-    ...(BINGE_EVENTS.length < BINGE_TOTAL
-      ? [
-          `Событий пока ${BINGE_EVENTS.length} из ${BINGE_TOTAL}: остальные доезжают на этом же этапе.`,
-        ]
-      : []),
   ];
 }
