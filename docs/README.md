@@ -26,6 +26,7 @@
 | Выкладывать                       | [DEPLOY.md](./DEPLOY.md)                         |
 | Понять, почему сделано именно так | [HISTORY.md](./HISTORY.md)                       |
 | Написать патчноут для игроков     | [PATCHNOTES.md](./PATCHNOTES.md)                 |
+| Закрыть дыру, поставить лимит     | [SECURITY.md](./SECURITY.md)                     |
 | Взять работу                      | [BACKLOG.md](./BACKLOG.md), [PLAN.md](./PLAN.md) |
 
 ## Для агента
