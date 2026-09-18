@@ -161,7 +161,7 @@ export class TurboRoom implements GameRoomState {
   private times: number[] = [];
   /** Постоянный на всю партию: запись обновляется, а не плодится. */
   private matchId = randomUUID();
-  private seed = newSeed();
+  private seed: number;
   /** Кто предложил ничью и ждёт ответа. */
   private offer: Side | null = null;
   /** На каком полуходе каждая сторона предлагала в последний раз. */
@@ -263,7 +263,14 @@ export class TurboRoom implements GameRoomState {
      * комнаты (docs/BOTS.md, А6).
      */
     private readonly pool: readonly BotSeat[] = [],
+    /**
+     * Откуда брать зерно партии. В жизни — случайное; проверки задают своё,
+     * чтобы партия с ботом повторялась ход в ход и падение можно было
+     * воспроизвести.
+     */
+    private readonly seeds: () => number = newSeed,
   ) {
+    this.seed = seeds();
     // Режим встаёт в партию через начальную позицию: движок про режимы не знает.
     this.game = this.newGame();
     this.clock = new MoveClock(MOVE_LIMIT_MS[settings.timeControl], now);
@@ -1174,7 +1181,7 @@ export class TurboRoom implements GameRoomState {
   private fresh(): void {
     // Зерно меняется раньше доски: по нему она и собирается.
     this.matchId = randomUUID();
-    this.seed = newSeed();
+    this.seed = this.seeds();
     this.game = this.newGame();
     this.setupUntil = null;
     this.arrangement = [];
