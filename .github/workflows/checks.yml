@@ -38,3 +38,7 @@ jobs:
       - run: npm test
       - run: npm run format:check
       - run: npm run build
+
+      # Уязвимые боевые зависимости: высокие и критические, кроме разобранных
+      # и принятых в scripts/audit-check.mjs (docs/SECURITY.md, S-A2).
+      - run: npm run audit:check

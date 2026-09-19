@@ -1,6 +1,6 @@
 "use server";
 
-import { getSessionUserId } from "@/lib/auth/session";
+import { sessionCaller } from "@/lib/auth/session";
 import { loadBoard } from "./board";
 import type { BoardView } from "./shape";
 
@@ -11,8 +11,12 @@ import type { BoardView } from "./shape";
  * окна целый слой незачем — так же сделано у платитутки.
  */
 export async function fetchBoard(): Promise<BoardView | null> {
-  const viewerId = await getSessionUserId();
-  if (!viewerId) return null;
+  // Гостю читать рейтинг можно: это ники и очки, ничего не меняется. Окно
+  // рейтинга в комнате ему уже показывают, и отказ повесил бы его на
+  // «Загружаем…» (docs/SECURITY.md, S-C1).
+  const caller = await sessionCaller();
+  if (!caller) return null;
+  const viewerId = caller.id;
 
   return { board: await loadBoard(viewerId), viewerId };
 }

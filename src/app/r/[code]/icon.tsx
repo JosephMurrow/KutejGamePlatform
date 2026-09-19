@@ -5,7 +5,8 @@ import {
   PLATFORM_ICON,
 } from "@/lib/games/icon";
 import { gameById } from "@/lib/games/registry";
-import { findPrivateRoom } from "@/lib/rooms/private";
+import { findRoomByCode } from "@/lib/rooms/code-guard";
+import { requestAddress } from "@/lib/request-address";
 
 export const size = ICON_SIZE;
 export const contentType = ICON_TYPE;
@@ -23,7 +24,9 @@ export default async function Icon({
   params: Promise<{ code: string }>;
 }) {
   const { code } = await params;
-  const room = await findPrivateRoom(code);
+  // Иконка тоже выдаёт, есть ли комната, — поэтому и здесь промахи на счету
+  // (docs/SECURITY.md, S-D1).
+  const { room } = await findRoomByCode(code, await requestAddress());
   const game = room ? gameById(room.gameId) : null;
 
   return iconResponse(game?.icon ?? PLATFORM_ICON);

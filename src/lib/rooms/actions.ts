@@ -1,22 +1,36 @@
 "use server";
 
 import { redirect } from "next/navigation";
-import { createGuest } from "../auth/guest";
-import { getSessionUserId, startSession } from "../auth/session";
+import { countGuestsIn, createGuest, MAX_GUESTS_PER_ROOM } from "../auth/guest";
+import { RateLimiter } from "../../server/rate-limit";
+import { securityLog } from "../../server/security-log";
+import { sessionMemberId, startSession } from "../auth/session";
 import type { FormState } from "../auth/form-state";
 import { allowsGuests, ROOM_CODE_LENGTH } from "@/shared/room-settings";
 import { defaultGameServer, gameServerById } from "@/lib/games/servers";
+import { requestAddress } from "../request-address";
+import { CODE_BLOCKED_REASON, findRoomByCode } from "./code-guard";
 import {
+  countRoomsOf,
   createPrivateRoom,
-  findPrivateRoom,
+  MAX_ROOMS_PER_HOST,
   normalizeSettings,
 } from "./private";
+
+/**
+ * Гостевых входов с одного адреса в час (docs/SECURITY.md, S-D3). Считаются
+ * состоявшиеся. Гость, вернувшийся со своей сессией, сюда не приходит — его
+ * пускает страница комнаты.
+ */
+const guestLimiter = new RateLimiter(5, 60 * 60 * 1000);
 
 export async function createRoomAction(
   _prev: FormState,
   formData: FormData,
 ): Promise<FormState> {
-  const userId = await getSessionUserId();
+  // Комнату заводит только полноценный игрок: гость заведён ради чужой
+  // комнаты, и своих у него нет (docs/SECURITY.md, S-C1).
+  const userId = await sessionMemberId();
   if (!userId) {
     // На витрину, а не в форму конкретной игры: платформенный экшен не обязан
     // знать, чью комнату заводили (src/games/chess/docs/BACKLOG.md A4).
@@ -38,6 +52,17 @@ export async function createRoomAction(
       ? gameServerById(asked)
       : defaultGameServer();
   if (!game) return { error: "Неизвестная игра" };
+
+  // Квота живых комнат (docs/SECURITY.md, S-D2): иначе экшеном в цикле
+  // заводится сколько угодно строк в базе. Пустые комнаты уходят сами через
+  // полчаса, так что упереться в квоту обычным путём трудно.
+  if ((await countRoomsOf(userId)) >= MAX_ROOMS_PER_HOST) {
+    return {
+      error:
+        `У тебя уже ${MAX_ROOMS_PER_HOST} комнат. Пустые закрываются сами ` +
+        "через полчаса — зайди в нужную или подожди.",
+    };
+  }
 
   let code: string;
   try {
@@ -68,7 +93,10 @@ export async function joinAsGuestAction(
   const adult = formData.get("adult") === "on";
   const values = { nickname, adult: adult ? "on" : "" };
 
-  const room = await findPrivateRoom(code);
+  const lookup = await findRoomByCode(code, await requestAddress());
+  if (lookup.blocked) return { values, error: CODE_BLOCKED_REASON };
+
+  const room = lookup.room;
   if (!room || !allowsGuests(room.kind)) {
     return { values, error: "В эту комнату гостем не пускают" };
   }
@@ -82,10 +110,28 @@ export async function joinAsGuestAction(
     };
   }
 
+  // Гостевой вход заводит строку в базе, поэтому лимитирован
+  // (docs/SECURITY.md, S-D3): с адреса — как у регистрации, на комнату —
+  // потолок, выше которого за стол всё равно не посадить.
+  const address = await requestAddress();
+  if (guestLimiter.blocked(address)) {
+    securityLog("гость: отказ по лимиту", { address }, address);
+    return {
+      values,
+      error:
+        "С этого адреса уже заходили несколько гостей. Попробуй через час.",
+    };
+  }
+  if ((await countGuestsIn(room.id)) >= MAX_GUESTS_PER_ROOM) {
+    securityLog("гость: комната полна", { room: room.id, address }, room.id);
+    return { values, error: "В комнате уже слишком много гостей" };
+  }
+
   const result = await createGuest(room.id, nickname);
   if (!result.ok) {
     return { values, fieldErrors: { nickname: result.reason } };
   }
+  guestLimiter.hit(address);
 
   await startSession(result.guest.id, true);
   redirect(`/r/${room.code}`);
@@ -110,7 +156,10 @@ export async function joinByCodeAction(
     };
   }
 
-  const room = await findPrivateRoom(code);
+  const lookup = await findRoomByCode(code, await requestAddress());
+  if (lookup.blocked) return { values: { code }, error: CODE_BLOCKED_REASON };
+
+  const room = lookup.room;
   if (!room) {
     return {
       values: { code },

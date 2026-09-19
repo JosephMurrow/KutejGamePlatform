@@ -12,6 +12,11 @@
     "typecheck": "next typegen && tsc --noEmit",
     "test": "tsx --test \"src/**/*.test.ts\"",
     "smoke:sockets": "node --env-file-if-exists=.env --import tsx scripts/smoke-sockets.ts",
+    "smoke:guest": "node --env-file-if-exists=.env --import tsx scripts/smoke-guest-actions.ts",
+    "smoke:limits": "node --env-file-if-exists=.env --import tsx scripts/smoke-limits.ts",
+    "smoke:account": "node --env-file-if-exists=.env --import tsx scripts/smoke-account.ts",
+    "smoke:rooms": "node --env-file-if-exists=.env --import tsx scripts/smoke-rooms.ts",
+    "smoke:flood": "node --env-file-if-exists=.env --import tsx scripts/smoke-flood.ts",
     "smoke:crowd": "node --env-file-if-exists=.env --import tsx scripts/smoke-crowd.ts",
     "smoke:chess": "node --env-file-if-exists=.env --import tsx src/games/chess/scripts/smoke-chess.ts",
     "smoke:lobby": "node --env-file-if-exists=.env --import tsx src/games/chess/scripts/smoke-lobby.ts",
@@ -27,6 +32,7 @@
     "db:studio": "prisma studio",
     "db:seed": "prisma db seed",
     "postinstall": "prisma generate",
+    "audit:check": "node scripts/audit-check.mjs",
     "audit:questions": "node --import tsx src/games/pricetitute/scripts/audit-questions.ts",
     "db:rename-questions": "node --env-file-if-exists=.env --import tsx src/games/pricetitute/scripts/rename-questions.ts",
     "mail:check": "node --env-file-if-exists=.env --import tsx scripts/mail-check.ts",
@@ -41,8 +47,8 @@
     "dotenv": "^17.4.2",
     "glicko2-lite": "^6.0.0",
     "jose": "^6.2.8",
-    "next": "16.3.1",
-    "nodemailer": "^9.0.5",
+    "next": "16.3.5",
+    "nodemailer": "^9.1.1",
     "qrcode-generator": "^2.0.4",
     "react": "19.2.8",
     "react-chessboard": "^5.12.1",
@@ -59,12 +65,17 @@
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "eslint": "^9",
-    "eslint-config-next": "16.3.1",
+    "eslint-config-next": "16.3.5",
     "eslint-config-prettier": "^10.1.8",
     "jsqr": "^1.4.0",
     "prettier": "^3.9.6",
     "prisma": "^7.9.1",
     "tailwindcss": "^4",
     "typescript": "^5"
+  },
+  "overrides": {
+    "prisma": {
+      "mysql2": "^3.24.4"
+    }
   }
 }

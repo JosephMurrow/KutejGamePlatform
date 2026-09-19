@@ -40,7 +40,13 @@ ENV NODE_OPTIONS=--dns-result-order=ipv4first
 # В стабильных репозиториях Alpine стокфиша нет — пакет лежит в edge/testing,
 # оттуда и берём. Зависимости у него те же, что уже есть в базовом образе:
 # ставится ровно один пакет, ничего чужого за собой не тянет.
-RUN apk add --no-cache stockfish \
+#
+# Версия закреплена (docs/SECURITY.md, S-A4): edge/testing меняется без
+# предупреждения, а движок исполняется нашим процессом. Подпись пакета apk
+# проверяет сам — ключами Alpine из базового образа. Новая версия приходит
+# осознанно: поменять номер здесь, собрать, прогнать smoke:bot и smoke:magnus.
+# Исчезнет этот номер из репозитория — сборка упадёт, и это правильно.
+RUN apk add --no-cache stockfish=18-r0 \
       --repository=https://dl-cdn.alpinelinux.org/alpine/edge/testing
 ENV CHESS_ENGINE_PATH=/usr/bin/stockfish
 
@@ -58,6 +64,14 @@ COPY --from=build /app/next.config.ts ./next.config.ts
 COPY --from=build /app/tsconfig.json ./tsconfig.json
 COPY --from=build /app/prisma.config.ts ./prisma.config.ts
 COPY --from=build /app/package.json ./package.json
+
+# Приложение работает не от root (docs/SECURITY.md, S-A3): выполнение чужого
+# кода в процессе не должно получать root в контейнере. Файлы приложения
+# остаются root-овскими и доступны только на чтение; писать можно только в
+# кеш Next — туда кладёт картинки оптимизатор. Пользователь `node` уже есть в
+# базовом образе.
+RUN mkdir -p .next/cache && chown -R node:node .next/cache
+USER node
 
 EXPOSE 3000
 

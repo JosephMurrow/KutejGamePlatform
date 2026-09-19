@@ -19,7 +19,14 @@ import {
  */
 
 /** Без нуля, единицы и похожих букв: код диктуют голосом. */
-const ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+export const ROOM_CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+const ALPHABET = ROOM_CODE_ALPHABET;
+
+/**
+ * Сколько живых комнат может держать один хозяин (docs/SECURITY.md, S-D2).
+ * Обычному человеку хватает одной-двух; десять — это уже конвейер.
+ */
+export const MAX_ROOMS_PER_HOST = 10;
 
 /** Через сколько после ухода последнего игрока комната удаляется. */
 export const EMPTY_LIFETIME_MS = 30 * 60 * 1000;
@@ -71,6 +78,9 @@ export async function createPrivateRoom(
           maxPlayers: settings.maxPlayers,
           twitchChannel: settings.twitchChannel,
           screenKey: generateScreenKey(),
+          // Пуста с рождения: первый вход сбросит отметку. Без неё комната,
+          // в которую так и не зашли, не удалялась бы никогда (S-D2).
+          emptySince: new Date(),
         },
       });
 
@@ -91,6 +101,33 @@ export async function findPrivateRoom(
   });
 
   return room ? toInfo(room) : null;
+}
+
+/** Сколько комнат сейчас держит хозяин. */
+export async function countRoomsOf(hostId: string): Promise<number> {
+  return prisma.privateRoom.count({ where: { hostId } });
+}
+
+/**
+ * Проставить отсчёт комнатам, которые никто не держит, а отметки у них нет.
+ *
+ * Так бывает в двух случаях: комната заведена до того, как отсчёт стал
+ * ставиться при создании, или в ней сидели люди, когда сервер перезапустили, —
+ * выйти «правильно» они уже не могли. Без этого такие комнаты не удалялись бы
+ * никогда (docs/SECURITY.md, S-D2). `live` — ключи комнат, поднятых в памяти:
+ * их жизнь ведёт менеджер комнат.
+ */
+export async function markOrphanRooms(
+  live: readonly string[],
+  at: Date,
+  /** Только комнаты этого хозяина. Для смоука: база бывает общей с чужим сервером. */
+  hostId?: string,
+): Promise<number> {
+  const { count } = await prisma.privateRoom.updateMany({
+    where: { emptySince: null, id: { notIn: [...live] }, hostId },
+    data: { emptySince: at },
+  });
+  return count;
 }
 
 /** Комната опустела — запускаем отсчёт до удаления. */

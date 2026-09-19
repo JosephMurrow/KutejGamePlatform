@@ -1,4 +1,5 @@
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
+import { logFailure } from "@/server/failure-log";
 
 /**
  * Движок шахмат отдельным процессом, разговор по UCI через потоки.
@@ -54,13 +55,25 @@ export class UciEngine {
   private tail = "";
   private listeners: ((line: string) => void)[] = [];
   private dead = false;
+  /** Отпустить ждущих ответа, если движок умрёт. */
+  private aborts: (() => void)[] = [];
 
   private constructor(path: string) {
     this.process = spawn(path, [], { stdio: "pipe" });
     this.process.stdout.setEncoding("utf8");
     this.process.stdout.on("data", (chunk: string) => this.read(chunk));
-    this.process.on("exit", () => {
-      this.dead = true;
+    this.process.on("exit", () => this.die());
+    // Без слушателя `error` событие становится uncaughtException процесса:
+    // так бывало, когда бинарника нет или в stdin пишут умершему движку
+    // (docs/SECURITY.md, S-E4). Это внешний сбой, уровень 1: ботов не будет,
+    // сервер живёт дальше.
+    this.process.on("error", (error) => {
+      logFailure(1, "stockfish: процесс", error);
+      this.die();
+    });
+    this.process.stdin.on("error", (error) => {
+      logFailure(1, "stockfish: stdin", error);
+      this.die();
     });
     // Движок пишет в stderr предупреждения; они нам не нужны, но и ронять
     // сервер из-за них незачем.
@@ -71,10 +84,17 @@ export class UciEngine {
     const engine = new UciEngine(path);
 
     engine.send("uci");
-    await engine.await_((line) => line === "uciok");
+    const hello = await engine.await_((line) => line === "uciok");
     engine.send("setoption name Threads value 1");
     engine.send("isready");
-    await engine.await_((line) => line === "readyok");
+    const ready = await engine.await_((line) => line === "readyok");
+
+    // Не ответил или умер по дороге — движка нет. Пул это ловит и считает
+    // ботов недоступными, а не держит мёртвый процесс за живой.
+    if (hello === null || ready === null || !engine.alive) {
+      engine.stop();
+      throw new Error(`движок не ответил: ${path}`);
+    }
 
     return engine;
   }
@@ -170,6 +190,17 @@ export class UciEngine {
     if (!this.dead) this.process.stdin.write(`${command}\n`);
   }
 
+  /**
+   * Движок умер. Всех, кто ждёт от него строку, отпускаем сразу с пустым
+   * ответом — не дожидаясь таймаута.
+   */
+  private die(): void {
+    this.dead = true;
+    const waiting = this.aborts;
+    this.aborts = [];
+    for (const abort of waiting) abort();
+  }
+
   private read(chunk: string): void {
     this.tail += chunk;
     const lines = this.tail.split("\n");
@@ -188,13 +219,21 @@ export class UciEngine {
     timeoutMs = HANDSHAKE_MS,
   ): Promise<string | null> {
     return new Promise((resolve) => {
+      if (this.dead) {
+        resolve(null);
+        return;
+      }
+
       const done = (value: string | null) => {
         this.listeners = this.listeners.filter(
           (listener) => listener !== onLine,
         );
+        this.aborts = this.aborts.filter((abort) => abort !== onDeath);
         clearTimeout(timer);
         resolve(value);
       };
+      const onDeath = () => done(null);
+      this.aborts.push(onDeath);
 
       const onLine = (line: string) => {
         if (matches(line)) done(line);

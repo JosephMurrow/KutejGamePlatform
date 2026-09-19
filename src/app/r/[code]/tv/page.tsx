@@ -6,10 +6,20 @@ import { GameTheme } from "@/components/games/GameTheme";
 import { gameById } from "@/lib/games/registry";
 import { gamePages } from "@/lib/games/pages";
 import { getSessionUserId } from "@/lib/auth/session";
-import { findPrivateRoom } from "@/lib/rooms/private";
+import { findRoomByCode } from "@/lib/rooms/code-guard";
+import { requestAddress } from "@/lib/request-address";
 import { hasScreen } from "@/shared/room-settings";
+import { sameSecret } from "@/lib/secret";
+import { securityLog } from "@/server/security-log";
 
-const roomByCode = cache(findPrivateRoom);
+/**
+ * Поиск считает промахи адреса (docs/SECURITY.md, S-D1); исчерпал — комнаты
+ * для него «нет», как и для неверного кода.
+ */
+const roomByCode = cache(
+  async (code: string) =>
+    (await findRoomByCode(code, await requestAddress())).room,
+);
 
 /** Экран тоже подписан игрой: на телевизоре открыта не «платформа». */
 export async function generateMetadata({
@@ -21,7 +31,12 @@ export async function generateMetadata({
   const room = await roomByCode(code);
   const game = room ? gameById(room.gameId) : null;
 
-  return { title: `Экран — ${game?.title ?? PLATFORM}` };
+  return {
+    title: `Экран — ${game?.title ?? PLATFORM}`,
+    // Ключ экрана живёт в адресе. Без этого он уезжал бы в заголовке Referer
+    // на любой сторонний адрес, который подгрузит страница (S-G2).
+    referrer: "no-referrer",
+  };
 }
 
 /**
@@ -49,9 +64,17 @@ export default async function ScreenPage({
     notFound();
   }
 
-  if (key !== room.screenKey) {
+  if (!sameSecret(key, room.screenKey)) {
     const userId = await getSessionUserId();
-    if (userId !== room.hostId) notFound();
+    if (userId !== room.hostId) {
+      const address = await requestAddress();
+      securityLog(
+        "экран: неверный ключ",
+        { room: room.id, address },
+        `${room.id}|${address}`,
+      );
+      notFound();
+    }
   }
 
   const pages = gamePages(room.gameId);

@@ -1,6 +1,6 @@
 import { randomAvatarId } from "../../lib/avatars";
 import { prisma } from "../../lib/prisma";
-import { checkNickname } from "../../shared/guest";
+import { checkNickname, normalizeNickname } from "../../shared/guest";
 import {
   normalizeChannel,
   twitchLogin,
@@ -8,6 +8,7 @@ import {
 } from "../../shared/twitch";
 import type { RoomManager } from "../rooms";
 import { ChatReader, type TwitchMessage } from "./chat";
+import { TwitchLimits } from "./limits";
 
 /**
  * Мост между чатом Твича и столом.
@@ -45,6 +46,8 @@ interface Attachment {
 
 export class TwitchBridge {
   private readonly rooms = new Map<string, Attachment>();
+  /** Потолки каналов и посадок (docs/SECURITY.md, S-F1). */
+  private readonly limits = new TwitchLimits();
 
   constructor(
     private readonly manager: RoomManager,
@@ -72,6 +75,17 @@ export class TwitchBridge {
 
     const existing = this.rooms.get(roomKey);
     if (existing?.channel === channel) return;
+
+    // Каналов на процесс — не больше потолка. Комната без канала играет
+    // дальше, просто без чата: экран покажет, что Твич не подключён.
+    const listening = this.rooms.size - (existing ? 1 : 0);
+    if (!this.limits.canAttach(listening)) {
+      console.warn(
+        `[twitch ${channel}] не подключён: слушаем уже ${listening} каналов`,
+      );
+      return;
+    }
+
     if (existing) this.detach(roomKey);
 
     const attachment: Attachment = {
@@ -108,13 +122,18 @@ export class TwitchBridge {
 
     attachment.reader.stop();
     this.rooms.delete(roomKey);
+    this.limits.forget(roomKey);
 
     const managed = this.manager.get(roomKey);
     if (!managed) return;
 
-    for (const seat of attachment.seats.values()) {
-      managed.profiles.delete(seat.userId);
-      managed.game.leave(seat.userId);
+    try {
+      for (const seat of attachment.seats.values()) {
+        managed.profiles.delete(seat.userId);
+        managed.game.leave(seat.userId);
+      }
+    } catch (error) {
+      managed.fail("отключение Твича", error);
     }
   }
 
@@ -158,7 +177,12 @@ export class TwitchBridge {
         const player = seat ?? (await this.seat(roomKey, message));
         if (!player) return;
 
-        await managed.game.act(intent.event, player.userId, intent.payload);
+        try {
+          await managed.game.act(intent.event, player.userId, intent.payload);
+        } catch (error) {
+          managed.fail(`действие из чата ${intent.event}`, error);
+          return;
+        }
         break;
       }
     }
@@ -185,11 +209,20 @@ export class TwitchBridge {
       return null;
     }
 
-    const raw = twitchNickname(message.displayName, message.login);
+    // Зрителей за столом не больше потолка гостей, а новые садятся порциями:
+    // лавина с большого канала не превращается в лавину записей в базу.
+    if (!this.limits.canSeat(roomKey, attachment.seats.size)) return null;
+
+    const raw = normalizeNickname(
+      twitchNickname(message.displayName, message.login),
+    );
     // Ник приезжает с Твича, а показывается на нашем экране: правила те же,
-    // что и для гостя по ссылке. Не прошёл — играет под логином.
+    // что и для гостя по ссылке. Не прошёл — играет под началом логина:
+    // логин Твича — латиница и цифры, невидимого в нём не спрятать (S-B8).
     const nickname =
-      checkNickname(raw) === null ? raw : `Зритель ${raw.slice(0, 4)}`;
+      checkNickname(raw) === null
+        ? raw
+        : `Зритель ${message.login.slice(0, 8)}`;
 
     const login = twitchLogin(message.userId);
     const avatarId = randomAvatarId();
@@ -218,7 +251,12 @@ export class TwitchBridge {
       avatarId: user.avatarId,
       isGuest: true,
     });
-    managed.game.join(user.id);
+    try {
+      managed.game.join(user.id);
+    } catch (error) {
+      managed.fail("вход из чата", error);
+      return null;
+    }
 
     return seat;
   }
@@ -233,6 +271,10 @@ export class TwitchBridge {
 
     attachment.seats.delete(twitchUserId);
     managed.profiles.delete(seat.userId);
-    managed.game.leave(seat.userId);
+    try {
+      managed.game.leave(seat.userId);
+    } catch (error) {
+      managed.fail("выход из чата", error);
+    }
   }
 }

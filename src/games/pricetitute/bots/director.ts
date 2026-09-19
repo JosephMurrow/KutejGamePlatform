@@ -1,4 +1,5 @@
 import { randomInt, randomUUID } from "node:crypto";
+import { logFailure } from "@/server/failure-log";
 import { NEVER, type Bet } from "@/games/pricetitute/engine/bet";
 import { isHardcore } from "@/games/pricetitute/questions/modes";
 import { prisma } from "@/lib/prisma";
@@ -117,7 +118,16 @@ export class BotDirector {
 
   start(): void {
     if (this.timer) return;
-    this.timer = setInterval(() => this.tick(), TICK_MS);
+    // Такт режиссёра общий на все комнаты. Ошибка в нём не должна
+    // повторяться в лог каждый такт без метки и ронять что-то ещё: пишем
+    // сбой и ждём следующего такта (docs/SECURITY.md, S-E4).
+    this.timer = setInterval(() => {
+      try {
+        this.tick();
+      } catch (error) {
+        logFailure(3, "платитутка: режиссёр ботов", error);
+      }
+    }, TICK_MS);
     this.timer.unref?.();
   }
 

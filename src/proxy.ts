@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { readSessionClaims, SESSION_COOKIE } from "@/lib/auth/token";
+import { safeInternalPath } from "@/lib/safe-path";
 
 /**
  * Быстрая развилка по сессии: без похода в базу, только проверка подписи.
@@ -81,15 +82,6 @@ export function isGamePage(pathname: string): boolean {
   return !(parts.at(-1) ?? "").includes(".");
 }
 
-/**
- * Куда можно вести по параметру `next`: только внутрь сайта. Протокольно
- * относительный путь (`//чужой-домен`) увёл бы наружу.
- */
-function safePath(value: string | null): string | null {
-  if (!value || !value.startsWith("/") || value.startsWith("//")) return null;
-  return value;
-}
-
 export async function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
   const token = request.cookies.get(SESSION_COOKIE)?.value;
@@ -125,7 +117,8 @@ export async function proxy(request: NextRequest) {
     // приглашению: комната отправила его сюда, а сессия у него уже была.
     // Раньше `next` здесь терялся, и приглашение пропадало ровно в тот
     // момент, когда должно было сработать.
-    const next = safePath(request.nextUrl.searchParams.get("next"));
+    // Только внутрь сайта — та же проверка, что у экшенов входа (S-B4).
+    const next = safeInternalPath(request.nextUrl.searchParams.get("next"));
     if (next) {
       const target = new URL(next, request.nextUrl.origin);
       url.pathname = target.pathname;

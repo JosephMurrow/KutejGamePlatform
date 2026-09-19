@@ -1,0 +1,31 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Write|Edit|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"$CLAUDE_PROJECT_DIR/scripts/check-hidden-chars.mjs\"",
+            "timeout": 10,
+            "statusMessage": "Проверяю файл на невидимые символы"
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "if": "Bash(git commit*)",
+            "command": "node \"$CLAUDE_PROJECT_DIR/scripts/check-hidden-chars.mjs\" --staged",
+            "timeout": 20,
+            "statusMessage": "Проверяю индекс на невидимые символы"
+          }
+        ]
+      }
+    ]
+  }
+}

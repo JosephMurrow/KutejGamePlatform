@@ -16,6 +16,7 @@ import { createPrivateRoom, deletePrivateRoom } from "@/lib/rooms/private";
 import { GAME_EVENT, GAME_ID } from "../protocol";
 import { saveRoomSettings } from "../rooms/store";
 import { VIEWER_DELAY_MS } from "../rooms/settings";
+import { waitForMatch } from "./teardown";
 
 /**
  * Смоук режима стримера: задержка для зрителей и экран для трансляции.
@@ -28,7 +29,8 @@ import { VIEWER_DELAY_MS } from "../rooms/settings";
  * Нужен живой `npm run dev` и база.
  */
 
-const URL = "http://localhost:3000";
+/** Куда ходит смоук: `SMOKE_URL`, иначе локальный сервер (docs/TESTING.md). */
+const URL = process.env.SMOKE_URL ?? "http://localhost:3000";
 const DELAY = "SEC_15";
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -195,6 +197,17 @@ async function main() {
     viewer.states.length > 1,
     `снимков ${viewer.states.length}`,
   );
+
+  // Партию заканчиваем до уборки: недоигранная с ходом через пару минут
+  // засчитала бы уход и писалась бы на удалённых пользователей
+  // (см. ./teardown.ts).
+  const resigned = await playing.emit(GAME_EVENT.resign);
+  check(
+    "партия закрыта перед уборкой",
+    resigned.ok === true,
+    resigned.error ?? "",
+  );
+  check("и записана", await waitForMatch(room.id));
 
   for (const client of [...players, screen]) client.disconnect();
   await sleep(300);

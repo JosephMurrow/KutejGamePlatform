@@ -8,8 +8,14 @@ import {
   GAME_SERVERS,
 } from "@/lib/games/servers";
 import { renameGuest } from "../lib/auth/guest";
-import { findPrivateRoom, setRoomLocked } from "../lib/rooms/private";
-import { checkNickname } from "../shared/guest";
+import { setRoomLocked } from "../lib/rooms/private";
+import { CODE_BLOCKED_REASON, findRoomByCode } from "../lib/rooms/code-guard";
+import { socketAddress } from "./client-address";
+import { originAllowed } from "./origin";
+import { sameSecret } from "../lib/secret";
+import { securityLog } from "./security-log";
+import { env } from "../lib/env";
+import { checkNickname, normalizeNickname } from "../shared/guest";
 import { hasScreen } from "../shared/room-settings";
 import {
   CHAT_MAX_LENGTH,
@@ -32,6 +38,7 @@ import { dropExpiredLinks } from "../lib/auth/links";
 import { startCleanup } from "./cleanup";
 import {
   pushChat,
+  ROOM_BROKEN_REASON,
   RoomManager,
   sweepStaleRooms,
   type ManagedRoom,
@@ -43,6 +50,37 @@ export { SOCKET_PATH };
 /** Не чаще этого игрок может слать действия и сообщения. */
 const actionLimiter = new RateLimiter(20, 5_000);
 const chatLimiter = new RateLimiter(5, 10_000);
+
+/**
+ * Лимиты сокетов (docs/SECURITY.md, S-E1, S-E2).
+ *
+ * - **Новые подключения с адреса** — до похода в базу: каждое подключение
+ *   проверяет сессию и ищет комнату, и поток подключений иначе шёл бы прямо в
+ *   базу. Сто двадцать в минуту: за одним адресом бывает не только дом с
+ *   телевизором, но и мобильный оператор, у которого тысячи абонентов выходят
+ *   в сеть через один адрес (CGNAT), — зрители стрима с одного оператора не
+ *   должны друг другу мешать.
+ * - **Открытых сокетов на игрока** — десять: телефон, ноутбук, экран в OBS и
+ *   ещё несколько вкладок. Больше — это уже не человек.
+ * - **Любое событие** проходит общий потолок (`socket.use`), поэтому новое
+ *   событие не может забыть про лимит. Поверх него — свои лимиты у действий
+ *   игры, у чата и у управления комнатой: кик, замок и переименование пишут
+ *   в базу.
+ * - **Размер сообщения** — 32 КБ. Самое длинное, что шлёт клиент, — сообщение
+ *   чата в триста знаков; мегабайт по умолчанию был бы подарком.
+ */
+const connectLimiter = new RateLimiter(120, 60_000);
+const MAX_SOCKETS_PER_USER = 10;
+const eventLimiter = new RateLimiter(40, 5_000);
+const controlLimiter = new RateLimiter(10, 10_000);
+const MAX_MESSAGE_BYTES = 32 * 1024;
+
+/** Сколько сокетов сейчас открыто у каждого игрока. */
+const openSockets = new Map<string, number>();
+
+const TOO_MANY_CONNECTIONS =
+  "Слишком много подключений с этого адреса, подожди минуту";
+const TOO_MANY_TABS = "Слишком много открытых вкладок — закрой лишние";
 
 export interface SocketServer {
   io: IOServer;
@@ -86,6 +124,7 @@ export function createSocketServer(httpServer: HttpServer): SocketServer {
     // путь. В одном процессе с Next это убивает HMR-сокет, поэтому чужие
     // upgrade'ы оставляем в покое — их разбирает обработчик в server.ts.
     destroyUpgrade: false,
+    maxHttpBufferSize: MAX_MESSAGE_BYTES,
   });
 
   // Серверная часть каждой игры поднимается один раз на процесс. Что она там
@@ -125,10 +164,46 @@ export function createSocketServer(httpServer: HttpServer): SocketServer {
 
   manager.onClose((roomKey) => twitch.detach(roomKey));
 
+  // Карантин комнаты: всех подключённых — игроков и экраны — выгоняем с
+  // объяснением. Следующий вход поднимет комнату заново (S-E4).
+  manager.onQuarantine((roomKey) => {
+    io.to(roomKey).emit(SERVER_EVENT.kicked, { reason: ROOM_BROKEN_REASON });
+    io.in(roomKey).disconnectSockets(true);
+  });
+
   io.use((socket, next) => {
+    // Первым делом и без базы: поток подключений не должен в неё дойти.
+    const address = socketAddress(socket.handshake);
+    if (!connectLimiter.allow(address)) {
+      securityLog("сокет: отказ по лимиту подключений", { address }, address);
+      next(new Error(TOO_MANY_CONNECTIONS));
+      return;
+    }
+
+    // Чужая страница с cookie нашего игрока — не наш клиент (S-E3).
+    if (!originAllowed(socket.handshake.headers, env.APP_URL)) {
+      securityLog(
+        "сокет: чужой Origin",
+        { origin: socket.handshake.headers.origin, address },
+        address,
+      );
+      next(new Error("Подключение с чужого сайта"));
+      return;
+    }
+
     void authenticateSocket(socket.handshake.headers)
       .then((user) => {
         if (user) {
+          if ((openSockets.get(user.id) ?? 0) >= MAX_SOCKETS_PER_USER) {
+            securityLog(
+              "сокет: отказ по лимиту вкладок",
+              { user: user.id, address },
+              user.id,
+            );
+            next(new Error(TOO_MANY_TABS));
+            return;
+          }
+
           socket.data.user = user;
           next();
           return;
@@ -151,6 +226,29 @@ export function createSocketServer(httpServer: HttpServer): SocketServer {
   });
 
   io.on("connection", (socket) => {
+    const user = socket.data.user as SocketUser | undefined;
+    if (user) {
+      openSockets.set(user.id, (openSockets.get(user.id) ?? 0) + 1);
+      socket.on("disconnect", () => {
+        const left = (openSockets.get(user.id) ?? 1) - 1;
+        if (left > 0) openSockets.set(user.id, left);
+        else openSockets.delete(user.id);
+      });
+    }
+
+    // Общий потолок на любое событие. Отказ приходит в подтверждение, если
+    // клиент его ждёт, а само событие до обработчика не доходит.
+    socket.use((packet, next) => {
+      if (eventLimiter.allow(user?.id ?? socket.id)) {
+        next();
+        return;
+      }
+      const ack = packet.at(-1);
+      if (typeof ack === "function") {
+        (ack as (reply: Ack) => void)({ ok: false, error: tooFast().reason });
+      }
+    });
+
     void onConnection(io, manager, twitch, socket);
   });
 
@@ -191,14 +289,19 @@ interface RoomTarget {
  * комнаты — её колонка `gameId`. Игр от этого может быть сколько угодно, и
  * ключи общих залов у них разные (docs/BACKLOG.md A4).
  */
-async function resolveRoom(socket: Socket): Promise<RoomTarget | null> {
+/** Почему не нашлась комната: нет такой или адрес исчерпал промахи. */
+const NOT_FOUND = { missing: true, reason: "Комната не найдена" } as const;
+
+type RoomMiss = { missing: true; reason: string };
+
+async function resolveRoom(socket: Socket): Promise<RoomTarget | RoomMiss> {
   const code = readQuery(socket, ROOM_QUERY);
 
   // Игру называет клиент, а для приватной комнаты — сама комната. Пустой
   // параметр означает платитутку: так ходит вкладка, открытая до выкладки.
   const asked = readQuery(socket, GAME_QUERY);
   const game = asked === "" ? defaultGameServer() : gameServerById(asked);
-  if (!game) return null;
+  if (!game) return NOT_FOUND;
 
   if (code === "") {
     return {
@@ -221,13 +324,18 @@ async function resolveRoom(socket: Socket): Promise<RoomTarget | null> {
     };
   }
 
-  const room = await findPrivateRoom(code);
-  if (!room) return null;
+  // Промахи по коду считаются на адрес: экран подключается без сессии, и без
+  // лимита это был бы бесплатный перебиратель кодов (docs/SECURITY.md, S-D1).
+  const lookup = await findRoomByCode(code, socketAddress(socket.handshake));
+  if (lookup.blocked) return { missing: true, reason: CODE_BLOCKED_REASON };
+
+  const room = lookup.room;
+  if (!room) return NOT_FOUND;
 
   // За столом играют в то, во что завели комнату, а не в то, что попросил
   // клиент: иначе чужая вкладка меняла бы игру чужой комнате.
   const owner = gameServerById(room.gameId);
-  if (!owner) return null;
+  if (!owner) return NOT_FOUND;
 
   return {
     key: room.id,
@@ -267,7 +375,13 @@ async function onScreen(
   }
 
   const owner = user !== undefined && target.setup.ownerId === user.id;
-  if (!owner && readQuery(socket, KEY_QUERY) !== target.screenKey) {
+  if (!owner && !sameSecret(readQuery(socket, KEY_QUERY), target.screenKey)) {
+    const address = socketAddress(socket.handshake);
+    securityLog(
+      "экран: неверный ключ",
+      { room: target.key, address },
+      `${target.key}|${address}`,
+    );
     socket.emit(SERVER_EVENT.kicked, { reason: "Экран этой комнаты закрыт" });
     socket.disconnect(true);
     return;
@@ -285,10 +399,9 @@ async function onScreen(
   socket.data.viewer = viewer;
   socket.data.roomCode = target.code;
 
-  socket.emit(
-    SERVER_EVENT.state,
-    buildState(managed, viewer, target.code, twitch),
-  );
+  const initial = stateFor(managed, viewer, target.code, twitch);
+  if (!initial) return;
+  socket.emit(SERVER_EVENT.state, initial);
 
   socket.on("disconnect", () => {
     manager.unwatch(socket.id, target.key);
@@ -302,8 +415,8 @@ async function onConnection(
   socket: Socket,
 ): Promise<void> {
   const target = await resolveRoom(socket);
-  if (!target) {
-    socket.emit(SERVER_EVENT.kicked, { reason: "Комната не найдена" });
+  if ("missing" in target) {
+    socket.emit(SERVER_EVENT.kicked, { reason: target.reason });
     socket.disconnect(true);
     return;
   }
@@ -357,10 +470,9 @@ async function onConnection(
   socket.data.viewer = viewer;
   socket.data.roomCode = roomCode;
   socket.emit(SERVER_EVENT.chatHistory, managed.chat);
-  socket.emit(
-    SERVER_EVENT.state,
-    buildState(managed, viewer, roomCode, twitch),
-  );
+  const initial = stateFor(managed, viewer, roomCode, twitch);
+  if (!initial) return;
+  socket.emit(SERVER_EVENT.state, initial);
   void broadcastState(io, managed, twitch);
 
   // Действия игры платформа только передаёт: какие они бывают, объявляет
@@ -370,7 +482,14 @@ async function onConnection(
     socket.on(action, (...args: unknown[]) => {
       void respondAsync(args, async (payload) => {
         if (!actionLimiter.allow(user.id)) return tooFast();
-        return managed.game.act(action, user.id, payload);
+        try {
+          return await managed.game.act(action, user.id, payload);
+        } catch (error) {
+          // Исключение из движка — не отказ игроку, а сломанная партия:
+          // карантин комнаты (docs/SECURITY.md, S-E4, уровень 2).
+          managed.fail(`действие ${action}`, error);
+          return { accepted: false, reason: ROOM_BROKEN_REASON };
+        }
       });
     });
   }
@@ -404,10 +523,17 @@ async function onConnection(
 
   socket.on(CLIENT_EVENT.kick, (...args: unknown[]) => {
     respond(args, (payload) => {
+      if (!controlLimiter.allow(user.id)) return tooFast();
       const targetId = readString(payload, "playerId");
       if (!targetId) return { accepted: false, reason: "Кого выгонять?" };
 
-      const result = managed.game.remove(user.id, targetId);
+      let result: HandlerResult;
+      try {
+        result = managed.game.remove(user.id, targetId);
+      } catch (error) {
+        managed.fail("выгон", error);
+        return { accepted: false, reason: ROOM_BROKEN_REASON };
+      }
 
       // Выгнать из круга мало: без разрыва сокета человек остался бы в
       // комнате призраком — видел бы игру, но не мог в ней участвовать.
@@ -421,6 +547,7 @@ async function onConnection(
 
   socket.on(CLIENT_EVENT.lock, (...args: unknown[]) => {
     void respondAsync(args, async (payload) => {
+      if (!controlLimiter.allow(user.id)) return tooFast();
       if (target.setup.ownerId !== user.id) {
         return { accepted: false, reason: "Набор закрывает только хозяин" };
       }
@@ -439,6 +566,7 @@ async function onConnection(
 
   socket.on(CLIENT_EVENT.rename, (...args: unknown[]) => {
     void respondAsync(args, async (payload) => {
+      if (!controlLimiter.allow(user.id)) return tooFast();
       if (target.setup.ownerId !== user.id) {
         return {
           accepted: false,
@@ -447,7 +575,7 @@ async function onConnection(
       }
 
       const targetId = readString(payload, "playerId");
-      const nickname = readString(payload, "nickname")?.trim() ?? "";
+      const nickname = normalizeNickname(readString(payload, "nickname") ?? "");
       if (!targetId)
         return { accepted: false, reason: "Кого переименовывать?" };
 
@@ -548,10 +676,28 @@ async function broadcastState(
     if (!viewer) continue;
 
     const code = socket.data.roomCode as string | null | undefined;
-    socket.emit(
-      SERVER_EVENT.state,
-      buildState(managed, viewer, code ?? null, twitch),
-    );
+    const state = stateFor(managed, viewer, code ?? null, twitch);
+    // Снимок не собрался — комната ушла на карантин, рассылать нечего.
+    if (!state) return;
+    socket.emit(SERVER_EVENT.state, state);
+  }
+}
+
+/**
+ * Снимок для зрителя или `null`, если движок на нём сломался: тогда комната
+ * уходит на карантин (docs/SECURITY.md, S-E4, уровень 2).
+ */
+function stateFor(
+  managed: ManagedRoom,
+  viewer: Viewer,
+  roomCode: string | null,
+  twitch?: TwitchBridge,
+): RoomStatePayload | null {
+  try {
+    return buildState(managed, viewer, roomCode, twitch);
+  } catch (error) {
+    managed.fail("снимок", error);
+    return null;
   }
 }
 

@@ -1,6 +1,6 @@
 "use server";
 
-import { getSessionUserId } from "@/lib/auth/session";
+import { sessionCaller } from "@/lib/auth/session";
 import { loadChampions } from "./champions";
 import {
   loadLeaderboard,
@@ -26,8 +26,12 @@ export interface LeaderboardView {
 export async function fetchLeaderboard(
   period: LeaderboardPeriod,
 ): Promise<LeaderboardView | null> {
-  const viewerId = await getSessionUserId();
-  if (!viewerId) return null;
+  // Гостю читать рейтинг можно: это ники и очки, ничего не меняется. Окно
+  // рейтинга в комнате ему уже показывают, и отказ повесил бы его на
+  // «Загружаем…» (docs/SECURITY.md, S-C1).
+  const caller = await sessionCaller();
+  if (!caller) return null;
+  const viewerId = caller.id;
 
   const [board, champs] = await Promise.all([
     loadLeaderboard(period, viewerId),

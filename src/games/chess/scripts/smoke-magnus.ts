@@ -26,7 +26,8 @@ import { MAGNUS_WINS } from "../bots/levels";
  * Нужен живой `npm run dev`, база и движок у сервера.
  */
 
-const URL = "http://localhost:3000";
+/** Куда ходит смоук: `SMOKE_URL`, иначе локальный сервер (docs/TESTING.md). */
+const URL = process.env.SMOKE_URL ?? "http://localhost:3000";
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 let failures = 0;

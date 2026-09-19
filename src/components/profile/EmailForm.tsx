@@ -60,6 +60,15 @@ export function EmailForm({
         error={state.fieldErrors?.email}
       />
 
+      <Field
+        label="Текущий пароль"
+        name="password"
+        type="password"
+        autoComplete="current-password"
+        hint="Нужен, чтобы сменить адрес: почта — это способ вернуть аккаунт."
+        error={state.fieldErrors?.password}
+      />
+
       <SubmitButton>
         {email === null ? "Прикрепить и подтвердить" : "Отправить письмо"}
       </SubmitButton>
