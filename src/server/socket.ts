@@ -11,6 +11,8 @@ import { renameGuest } from "../lib/auth/guest";
 import { setRoomLocked } from "../lib/rooms/private";
 import { CODE_BLOCKED_REASON, findRoomByCode } from "../lib/rooms/code-guard";
 import { socketAddress } from "./client-address";
+import { originAllowed } from "./origin";
+import { env } from "../lib/env";
 import { checkNickname } from "../shared/guest";
 import { hasScreen } from "../shared/room-settings";
 import {
@@ -163,6 +165,12 @@ export function createSocketServer(httpServer: HttpServer): SocketServer {
     // Первым делом и без базы: поток подключений не должен в неё дойти.
     if (!connectLimiter.allow(socketAddress(socket.handshake))) {
       next(new Error(TOO_MANY_CONNECTIONS));
+      return;
+    }
+
+    // Чужая страница с cookie нашего игрока — не наш клиент (S-E3).
+    if (!originAllowed(socket.handshake.headers, env.APP_URL)) {
+      next(new Error("Подключение с чужого сайта"));
       return;
     }
 

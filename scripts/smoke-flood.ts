@@ -15,7 +15,7 @@ import { SMOKE_URL } from "./actions";
  * Смоук: лимиты сокетов (docs/SECURITY.md, S-E1, S-E2).
  *
  * Подключения с одного адреса, открытые вкладки игрока, управление комнатой,
- * общий потолок на любое событие и размер сообщения. Разные клиенты
+ * общий потолок на любое событие, размер сообщения и Origin (S-E3). Разные клиенты
  * изображаются `X-Forwarded-For`, как в остальных смоуках безопасности.
  *
  * Запуск: npm run smoke:flood
@@ -47,11 +47,12 @@ interface Attempt {
 /** Подключиться и дождаться: пустили (пришло состояние) или отказали. */
 function connect(
   address: string,
-  options: { token?: string; room?: string } = {},
+  options: { token?: string; room?: string; origin?: string } = {},
 ): Promise<Attempt> {
   return new Promise((resolve) => {
     const headers: Record<string, string> = { "X-Forwarded-For": address };
     if (options.token) headers.Cookie = `pt_session=${options.token}`;
+    if (options.origin) headers.Origin = options.origin;
 
     const socket = io(SMOKE_URL, {
       path: SOCKET_PATH,
@@ -189,6 +190,29 @@ async function main() {
     });
     big.emit(CLIENT_EVENT.chat, { text: "а".repeat(40 * 1024) });
     check("сообщение больше 32 КБ рвёт соединение", await closed);
+
+    console.log("\n[6] Подключение с чужого сайта");
+    for (const socket of open) socket.disconnect();
+    open.length = 0;
+    await sleep(300);
+    const foreign = await connect(ip(6), {
+      token,
+      room: room.code,
+      origin: "https://evil.example",
+    });
+    foreign.socket.disconnect();
+    check(
+      "чужой Origin с cookie игрока — отказ",
+      foreign.refused?.includes("чужого сайта") === true,
+      String(foreign.refused),
+    );
+    const own = await connect(ip(6, 2), {
+      token,
+      room: room.code,
+      origin: new URL(SMOKE_URL).origin,
+    });
+    open.push(own.socket);
+    check("свой Origin — пускает", own.refused === null, String(own.refused));
   } finally {
     for (const socket of open) socket.disconnect();
     await sleep(300);
