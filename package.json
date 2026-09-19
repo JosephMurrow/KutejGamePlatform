@@ -16,6 +16,7 @@
     "smoke:limits": "node --env-file-if-exists=.env --import tsx scripts/smoke-limits.ts",
     "smoke:account": "node --env-file-if-exists=.env --import tsx scripts/smoke-account.ts",
     "smoke:rooms": "node --env-file-if-exists=.env --import tsx scripts/smoke-rooms.ts",
+    "smoke:flood": "node --env-file-if-exists=.env --import tsx scripts/smoke-flood.ts",
     "smoke:crowd": "node --env-file-if-exists=.env --import tsx scripts/smoke-crowd.ts",
     "smoke:chess": "node --env-file-if-exists=.env --import tsx src/games/chess/scripts/smoke-chess.ts",
     "smoke:lobby": "node --env-file-if-exists=.env --import tsx src/games/chess/scripts/smoke-lobby.ts",

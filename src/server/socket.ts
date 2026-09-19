@@ -46,6 +46,37 @@ export { SOCKET_PATH };
 const actionLimiter = new RateLimiter(20, 5_000);
 const chatLimiter = new RateLimiter(5, 10_000);
 
+/**
+ * Лимиты сокетов (docs/SECURITY.md, S-E1, S-E2).
+ *
+ * - **Новые подключения с адреса** — до похода в базу: каждое подключение
+ *   проверяет сессию и ищет комнату, и поток подключений иначе шёл бы прямо в
+ *   базу. Сто двадцать в минуту: за одним адресом бывает не только дом с
+ *   телевизором, но и мобильный оператор, у которого тысячи абонентов выходят
+ *   в сеть через один адрес (CGNAT), — зрители стрима с одного оператора не
+ *   должны друг другу мешать.
+ * - **Открытых сокетов на игрока** — десять: телефон, ноутбук, экран в OBS и
+ *   ещё несколько вкладок. Больше — это уже не человек.
+ * - **Любое событие** проходит общий потолок (`socket.use`), поэтому новое
+ *   событие не может забыть про лимит. Поверх него — свои лимиты у действий
+ *   игры, у чата и у управления комнатой: кик, замок и переименование пишут
+ *   в базу.
+ * - **Размер сообщения** — 32 КБ. Самое длинное, что шлёт клиент, — сообщение
+ *   чата в триста знаков; мегабайт по умолчанию был бы подарком.
+ */
+const connectLimiter = new RateLimiter(120, 60_000);
+const MAX_SOCKETS_PER_USER = 10;
+const eventLimiter = new RateLimiter(40, 5_000);
+const controlLimiter = new RateLimiter(10, 10_000);
+const MAX_MESSAGE_BYTES = 32 * 1024;
+
+/** Сколько сокетов сейчас открыто у каждого игрока. */
+const openSockets = new Map<string, number>();
+
+const TOO_MANY_CONNECTIONS =
+  "Слишком много подключений с этого адреса, подожди минуту";
+const TOO_MANY_TABS = "Слишком много открытых вкладок — закрой лишние";
+
 export interface SocketServer {
   io: IOServer;
   /** Остановить таймеры комнат и игр при выключении сервера. */
@@ -88,6 +119,7 @@ export function createSocketServer(httpServer: HttpServer): SocketServer {
     // путь. В одном процессе с Next это убивает HMR-сокет, поэтому чужие
     // upgrade'ы оставляем в покое — их разбирает обработчик в server.ts.
     destroyUpgrade: false,
+    maxHttpBufferSize: MAX_MESSAGE_BYTES,
   });
 
   // Серверная часть каждой игры поднимается один раз на процесс. Что она там
@@ -128,9 +160,20 @@ export function createSocketServer(httpServer: HttpServer): SocketServer {
   manager.onClose((roomKey) => twitch.detach(roomKey));
 
   io.use((socket, next) => {
+    // Первым делом и без базы: поток подключений не должен в неё дойти.
+    if (!connectLimiter.allow(socketAddress(socket.handshake))) {
+      next(new Error(TOO_MANY_CONNECTIONS));
+      return;
+    }
+
     void authenticateSocket(socket.handshake.headers)
       .then((user) => {
         if (user) {
+          if ((openSockets.get(user.id) ?? 0) >= MAX_SOCKETS_PER_USER) {
+            next(new Error(TOO_MANY_TABS));
+            return;
+          }
+
           socket.data.user = user;
           next();
           return;
@@ -153,6 +196,29 @@ export function createSocketServer(httpServer: HttpServer): SocketServer {
   });
 
   io.on("connection", (socket) => {
+    const user = socket.data.user as SocketUser | undefined;
+    if (user) {
+      openSockets.set(user.id, (openSockets.get(user.id) ?? 0) + 1);
+      socket.on("disconnect", () => {
+        const left = (openSockets.get(user.id) ?? 1) - 1;
+        if (left > 0) openSockets.set(user.id, left);
+        else openSockets.delete(user.id);
+      });
+    }
+
+    // Общий потолок на любое событие. Отказ приходит в подтверждение, если
+    // клиент его ждёт, а само событие до обработчика не доходит.
+    socket.use((packet, next) => {
+      if (eventLimiter.allow(user?.id ?? socket.id)) {
+        next();
+        return;
+      }
+      const ack = packet.at(-1);
+      if (typeof ack === "function") {
+        (ack as (reply: Ack) => void)({ ok: false, error: tooFast().reason });
+      }
+    });
+
     void onConnection(io, manager, twitch, socket);
   });
 
@@ -416,6 +482,7 @@ async function onConnection(
 
   socket.on(CLIENT_EVENT.kick, (...args: unknown[]) => {
     respond(args, (payload) => {
+      if (!controlLimiter.allow(user.id)) return tooFast();
       const targetId = readString(payload, "playerId");
       if (!targetId) return { accepted: false, reason: "Кого выгонять?" };
 
@@ -433,6 +500,7 @@ async function onConnection(
 
   socket.on(CLIENT_EVENT.lock, (...args: unknown[]) => {
     void respondAsync(args, async (payload) => {
+      if (!controlLimiter.allow(user.id)) return tooFast();
       if (target.setup.ownerId !== user.id) {
         return { accepted: false, reason: "Набор закрывает только хозяин" };
       }
@@ -451,6 +519,7 @@ async function onConnection(
 
   socket.on(CLIENT_EVENT.rename, (...args: unknown[]) => {
     void respondAsync(args, async (payload) => {
+      if (!controlLimiter.allow(user.id)) return tooFast();
       if (target.setup.ownerId !== user.id) {
         return {
           accepted: false,
