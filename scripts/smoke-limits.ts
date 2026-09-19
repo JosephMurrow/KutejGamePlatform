@@ -1,10 +1,13 @@
 import { hash } from "@node-rs/argon2";
 import { prisma } from "../src/lib/prisma";
 import { signSessionToken } from "../src/lib/auth/token";
+import { MAX_GUESTS_PER_ROOM } from "../src/lib/auth/guest";
+import { createPrivateRoom, deletePrivateRoom } from "../src/lib/rooms/private";
 import { callAction, form, SMOKE_URL } from "./actions";
 
 /**
- * Смоук: лимиты на вход, регистрацию и письма (docs/SECURITY.md, S-B1, S-B2).
+ * Смоук: лимиты входа, регистрации, писем, гостей и сброса (docs/SECURITY.md,
+ * S-B1, S-B2, S-B7, S-D3).
  *
  * Экшены зовутся как у постороннего (`./actions.ts`), а разные клиенты
  * изображаются заголовком `X-Forwarded-For`: локально прокси нет, и сервер
@@ -14,7 +17,7 @@ import { callAction, form, SMOKE_URL } from "./actions";
  * Лимиты живут в памяти сервера, поэтому всё здесь с меткой прогона — логины,
  * адреса почты, адреса клиентов, — иначе второй прогон упёрся бы в счётчики
  * первого. Одна оговорка: общий потолок писем процесса (60 в час) один на
- * всех, а прогон тратит девять писем. Больше шести прогонов в час на одном
+ * всех, а прогон тратит двенадцать писем. Больше пяти прогонов в час на одном
  * сервере — и смоук упрётся в него; перезапуск сервера обнуляет счётчик.
  *
  * Нужна прод-сборка и mailpit (`npm run db:up`). Запуск: npm run smoke:limits
@@ -23,7 +26,7 @@ import { callAction, form, SMOKE_URL } from "./actions";
 const MAILPIT = process.env.MAILPIT_URL ?? "http://localhost:8025";
 const run = Date.now().toString(36);
 /** Адрес клиента с меткой прогона: у каждого раздела свой. */
-const ip = (block: number, n: number) =>
+const ip = (block: number, n = 1) =>
   `10.${block}.${parseInt(run.slice(-2), 36) % 250}.${n}`;
 
 let failures = 0;
@@ -78,6 +81,7 @@ async function main() {
   const vera = await member("vera", password);
   const created: string[] = [anya.id, borya.id, vera.id];
   const registered: string[] = [];
+  const rooms: { id: string; gameId: string }[] = [];
 
   try {
     console.log("[1] Перебор пароля упирается в счётчик логина");
@@ -207,7 +211,126 @@ async function main() {
       after?.email === `spin-${run}-a@local.test`,
       after?.email ?? "",
     );
+
+    console.log("\n[8] Гости: с одного адреса — не больше пяти в час");
+    const stream = await createPrivateRoom(vera.id, {
+      kind: "stream",
+      title: "Лимит гостей",
+      locked: false,
+      maxPlayers: null,
+      twitchChannel: null,
+    });
+    rooms.push(stream);
+    const joinAsGuest = (
+      nickname: string,
+      address: string,
+      code = stream.code,
+    ) =>
+      callAction(
+        "joinAsGuestAction",
+        [{}, form({ code, nickname, adult: "on" })],
+        { address },
+      );
+    for (let n = 0; n < 5; n++) {
+      const reply = await joinAsGuest(`Гость ${n}`, ip(8));
+      if (reply.redirect === null) {
+        check(`гость ${n + 1} зашёл`, false, reply.body.slice(0, 100));
+      }
+    }
+    const sixthGuest = await joinAsGuest("Гость 5", ip(8));
+    check(
+      "шестой за час — отказ",
+      sixthGuest.redirect === null &&
+        sixthGuest.body.includes("несколько гостей"),
+    );
+    check(
+      "с другого адреса заходит",
+      (await joinAsGuest("Гость 6", ip(8, 2))).redirect !== null,
+    );
+
+    console.log("\n[9] Гости: потолок на комнату");
+    const packed = await createPrivateRoom(vera.id, {
+      kind: "stream",
+      title: "Битком",
+      locked: false,
+      maxPlayers: null,
+      twitchChannel: null,
+    });
+    rooms.push(packed);
+    await prisma.user.createMany({
+      data: Array.from({ length: MAX_GUESTS_PER_ROOM }, (_, n) => ({
+        login: `g_${run}_${n}`,
+        passwordHash: "-",
+        nickname: `Толпа ${n}`,
+        avatarId: 1,
+        isGuest: true,
+        guestRoomId: packed.id,
+      })),
+    });
+    const crowded = await joinAsGuest("Лишний", ip(9), packed.code);
+    check(
+      `после ${MAX_GUESTS_PER_ROOM} гостей — отказ`,
+      crowded.redirect === null &&
+        crowded.body.includes("слишком много гостей"),
+    );
+
+    console.log("\n[10] Сброс пароля: лимит на аккаунт, как его ни называй");
+    const lost = await prisma.user.create({
+      data: {
+        login: `rec_${run}`,
+        passwordHash: "x",
+        nickname: "Забывчивый",
+        avatarId: 1,
+        email: `rec-${run}@local.test`,
+        emailConfirmedAt: new Date(),
+      },
+      select: { id: true, login: true },
+    });
+    created.push(lost.id);
+    const reset = (identity: string, address: string) =>
+      callAction("requestResetAction", [{}, form({ identity })], { address });
+    const names = [
+      lost.login,
+      `rec-${run}@local.test`,
+      lost.login.toUpperCase(),
+      `REC-${run}@local.test`,
+    ];
+    for (const [n, name] of names.entries()) {
+      const reply = await reset(name, ip(10, n));
+      if (!reply.body.includes("Если такой аккаунт есть")) {
+        check(`ответ ${n + 1} — общий`, false, reply.body.slice(0, 80));
+      }
+    }
+    const links = await prisma.oneTimeLink.count({
+      where: { userId: lost.id, purpose: "PASSWORD_RESET" },
+    });
+    check("ссылок выдано три, а не четыре", links === 3, `${links}`);
+
+    console.log("\n[11] Сброс пароля: лимит на адрес");
+    const other = await prisma.user.create({
+      data: {
+        login: `rec2_${run}`,
+        passwordHash: "x",
+        nickname: "Второй",
+        avatarId: 1,
+        email: `rec2-${run}@local.test`,
+        emailConfirmedAt: new Date(),
+      },
+      select: { id: true, login: true },
+    });
+    created.push(other.id);
+    for (let n = 0; n < 10; n++) await reset(`ghost_${run}_${n}`, ip(11));
+    const eleventhReset = await reset(other.login, ip(11));
+    check(
+      "одиннадцатый запрос — ответ тот же",
+      eleventhReset.body.includes("Если такой аккаунт есть"),
+    );
+    check(
+      "а ссылки нет",
+      (await prisma.oneTimeLink.count({ where: { userId: other.id } })) === 0,
+    );
   } finally {
+    for (const room of rooms) await deletePrivateRoom(room.id, room.gameId);
     await prisma.user.deleteMany({
       where: { id: { in: [...created, ...registered] } },
     });

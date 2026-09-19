@@ -1,5 +1,6 @@
 import { randomBytes } from "node:crypto";
 import { checkNickname } from "@/shared/guest";
+import { MAX_PLAYERS_LIMIT } from "@/shared/room-settings";
 import { randomAvatarId } from "../avatars";
 import { prisma } from "../prisma";
 
@@ -11,6 +12,19 @@ import { prisma } from "../prisma";
  * пароля — модель обкатана, изобретать нечего. Привязан он к своей комнате и
  * умирает вместе с ней; сохранить его нельзя, и это решено.
  */
+
+/**
+ * Потолок гостей на комнату (docs/SECURITY.md, S-D3). Гости не удаляются,
+ * пока жива комната, а зрители стрима приходят и уходят сотнями, поэтому
+ * потолок — не число мест, а то же число, что верхняя граница лимита игроков:
+ * больше за одним столом всё равно не бывает.
+ */
+export const MAX_GUESTS_PER_ROOM = MAX_PLAYERS_LIMIT;
+
+/** Сколько гостей заведено в комнате — по ссылке и из чата Твича. */
+export async function countGuestsIn(roomId: string): Promise<number> {
+  return prisma.user.count({ where: { guestRoomId: roomId } });
+}
 
 export interface GuestProfile {
   id: string;

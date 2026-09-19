@@ -1,7 +1,8 @@
 "use server";
 
 import { redirect } from "next/navigation";
-import { createGuest } from "../auth/guest";
+import { countGuestsIn, createGuest, MAX_GUESTS_PER_ROOM } from "../auth/guest";
+import { RateLimiter } from "../../server/rate-limit";
 import { sessionMemberId, startSession } from "../auth/session";
 import type { FormState } from "../auth/form-state";
 import { allowsGuests, ROOM_CODE_LENGTH } from "@/shared/room-settings";
@@ -14,6 +15,13 @@ import {
   MAX_ROOMS_PER_HOST,
   normalizeSettings,
 } from "./private";
+
+/**
+ * Гостевых входов с одного адреса в час (docs/SECURITY.md, S-D3). Считаются
+ * состоявшиеся. Гость, вернувшийся со своей сессией, сюда не приходит — его
+ * пускает страница комнаты.
+ */
+const guestLimiter = new RateLimiter(5, 60 * 60 * 1000);
 
 export async function createRoomAction(
   _prev: FormState,
@@ -101,10 +109,26 @@ export async function joinAsGuestAction(
     };
   }
 
+  // Гостевой вход заводит строку в базе, поэтому лимитирован
+  // (docs/SECURITY.md, S-D3): с адреса — как у регистрации, на комнату —
+  // потолок, выше которого за стол всё равно не посадить.
+  const address = await requestAddress();
+  if (guestLimiter.blocked(address)) {
+    return {
+      values,
+      error:
+        "С этого адреса уже заходили несколько гостей. Попробуй через час.",
+    };
+  }
+  if ((await countGuestsIn(room.id)) >= MAX_GUESTS_PER_ROOM) {
+    return { values, error: "В комнате уже слишком много гостей" };
+  }
+
   const result = await createGuest(room.id, nickname);
   if (!result.ok) {
     return { values, fieldErrors: { nickname: result.reason } };
   }
+  guestLimiter.hit(address);
 
   await startSession(result.guest.id, true);
   redirect(`/r/${room.code}`);

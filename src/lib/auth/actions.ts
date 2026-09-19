@@ -425,11 +425,22 @@ async function checkCurrentPassword(
 }
 
 /**
- * Ограничение на запросы восстановления: по одному ключу не чаще трёх раз за
- * четверть часа. Ключ — то, что ввели, поэтому перебор чужих логинов упирается
- * в него так же, как и попытки завалить один ящик письмами.
+ * Лимиты восстановления пароля (docs/SECURITY.md, S-B7).
+ *
+ * Раньше ключом была введённая строка: логин и почта одного аккаунта давали
+ * два счётчика — вдвое больше писем, — а каждая выдуманная строка заводила
+ * свой ключ. Теперь два счётчика по сути дела:
+ *
+ * - **на аккаунт** — сколько писем получит один человек, как его ни называй;
+ * - **на адрес клиента** — сколько раз вообще можно дёрнуть форму, в том
+ *   числе с выдуманными логинами, по которым письма и так не уходят.
+ *
+ * Ответ формы от лимитов не меняется: иначе по нему узнавали бы, есть ли
+ * такой аккаунт.
  */
-const resetLimiter = new RateLimiter(3, 15 * 60 * 1000);
+const RESET_WINDOW_MS = 15 * 60 * 1000;
+const resetPerAccount = new RateLimiter(3, RESET_WINDOW_MS);
+const resetPerAddress = new RateLimiter(10, RESET_WINDOW_MS);
 
 /**
  * Запрос на восстановление пароля по логину или адресу почты.
@@ -455,7 +466,7 @@ export async function requestResetAction(
       "Проверь почту, в том числе папку со спамом.",
   };
 
-  if (!resetLimiter.allow(raw.toLowerCase())) return done;
+  if (!resetPerAddress.allow(await requestAddress())) return done;
 
   const user = await prisma.user.findFirst({
     where: {
@@ -471,6 +482,7 @@ export async function requestResetAction(
   // Аккаунта нет, почты нет или она не подтверждена — молчим и отвечаем
   // ровно то же самое.
   if (!user?.email) return done;
+  if (!resetPerAccount.allow(user.id)) return done;
 
   try {
     const token = await issueLink(user.id, user.email, "PASSWORD_RESET");
