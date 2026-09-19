@@ -2,6 +2,7 @@ import { createTransport, type Transporter } from "nodemailer";
 import { env } from "@/lib/env";
 import type { Letter } from "./letter";
 import { LetterQuota } from "./quota";
+import { securityLog } from "../../server/security-log";
 
 /**
  * Отправка писем через внешний релей.
@@ -61,9 +62,12 @@ export async function sendLetter(
   }
 
   if (!quota.take(to)) {
-    // Адрес в лог не пишем целиком: это чужая почта.
-    console.warn(
-      `[почта] лимит: письмо «${letter.subject}» на ${maskAddress(to)} не ушло`,
+    // Адрес в журнал не пишем целиком: это чужая почта.
+    const masked = maskAddress(to);
+    securityLog(
+      "почта: лимит писем",
+      { to: masked, subject: letter.subject },
+      to.toLowerCase(),
     );
     return "limit";
   }

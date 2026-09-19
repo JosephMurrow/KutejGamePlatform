@@ -1,4 +1,5 @@
 import { RateLimiter } from "../../server/rate-limit";
+import { securityLog } from "../../server/security-log";
 import { ROOM_CODE_LENGTH } from "@/shared/room-settings";
 import {
   findPrivateRoom,
@@ -56,7 +57,10 @@ export async function findRoomByCode(
   address: string,
 ): Promise<CodeLookup> {
   const limiter = misses();
-  if (limiter.blocked(address)) return { room: null, blocked: true };
+  if (limiter.blocked(address)) {
+    securityLog("коды: отказ по лимиту промахов", { address }, address);
+    return { room: null, blocked: true };
+  }
 
   const room = looksLikeCode(code) ? await findPrivateRoom(code) : null;
   if (!room) limiter.hit(address);

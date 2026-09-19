@@ -1,4 +1,5 @@
 import { cookies } from "next/headers";
+import { securityLog } from "../../server/security-log";
 import { prisma } from "../prisma";
 import { GUEST_SESSION_SECONDS } from "@/shared/guest";
 import {
@@ -77,7 +78,11 @@ export async function sessionCaller(): Promise<SessionCaller | null> {
  */
 export async function sessionMemberId(): Promise<string | null> {
   const caller = await sessionCaller();
-  return caller && !caller.isGuest ? caller.id : null;
+  if (caller?.isGuest) {
+    securityLog("экшен: гостю отказано", { user: caller.id }, caller.id);
+    return null;
+  }
+  return caller?.id ?? null;
 }
 
 /**

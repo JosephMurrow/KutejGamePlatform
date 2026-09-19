@@ -13,6 +13,7 @@ import { CODE_BLOCKED_REASON, findRoomByCode } from "../lib/rooms/code-guard";
 import { socketAddress } from "./client-address";
 import { originAllowed } from "./origin";
 import { sameSecret } from "../lib/secret";
+import { securityLog } from "./security-log";
 import { env } from "../lib/env";
 import { checkNickname, normalizeNickname } from "../shared/guest";
 import { hasScreen } from "../shared/room-settings";
@@ -164,13 +165,20 @@ export function createSocketServer(httpServer: HttpServer): SocketServer {
 
   io.use((socket, next) => {
     // Первым делом и без базы: поток подключений не должен в неё дойти.
-    if (!connectLimiter.allow(socketAddress(socket.handshake))) {
+    const address = socketAddress(socket.handshake);
+    if (!connectLimiter.allow(address)) {
+      securityLog("сокет: отказ по лимиту подключений", { address }, address);
       next(new Error(TOO_MANY_CONNECTIONS));
       return;
     }
 
     // Чужая страница с cookie нашего игрока — не наш клиент (S-E3).
     if (!originAllowed(socket.handshake.headers, env.APP_URL)) {
+      securityLog(
+        "сокет: чужой Origin",
+        { origin: socket.handshake.headers.origin, address },
+        address,
+      );
       next(new Error("Подключение с чужого сайта"));
       return;
     }
@@ -179,6 +187,11 @@ export function createSocketServer(httpServer: HttpServer): SocketServer {
       .then((user) => {
         if (user) {
           if ((openSockets.get(user.id) ?? 0) >= MAX_SOCKETS_PER_USER) {
+            securityLog(
+              "сокет: отказ по лимиту вкладок",
+              { user: user.id, address },
+              user.id,
+            );
             next(new Error(TOO_MANY_TABS));
             return;
           }
@@ -355,6 +368,12 @@ async function onScreen(
 
   const owner = user !== undefined && target.setup.ownerId === user.id;
   if (!owner && !sameSecret(readQuery(socket, KEY_QUERY), target.screenKey)) {
+    const address = socketAddress(socket.handshake);
+    securityLog(
+      "экран: неверный ключ",
+      { room: target.key, address },
+      `${target.key}|${address}`,
+    );
     socket.emit(SERVER_EVENT.kicked, { reason: "Экран этой комнаты закрыт" });
     socket.disconnect(true);
     return;

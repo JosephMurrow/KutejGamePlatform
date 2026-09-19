@@ -10,6 +10,7 @@ import { findRoomByCode } from "@/lib/rooms/code-guard";
 import { requestAddress } from "@/lib/request-address";
 import { hasScreen } from "@/shared/room-settings";
 import { sameSecret } from "@/lib/secret";
+import { securityLog } from "@/server/security-log";
 
 /**
  * Поиск считает промахи адреса (docs/SECURITY.md, S-D1); исчерпал — комнаты
@@ -65,7 +66,15 @@ export default async function ScreenPage({
 
   if (!sameSecret(key, room.screenKey)) {
     const userId = await getSessionUserId();
-    if (userId !== room.hostId) notFound();
+    if (userId !== room.hostId) {
+      const address = await requestAddress();
+      securityLog(
+        "экран: неверный ключ",
+        { room: room.id, address },
+        `${room.id}|${address}`,
+      );
+      notFound();
+    }
   }
 
   const pages = gamePages(room.gameId);

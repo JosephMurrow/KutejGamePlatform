@@ -3,6 +3,7 @@
 import { redirect } from "next/navigation";
 import { countGuestsIn, createGuest, MAX_GUESTS_PER_ROOM } from "../auth/guest";
 import { RateLimiter } from "../../server/rate-limit";
+import { securityLog } from "../../server/security-log";
 import { sessionMemberId, startSession } from "../auth/session";
 import type { FormState } from "../auth/form-state";
 import { allowsGuests, ROOM_CODE_LENGTH } from "@/shared/room-settings";
@@ -114,6 +115,7 @@ export async function joinAsGuestAction(
   // потолок, выше которого за стол всё равно не посадить.
   const address = await requestAddress();
   if (guestLimiter.blocked(address)) {
+    securityLog("гость: отказ по лимиту", { address }, address);
     return {
       values,
       error:
@@ -121,6 +123,7 @@ export async function joinAsGuestAction(
     };
   }
   if ((await countGuestsIn(room.id)) >= MAX_GUESTS_PER_ROOM) {
+    securityLog("гость: комната полна", { room: room.id, address }, room.id);
     return { values, error: "В комнате уже слишком много гостей" };
   }
 

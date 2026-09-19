@@ -19,6 +19,7 @@ import { claimLink, issueLink } from "./links";
 import { LoginGuard } from "./login-guard";
 import { requestAddress } from "../request-address";
 import { safeInternalPath } from "../safe-path";
+import { securityLog } from "../../server/security-log";
 import { endSession, sessionMemberId, startSession } from "./session";
 import {
   emailOnlySchema,
@@ -118,6 +119,7 @@ export async function registerAction(
   const address = await requestAddress();
 
   if (registerLimiter.blocked(address)) {
+    securityLog("регистрация: отказ по лимиту", { address }, address);
     return {
       values,
       error:
@@ -201,7 +203,13 @@ export async function loginAction(
   const login = normalizeLogin(parsed.data.login);
 
   // До argon2 и до базы: иначе отказ приходил бы уже после дорогой работы.
-  if (!loginGuard.admit(login, await requestAddress())) {
+  const address = await requestAddress();
+  if (!loginGuard.admit(login, address)) {
+    securityLog(
+      "вход: отказ по лимиту",
+      { login, address },
+      `${login}|${address}`,
+    );
     return {
       values,
       error:
@@ -222,12 +230,14 @@ export async function loginAction(
   // Боты «Forever alone» — обычные записи в таблице, но входить под ними нельзя.
   if (!user || user.isBot) {
     loginGuard.failed(login);
+    securityLog("вход: неверный логин или пароль", { login, address });
     return wrong;
   }
 
   const passwordOk = await verify(user.passwordHash, parsed.data.password);
   if (!passwordOk) {
     loginGuard.failed(login);
+    securityLog("вход: неверный логин или пароль", { login, address });
     return wrong;
   }
 
@@ -322,6 +332,7 @@ export async function attachEmailAction(
 
   // До сохранения адреса: отказ не должен оставлять почту поменянной.
   if (!attachLimiter.allow(userId)) {
+    securityLog("почта: отказ по лимиту привязки", { user: userId }, userId);
     return {
       values,
       error: "Писем было уже несколько. Проверь почту или попробуй через час.",
@@ -366,6 +377,13 @@ export async function attachEmailAction(
 
   // Прежний подтверждённый адрес узнаёт о смене: если это был не хозяин,
   // хозяин должен узнать сразу, а не когда полезет восстанавливать пароль.
+  if (changing) {
+    securityLog("почта: адрес сменён", {
+      user: userId,
+      from: me.email ? maskAddress(me.email) : null,
+      to: maskAddress(email),
+    });
+  }
   if (changing && me.email && me.emailConfirmedAt) {
     void sendLetter(me.email, emailChangedLetter(me.login, maskAddress(email)));
   }
@@ -412,12 +430,19 @@ async function checkCurrentPassword(
 ): Promise<string | null> {
   if (password === "") return "Введи текущий пароль";
 
-  if (!loginGuard.admit(login, await requestAddress())) {
+  const address = await requestAddress();
+  if (!loginGuard.admit(login, address)) {
+    securityLog(
+      "пароль: отказ по лимиту",
+      { login, address },
+      `${login}|${address}`,
+    );
     return "Слишком много попыток. Подожди четверть часа.";
   }
 
   if (!(await verify(passwordHash, password))) {
     loginGuard.failed(login);
+    securityLog("пароль: неверный текущий", { login, address });
     return "Пароль не подходит";
   }
 
@@ -467,7 +492,11 @@ export async function requestResetAction(
       "Проверь почту, в том числе папку со спамом.",
   };
 
-  if (!resetPerAddress.allow(await requestAddress())) return done;
+  const address = await requestAddress();
+  if (!resetPerAddress.allow(address)) {
+    securityLog("сброс: отказ по лимиту адреса", { address }, address);
+    return done;
+  }
 
   const user = await prisma.user.findFirst({
     where: {
@@ -483,7 +512,14 @@ export async function requestResetAction(
   // Аккаунта нет, почты нет или она не подтверждена — молчим и отвечаем
   // ровно то же самое.
   if (!user?.email) return done;
-  if (!resetPerAccount.allow(user.id)) return done;
+  if (!resetPerAccount.allow(user.id)) {
+    securityLog(
+      "сброс: отказ по лимиту аккаунта",
+      { user: user.id, address },
+      user.id,
+    );
+    return done;
+  }
 
   try {
     const token = await issueLink(user.id, user.email, "PASSWORD_RESET");
@@ -615,6 +651,10 @@ export async function changePasswordAction(
 
   // Новая сессия — после сдвига отметки, поэтому переживёт его.
   await startSession(userId);
+  securityLog("пароль: сменён из профиля", {
+    user: userId,
+    address: await requestAddress(),
+  });
 
   // Если пароль менял не хозяин, хозяин узнает по почте.
   if (me.email && me.emailConfirmedAt) {
@@ -643,6 +683,10 @@ export async function logoutEverywhereAction(): Promise<FormState> {
     data: { sessionsValidFrom: new Date() },
   });
   await startSession(userId);
+  securityLog("сессии: выход на всех устройствах", {
+    user: userId,
+    address: await requestAddress(),
+  });
 
   return { ok: "Готово: на остальных устройствах сессии закрыты." };
 }
