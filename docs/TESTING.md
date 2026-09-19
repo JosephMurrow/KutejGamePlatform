@@ -61,6 +61,16 @@ IRC, фильтр гостевых ников, настроение ботов �
 SMOKE_URL=http://localhost:3100 npm run smoke:sockets
 ```
 
+Смоуки, которые зовут серверные экшены (`guest`, `limits`, `account`,
+`rooms`), берут их идентификаторы из манифеста сборки — по умолчанию
+локальной `.next`. У Docker-образа сборка своя, и идентификаторы другие;
+тогда манифест подкладывается из контейнера:
+
+```bash
+docker cp <контейнер>:/app/.next/server/server-reference-manifest.json /tmp/manifest.json
+SMOKE_URL=http://127.0.0.1:3200 SMOKE_MANIFEST=/tmp/manifest.json npm run smoke:account
+```
+
 После обновления библиотек смоуки гоняются на прод-сборке, а не на dev:
 выкладывается прод (см. «Для агента» в [README.md](./README.md)).
 

@@ -21,8 +21,14 @@ const { encodeReply } =
 interface ActionEntry {
   exportedName?: string;
 }
+/**
+ * Манифест экшенов — от той сборки, в которую ходит смоук. По умолчанию
+ * локальная `.next`; у контейнера своя сборка со своими идентификаторами,
+ * и её манифест подкладывается через `SMOKE_MANIFEST` (docs/TESTING.md).
+ */
 const manifest = require(
-  `${process.cwd()}/.next/server/server-reference-manifest.json`,
+  process.env.SMOKE_MANIFEST ??
+    `${process.cwd()}/.next/server/server-reference-manifest.json`,
 ) as {
   node: Record<string, ActionEntry>;
 };

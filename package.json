@@ -32,6 +32,7 @@
     "db:studio": "prisma studio",
     "db:seed": "prisma db seed",
     "postinstall": "prisma generate",
+    "audit:check": "node scripts/audit-check.mjs",
     "audit:questions": "node --import tsx src/games/pricetitute/scripts/audit-questions.ts",
     "db:rename-questions": "node --env-file-if-exists=.env --import tsx src/games/pricetitute/scripts/rename-questions.ts",
     "mail:check": "node --env-file-if-exists=.env --import tsx scripts/mail-check.ts",
