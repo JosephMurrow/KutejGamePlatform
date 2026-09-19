@@ -5,6 +5,7 @@ import { Brand, PLATFORM } from "@/components/Brand";
 import { EmailForm } from "@/components/profile/EmailForm";
 import { InstallHint } from "@/components/InstallHint";
 import { ProfileForm } from "@/components/profile/ProfileForm";
+import { SecurityForm } from "@/components/profile/SecurityForm";
 import { UserMenu } from "@/components/UserMenu";
 import { getCurrentUser } from "@/lib/auth/session";
 
@@ -47,6 +48,11 @@ export default async function ProfilePage() {
           email={user.email}
           confirmed={user.emailConfirmedAt !== null}
         />
+      </Card>
+
+      <Card className="mt-6">
+        <h2 className="mb-5 text-lg font-semibold">Безопасность</h2>
+        <SecurityForm />
       </Card>
     </main>
   );

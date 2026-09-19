@@ -1,15 +1,19 @@
 import { hash } from "@node-rs/argon2";
+import { issueLink } from "../src/lib/auth/links";
 import { signSessionToken } from "../src/lib/auth/token";
 import { prisma } from "../src/lib/prisma";
 import { callAction, form, SMOKE_URL } from "./actions";
 
 /**
- * Смоук: смена почты и возврат после входа (docs/SECURITY.md, S-B3, S-B4).
+ * Смоук: аккаунт — почта, возврат после входа, пароль, сессии
+ * (docs/SECURITY.md, S-B3, S-B4, S-B5, S-B6).
  *
  * S-B3 — почта меняется только с паролем, прежний подтверждённый адрес
  * получает письмо о смене, а форма почты не служит обходом лимита входа.
  * S-B4 — параметр `next` не уводит на чужой домен ни через экшен входа, ни
- * через `proxy.ts`.
+ * через `proxy.ts`. S-B5 — смена пароля и выход везде закрывают прежние
+ * сессии, оставляя текущую. S-B6 — ссылку подтверждения гасит кнопка, а не
+ * открытие страницы.
  *
  * Экшены зовутся как у постороннего (`./actions.ts`), письма считает
  * локальный mailpit. Нужна прод-сборка и mailpit. Запуск: npm run smoke:account
@@ -41,6 +45,15 @@ async function letters(to: string, subject?: string): Promise<number> {
 
 const settle = () => new Promise((resolve) => setTimeout(resolve, 500));
 
+/** Код ответа профиля с этой сессией: 200 — пускает, редирект — нет. */
+async function profile(session: string): Promise<number> {
+  const res = await fetch(`${SMOKE_URL}/profile`, {
+    headers: { Cookie: `pt_session=${session}` },
+    redirect: "manual",
+  });
+  return res.status;
+}
+
 async function main() {
   console.log(`Смоук аккаунта: ${SMOKE_URL}, прогон ${run}\n`);
 
@@ -70,6 +83,7 @@ async function main() {
   });
 
   const token = await signSessionToken(owner.id, 3600);
+  const extra: string[] = [];
   const attach = (fields: Record<string, string>) =>
     callAction("attachEmailAction", [{}, form(fields)], { token });
   const emailNow = async () =>
@@ -184,9 +198,102 @@ async function main() {
       own.origin === origin && own.pathname === "/games/chess",
       own.href,
     );
+
+    console.log("\n[8] Подтверждение почты: страница не гасит ссылку");
+    const confirmToken = await issueLink(owner.id, newMail, "EMAIL_CONFIRM");
+    const opened = await fetch(`${SMOKE_URL}/confirm/${confirmToken}`);
+    const stillAlive = await prisma.oneTimeLink.findFirst({
+      where: { userId: owner.id, purpose: "EMAIL_CONFIRM", usedAt: null },
+    });
+    check("открытие страницы — 200", opened.status === 200, `${opened.status}`);
+    check("ссылка после открытия жива", !!stillAlive);
+    const confirm = () =>
+      callAction("confirmEmailAction", [{}, form({ token: confirmToken })]);
+    const pressed = await confirm();
+    const confirmed = await prisma.user.findUnique({
+      where: { id: owner.id },
+      select: { emailConfirmedAt: true },
+    });
+    check("кнопка подтверждает", pressed.body.includes("Адрес подтверждён"));
+    check("в базе подтверждён", confirmed?.emailConfirmedAt instanceof Date);
+    check(
+      "второе нажатие — ссылка уже сработала",
+      (await confirm()).body.includes("Ссылка не сработала"),
+    );
+
+    console.log("\n[9] Смена пароля из профиля");
+    const changer = await prisma.user.create({
+      data: {
+        login: `chg_${run}`,
+        passwordHash: await hash(password),
+        nickname: "Меняющий",
+        avatarId: 3,
+        email: `chg-${run}@local.test`,
+        emailConfirmedAt: new Date(),
+      },
+      select: { id: true, login: true },
+    });
+    extra.push(changer.id);
+    const oldSession = await signSessionToken(changer.id, 3600);
+    // Сессии сравниваются по секундам: старая должна быть выдана раньше смены.
+    await new Promise((resolve) => setTimeout(resolve, 1100));
+    const newPassword = `new-${run}-secret`;
+    const change = (current: string) =>
+      callAction(
+        "changePasswordAction",
+        [{}, form({ current, password: newPassword })],
+        // Со страницы профиля, как браузер: пересланный с чужой страницы
+        // экшен теряет Set-Cookie, и новой сессии было бы не увидеть.
+        { token: oldSession, address: ip(200), path: "/profile" },
+      );
+    const wrongCurrent = await change("not-my-password");
+    check(
+      "чужой текущий — отказ",
+      wrongCurrent.body.includes("Пароль не подходит"),
+    );
+    check("до смены старая сессия жива", (await profile(oldSession)) === 200);
+    const changed = await change(password);
+    check("сменён", changed.body.includes("Пароль сменён"));
+    check(
+      "старая сессия больше не пускает",
+      (await profile(oldSession)) !== 200,
+    );
+    check(
+      "а выданная взамен — пускает",
+      changed.session !== null && (await profile(changed.session)) === 200,
+    );
+    const relogin = await callAction(
+      "loginAction",
+      [{}, form({ login: changer.login, password: newPassword })],
+      { address: ip(201) },
+    );
+    check(
+      "вход с новым паролем",
+      relogin.redirect?.startsWith("/games") === true,
+    );
+    await settle();
+    check(
+      "письмо о смене пароля",
+      (await letters(`chg-${run}@local.test`, "Пароль сменён")) === 1,
+    );
+
+    console.log("\n[10] Выйти на всех устройствах");
+    const phone = await signSessionToken(walker.id, 3600);
+    await new Promise((resolve) => setTimeout(resolve, 1100));
+    const laptop = await signSessionToken(walker.id, 3600);
+    const out = await callAction("logoutEverywhereAction", [], {
+      token: laptop,
+      path: "/profile",
+    });
+    check("готово", out.body.includes("сессии закрыты"));
+    check("телефон выкинут", (await profile(phone)) !== 200);
+    check(
+      "этому устройству выдана свежая",
+      out.session !== null && (await profile(out.session)) === 200,
+    );
   } finally {
     await prisma.user.deleteMany({
-      where: { id: { in: [owner.id, walker.id] } },
+      where: { id: { in: [owner.id, walker.id, ...extra] } },
     });
   }
 

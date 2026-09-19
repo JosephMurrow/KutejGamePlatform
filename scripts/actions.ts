@@ -49,12 +49,19 @@ export interface ActionReply {
   redirect: string | null;
   /** Тело ответа RSC как текст: сверяем по подстроке. */
   body: string;
+  /** Новая сессия, если экшен её выдал (`Set-Cookie: pt_session=…`). */
+  session: string | null;
 }
 
 export interface CallOptions {
   /** Сессия. Без неё — аноним. */
   token?: string;
-  /** С какой страницы звать. Посторонний выберет любую, по умолчанию `/`. */
+  /**
+   * С какой страницы звать. Посторонний выберет любую, по умолчанию `/`.
+   * Next пересылает экшен на страницу, где он объявлен, и в пересланном
+   * ответе теряется `Set-Cookie`: если нужна выданная экшеном сессия, звать
+   * надо с его страницы, как это делает браузер.
+   */
   path?: string;
   /**
    * Чьим адресом назваться. Локально прокси нет, и сервер верит
@@ -85,9 +92,16 @@ export async function callAction(
     redirect: "manual",
   });
 
+  const session =
+    res.headers
+      .getSetCookie()
+      .map((cookie) => /^pt_session=([^;]*)/.exec(cookie)?.[1] ?? "")
+      .find((value) => value !== "") ?? null;
+
   return {
     status: res.status,
     redirect: res.headers.get("x-action-redirect"),
     body: await res.text(),
+    session,
   };
 }

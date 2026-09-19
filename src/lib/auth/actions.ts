@@ -9,6 +9,7 @@ import { RateLimiter } from "../../server/rate-limit";
 import {
   confirmLetter,
   emailChangedLetter,
+  passwordChangedLetter,
   resetLetter,
   welcomeLetter,
 } from "../mail/letters";
@@ -555,4 +556,133 @@ export async function resetPasswordAction(
   // На главную, а не в игровой зал: платформенный экшен не знает, во что
   // человек играет (docs/BACKLOG.md A6).
   redirect("/");
+}
+
+/**
+ * Смена пароля из профиля (docs/SECURITY.md, S-B5).
+ *
+ * Только со знанием текущего: укравший сессию пароль не сменит. Все прежние
+ * сессии после смены перестают действовать — как и после сброса по почте, —
+ * а текущая выдаётся заново, чтобы человек остался в игре.
+ */
+export async function changePasswordAction(
+  _prev: FormState,
+  formData: FormData,
+): Promise<FormState> {
+  const userId = await sessionMemberId();
+  if (!userId) {
+    redirect("/login");
+  }
+
+  const me = await prisma.user.findUnique({
+    where: { id: userId },
+    select: {
+      login: true,
+      passwordHash: true,
+      email: true,
+      emailConfirmedAt: true,
+    },
+  });
+  if (!me) redirect("/login");
+
+  const problem = await checkCurrentPassword(
+    me.login,
+    me.passwordHash,
+    String(formData.get("current") ?? ""),
+  );
+  if (problem) return { fieldErrors: { current: problem } };
+
+  const parsed = newPasswordSchema.safeParse({
+    password: String(formData.get("password") ?? ""),
+  });
+  if (!parsed.success) return { fieldErrors: fieldErrorsFrom(parsed.error) };
+
+  const now = new Date();
+  await prisma.$transaction([
+    prisma.user.update({
+      where: { id: userId },
+      data: {
+        passwordHash: await hash(parsed.data.password),
+        sessionsValidFrom: now,
+      },
+    }),
+    // Живые ссылки сброса выданы под старый пароль — гасим.
+    prisma.oneTimeLink.updateMany({
+      where: { userId, usedAt: null, purpose: "PASSWORD_RESET" },
+      data: { usedAt: now },
+    }),
+  ]);
+
+  // Новая сессия — после сдвига отметки, поэтому переживёт его.
+  await startSession(userId);
+
+  // Если пароль менял не хозяин, хозяин узнает по почте.
+  if (me.email && me.emailConfirmedAt) {
+    void sendLetter(me.email, passwordChangedLetter(me.login));
+  }
+
+  return {
+    ok: "Пароль сменён. На остальных устройствах придётся войти заново.",
+  };
+}
+
+/**
+ * Выйти на всех устройствах (docs/SECURITY.md, S-B5). Сессия — подписанный
+ * токен на тридцать дней, и «выйти» на одном устройстве только стирает там
+ * cookie. Здесь сдвигается отметка, раньше которой сессии не действуют, — и
+ * для страниц, и для сокетов. Текущему устройству выдаётся свежая.
+ */
+export async function logoutEverywhereAction(): Promise<FormState> {
+  const userId = await sessionMemberId();
+  if (!userId) {
+    redirect("/login");
+  }
+
+  await prisma.user.update({
+    where: { id: userId },
+    data: { sessionsValidFrom: new Date() },
+  });
+  await startSession(userId);
+
+  return { ok: "Готово: на остальных устройствах сессии закрыты." };
+}
+
+/**
+ * Подтверждение почты по кнопке, а не по открытию страницы
+ * (docs/SECURITY.md, S-B6). Почтовые сканеры и предпросмотр в мессенджерах
+ * открывают ссылку раньше человека; раньше это и гасило её.
+ *
+ * Без проверки сессии — осознанно: пропуск здесь сама ссылка, и подтвердить
+ * адрес можно, не входя в игру, например с телефона, где сессии нет.
+ */
+export async function confirmEmailAction(
+  _prev: FormState,
+  formData: FormData,
+): Promise<FormState> {
+  const claimed = await claimLink(
+    String(formData.get("token") ?? ""),
+    "EMAIL_CONFIRM",
+  );
+  if (!claimed) {
+    return {
+      error:
+        "Ссылка не сработала: она живёт час и срабатывает один раз. " +
+        "Запроси новую в профиле.",
+    };
+  }
+
+  // Подтверждаем тот адрес, на который ушло письмо: человек мог успеть
+  // поменять почту в профиле, пока письмо шло.
+  const { count } = await prisma.user.updateMany({
+    where: { id: claimed.userId, email: claimed.email },
+    data: { emailConfirmedAt: new Date() },
+  });
+
+  return count === 1
+    ? { ok: "Адрес подтверждён. Теперь забытый пароль можно восстановить." }
+    : {
+        error:
+          "Почту аккаунта успели сменить, пока шло письмо. Подтверди новый " +
+          "адрес по письму, которое ушло на него.",
+      };
 }
