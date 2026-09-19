@@ -8,6 +8,7 @@ import {
 } from "../../shared/twitch";
 import type { RoomManager } from "../rooms";
 import { ChatReader, type TwitchMessage } from "./chat";
+import { TwitchLimits } from "./limits";
 
 /**
  * Мост между чатом Твича и столом.
@@ -45,6 +46,8 @@ interface Attachment {
 
 export class TwitchBridge {
   private readonly rooms = new Map<string, Attachment>();
+  /** Потолки каналов и посадок (docs/SECURITY.md, S-F1). */
+  private readonly limits = new TwitchLimits();
 
   constructor(
     private readonly manager: RoomManager,
@@ -72,6 +75,17 @@ export class TwitchBridge {
 
     const existing = this.rooms.get(roomKey);
     if (existing?.channel === channel) return;
+
+    // Каналов на процесс — не больше потолка. Комната без канала играет
+    // дальше, просто без чата: экран покажет, что Твич не подключён.
+    const listening = this.rooms.size - (existing ? 1 : 0);
+    if (!this.limits.canAttach(listening)) {
+      console.warn(
+        `[twitch ${channel}] не подключён: слушаем уже ${listening} каналов`,
+      );
+      return;
+    }
+
     if (existing) this.detach(roomKey);
 
     const attachment: Attachment = {
@@ -108,6 +122,7 @@ export class TwitchBridge {
 
     attachment.reader.stop();
     this.rooms.delete(roomKey);
+    this.limits.forget(roomKey);
 
     const managed = this.manager.get(roomKey);
     if (!managed) return;
@@ -184,6 +199,10 @@ export class TwitchBridge {
     if (limit !== null && managed.game.seated().length >= limit) {
       return null;
     }
+
+    // Зрителей за столом не больше потолка гостей, а новые садятся порциями:
+    // лавина с большого канала не превращается в лавину записей в базу.
+    if (!this.limits.canSeat(roomKey, attachment.seats.size)) return null;
 
     const raw = twitchNickname(message.displayName, message.login);
     // Ник приезжает с Твича, а показывается на нашем экране: правила те же,
