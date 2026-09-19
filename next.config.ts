@@ -1,4 +1,10 @@
 import type { NextConfig } from "next";
+import {
+  commonSecurityHeaders,
+  screenSecurityHeaders,
+} from "./src/lib/security-headers";
+
+const dev = process.env.NODE_ENV !== "production";
 
 const nextConfig: NextConfig = {
   // Явно фиксируем корень: иначе Turbopack уходит вверх по дереву в поисках
@@ -19,6 +25,14 @@ const nextConfig: NextConfig = {
    */
   async headers() {
     return [
+      /**
+       * Заголовки безопасности на всё (docs/SECURITY.md, S-G1). Правило для
+       * экрана стоит ниже и перекрывает CSP: из двух правил с одним ключом
+       * Next берёт последнее.
+       */
+      { source: "/:path*", headers: commonSecurityHeaders(dev) },
+      { source: "/r/:code/tv", headers: screenSecurityHeaders(dev) },
+
       /**
        * Служебный воркер (docs/BACKLOG.md D1). Половина защиты от «застрял на
        * старой версии»: браузер обязан перепроверять сам файл воркера каждый
