@@ -12,8 +12,9 @@ import { setRoomLocked } from "../lib/rooms/private";
 import { CODE_BLOCKED_REASON, findRoomByCode } from "../lib/rooms/code-guard";
 import { socketAddress } from "./client-address";
 import { originAllowed } from "./origin";
+import { sameSecret } from "../lib/secret";
 import { env } from "../lib/env";
-import { checkNickname } from "../shared/guest";
+import { checkNickname, normalizeNickname } from "../shared/guest";
 import { hasScreen } from "../shared/room-settings";
 import {
   CHAT_MAX_LENGTH,
@@ -353,7 +354,7 @@ async function onScreen(
   }
 
   const owner = user !== undefined && target.setup.ownerId === user.id;
-  if (!owner && readQuery(socket, KEY_QUERY) !== target.screenKey) {
+  if (!owner && !sameSecret(readQuery(socket, KEY_QUERY), target.screenKey)) {
     socket.emit(SERVER_EVENT.kicked, { reason: "Экран этой комнаты закрыт" });
     socket.disconnect(true);
     return;
@@ -536,7 +537,7 @@ async function onConnection(
       }
 
       const targetId = readString(payload, "playerId");
-      const nickname = readString(payload, "nickname")?.trim() ?? "";
+      const nickname = normalizeNickname(readString(payload, "nickname") ?? "");
       if (!targetId)
         return { accepted: false, reason: "Кого переименовывать?" };
 

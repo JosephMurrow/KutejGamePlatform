@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { checkNickname, normalizeNickname } from "@/shared/guest";
 
 export const LOGIN_MIN_LENGTH = 3;
 export const LOGIN_MAX_LENGTH = 20;
@@ -18,11 +19,18 @@ const passwordSchema = z
   .min(PASSWORD_MIN_LENGTH, `Пароль не короче ${PASSWORD_MIN_LENGTH} символов`)
   .max(128, "Пароль не длиннее 128 символов");
 
+/**
+ * Ник игрока с аккаунтом — по тем же правилам, что у гостя и зрителя из
+ * Твича: длина, невидимые символы и фильтр (docs/SECURITY.md, S-B8). Раньше
+ * у игрока проверялась только длина, а видит его ник тот же зал.
+ */
 const nicknameSchema = z
   .string()
-  .trim()
-  .min(NICKNAME_MIN_LENGTH, `Ник не короче ${NICKNAME_MIN_LENGTH} символов`)
-  .max(NICKNAME_MAX_LENGTH, `Ник не длиннее ${NICKNAME_MAX_LENGTH} символов`);
+  .transform(normalizeNickname)
+  .superRefine((nickname, ctx) => {
+    const problem = checkNickname(nickname);
+    if (problem) ctx.addIssue({ code: "custom", message: problem });
+  });
 
 /** Адрес хранится в нижнем регистре: почта регистронезависима на практике. */
 const emailSchema = z

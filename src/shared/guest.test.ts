@@ -1,6 +1,12 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { checkNickname, GUEST_NICKNAME_MAX, nicknameLooksBad } from "./guest";
+import {
+  checkNickname,
+  GUEST_NICKNAME_MAX,
+  hasHiddenChars,
+  nicknameLooksBad,
+  normalizeNickname,
+} from "./guest";
 
 /**
  * Ник гостя — это то, что стример покажет в эфире, поэтому фильтр здесь
@@ -59,5 +65,42 @@ describe("проверка ника перед заведением гостя",
 
   it("годный ник проходит", () => {
     assert.equal(checkNickname("Толя"), null);
+  });
+});
+
+describe("невидимые символы в нике (docs/SECURITY.md, S-B8)", () => {
+  it("нуль ширины прячет мат — не проходит", () => {
+    assert.notEqual(checkNickname("ху\u200bйло"), null);
+    assert.notEqual(checkNickname("Толя\u200b"), null);
+  });
+
+  it("смена направления текста — не проходит", () => {
+    for (const mark of ["\u202e", "\u202d", "\u2066", "\u200f", "\u061c"]) {
+      assert.notEqual(
+        checkNickname(`Толя${mark}ялоТ`),
+        null,
+        mark.codePointAt(0)?.toString(16),
+      );
+    }
+  });
+
+  it("управляющие коды и перевод строки — не проходят", () => {
+    const bad = ["Толя\u0000", "То\nля", "То\tля", "Толя\u007f", "То\u2028ля"];
+    for (const nickname of bad) {
+      assert.notEqual(checkNickname(nickname), null, JSON.stringify(nickname));
+    }
+  });
+
+  it("составные эмодзи через ZWJ проходят", () => {
+    const family = "\u{1f468}\u200d\u{1f469}\u200d\u{1f467}";
+    assert.equal(checkNickname(`Семья ${family}`), null);
+    assert.equal(hasHiddenChars("\u{1f44d}\u{1f3fd} Толя"), false);
+  });
+
+  it("NFC: «й» из двух кодовых точек и из одной — один ник", () => {
+    const composed = "Толй";
+    const decomposed = "Толи\u0306";
+    assert.notEqual(composed, decomposed);
+    assert.equal(normalizeNickname(decomposed), composed);
   });
 });

@@ -90,15 +90,47 @@ export function nicknameLooksBad(nickname: string): boolean {
   return BANNED.some((bad) => flat.includes(flatten(bad)));
 }
 
-/** Проверка ника без похода в базу: длина и фильтр. */
+/**
+ * Ник в том виде, в каком он хранится: NFC и без пробелов по краям. Без NFC
+ * «й» из двух кодовых точек и «й» из одной — разные ники, которые выглядят
+ * одинаково.
+ */
+export function normalizeNickname(raw: string): string {
+  return raw.normalize("NFC").trim();
+}
+
+/**
+ * Невидимые и управляющие символы: нули ширины, смена направления текста,
+ * управляющие коды, частные и неназначенные символы. Ими прячут мат от
+ * фильтра, выдают себя за чужой ник и переворачивают строку в чужой вёрстке
+ * (docs/SECURITY.md, S-B8).
+ *
+ * Исключение одно — U+200D (ZWJ): им склеиваются составные эмодзи, и спрятать
+ * в нём ничего нельзя.
+ */
+const HIDDEN = /[\p{Cc}\p{Cf}\p{Co}\p{Cs}\p{Cn}\p{Zl}\p{Zp}]/gu;
+
+export function hasHiddenChars(nickname: string): boolean {
+  return (nickname.match(HIDDEN) ?? []).some((char) => char !== "\u200d");
+}
+
+/**
+ * Проверка ника без похода в базу: длина, невидимые символы и фильтр.
+ *
+ * Одна для всех — гостя, зрителя из Твича и игрока с аккаунтом
+ * (docs/SECURITY.md, S-B8): ник видит весь зал, а на стриме — интернет.
+ */
 export function checkNickname(raw: string): string | null {
-  const nickname = raw.trim();
+  const nickname = normalizeNickname(raw);
 
   if (nickname.length < GUEST_NICKNAME_MIN) {
     return `Ник не короче ${GUEST_NICKNAME_MIN} символов`;
   }
   if (nickname.length > GUEST_NICKNAME_MAX) {
     return `Ник не длиннее ${GUEST_NICKNAME_MAX} символов`;
+  }
+  if (hasHiddenChars(nickname)) {
+    return "В нике невидимые или служебные символы — убери их";
   }
   if (nicknameLooksBad(nickname)) {
     return "Такой ник не годится — его увидит весь зал";

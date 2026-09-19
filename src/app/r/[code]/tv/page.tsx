@@ -9,6 +9,7 @@ import { getSessionUserId } from "@/lib/auth/session";
 import { findRoomByCode } from "@/lib/rooms/code-guard";
 import { requestAddress } from "@/lib/request-address";
 import { hasScreen } from "@/shared/room-settings";
+import { sameSecret } from "@/lib/secret";
 
 /**
  * Поиск считает промахи адреса (docs/SECURITY.md, S-D1); исчерпал — комнаты
@@ -29,7 +30,12 @@ export async function generateMetadata({
   const room = await roomByCode(code);
   const game = room ? gameById(room.gameId) : null;
 
-  return { title: `Экран — ${game?.title ?? PLATFORM}` };
+  return {
+    title: `Экран — ${game?.title ?? PLATFORM}`,
+    // Ключ экрана живёт в адресе. Без этого он уезжал бы в заголовке Referer
+    // на любой сторонний адрес, который подгрузит страница (S-G2).
+    referrer: "no-referrer",
+  };
 }
 
 /**
@@ -57,7 +63,7 @@ export default async function ScreenPage({
     notFound();
   }
 
-  if (key !== room.screenKey) {
+  if (!sameSecret(key, room.screenKey)) {
     const userId = await getSessionUserId();
     if (userId !== room.hostId) notFound();
   }

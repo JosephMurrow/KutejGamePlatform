@@ -1,6 +1,6 @@
 import { randomAvatarId } from "../../lib/avatars";
 import { prisma } from "../../lib/prisma";
-import { checkNickname } from "../../shared/guest";
+import { checkNickname, normalizeNickname } from "../../shared/guest";
 import {
   normalizeChannel,
   twitchLogin,
@@ -204,11 +204,16 @@ export class TwitchBridge {
     // лавина с большого канала не превращается в лавину записей в базу.
     if (!this.limits.canSeat(roomKey, attachment.seats.size)) return null;
 
-    const raw = twitchNickname(message.displayName, message.login);
+    const raw = normalizeNickname(
+      twitchNickname(message.displayName, message.login),
+    );
     // Ник приезжает с Твича, а показывается на нашем экране: правила те же,
-    // что и для гостя по ссылке. Не прошёл — играет под логином.
+    // что и для гостя по ссылке. Не прошёл — играет под началом логина:
+    // логин Твича — латиница и цифры, невидимого в нём не спрятать (S-B8).
     const nickname =
-      checkNickname(raw) === null ? raw : `Зритель ${raw.slice(0, 4)}`;
+      checkNickname(raw) === null
+        ? raw
+        : `Зритель ${message.login.slice(0, 8)}`;
 
     const login = twitchLogin(message.userId);
     const avatarId = randomAvatarId();

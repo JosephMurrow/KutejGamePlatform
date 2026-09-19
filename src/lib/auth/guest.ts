@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import { checkNickname } from "@/shared/guest";
+import { checkNickname, normalizeNickname } from "@/shared/guest";
 import { MAX_PLAYERS_LIMIT } from "@/shared/room-settings";
 import { randomAvatarId } from "../avatars";
 import { prisma } from "../prisma";
@@ -45,7 +45,7 @@ export async function createGuest(
   roomId: string,
   raw: string,
 ): Promise<GuestResult> {
-  const nickname = raw.trim();
+  const nickname = normalizeNickname(raw);
   const problem = checkNickname(nickname);
   if (problem) return { ok: false, reason: problem };
 
@@ -111,6 +111,6 @@ export async function renameGuest(
 ): Promise<void> {
   await prisma.user.updateMany({
     where: { id: guestId, isGuest: true },
-    data: { nickname: nickname.trim() },
+    data: { nickname: normalizeNickname(nickname) },
   });
 }
