@@ -8,7 +8,9 @@ import {
   GAME_SERVERS,
 } from "@/lib/games/servers";
 import { renameGuest } from "../lib/auth/guest";
-import { findPrivateRoom, setRoomLocked } from "../lib/rooms/private";
+import { setRoomLocked } from "../lib/rooms/private";
+import { CODE_BLOCKED_REASON, findRoomByCode } from "../lib/rooms/code-guard";
+import { socketAddress } from "./client-address";
 import { checkNickname } from "../shared/guest";
 import { hasScreen } from "../shared/room-settings";
 import {
@@ -191,14 +193,19 @@ interface RoomTarget {
  * комнаты — её колонка `gameId`. Игр от этого может быть сколько угодно, и
  * ключи общих залов у них разные (docs/BACKLOG.md A4).
  */
-async function resolveRoom(socket: Socket): Promise<RoomTarget | null> {
+/** Почему не нашлась комната: нет такой или адрес исчерпал промахи. */
+const NOT_FOUND = { missing: true, reason: "Комната не найдена" } as const;
+
+type RoomMiss = { missing: true; reason: string };
+
+async function resolveRoom(socket: Socket): Promise<RoomTarget | RoomMiss> {
   const code = readQuery(socket, ROOM_QUERY);
 
   // Игру называет клиент, а для приватной комнаты — сама комната. Пустой
   // параметр означает платитутку: так ходит вкладка, открытая до выкладки.
   const asked = readQuery(socket, GAME_QUERY);
   const game = asked === "" ? defaultGameServer() : gameServerById(asked);
-  if (!game) return null;
+  if (!game) return NOT_FOUND;
 
   if (code === "") {
     return {
@@ -221,13 +228,18 @@ async function resolveRoom(socket: Socket): Promise<RoomTarget | null> {
     };
   }
 
-  const room = await findPrivateRoom(code);
-  if (!room) return null;
+  // Промахи по коду считаются на адрес: экран подключается без сессии, и без
+  // лимита это был бы бесплатный перебиратель кодов (docs/SECURITY.md, S-D1).
+  const lookup = await findRoomByCode(code, socketAddress(socket.handshake));
+  if (lookup.blocked) return { missing: true, reason: CODE_BLOCKED_REASON };
+
+  const room = lookup.room;
+  if (!room) return NOT_FOUND;
 
   // За столом играют в то, во что завели комнату, а не в то, что попросил
   // клиент: иначе чужая вкладка меняла бы игру чужой комнате.
   const owner = gameServerById(room.gameId);
-  if (!owner) return null;
+  if (!owner) return NOT_FOUND;
 
   return {
     key: room.id,
@@ -302,8 +314,8 @@ async function onConnection(
   socket: Socket,
 ): Promise<void> {
   const target = await resolveRoom(socket);
-  if (!target) {
-    socket.emit(SERVER_EVENT.kicked, { reason: "Комната не найдена" });
+  if ("missing" in target) {
+    socket.emit(SERVER_EVENT.kicked, { reason: target.reason });
     socket.disconnect(true);
     return;
   }

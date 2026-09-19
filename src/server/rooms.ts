@@ -11,6 +11,7 @@ import {
   deletePrivateRoom,
   markBusy,
   markEmpty,
+  markOrphanRooms,
   staleRooms,
 } from "../lib/rooms/private";
 import type { SocketUser } from "./auth";
@@ -279,6 +280,19 @@ export class RoomManager {
     return this.rooms.get(key);
   }
 
+  /** Ключи комнат, поднятых в памяти или поднимающихся прямо сейчас. */
+  openKeys(): string[] {
+    return [...this.rooms.keys(), ...this.opening.keys()];
+  }
+
+  /** Сидит ли в комнате кто-нибудь — за столом или у экрана. */
+  occupied(key: string): boolean {
+    const managed = this.rooms.get(key);
+    return (
+      !!managed && (managed.connections.size > 0 || managed.screens.size > 0)
+    );
+  }
+
   /** Погасить комнату: приватную после удаления, все — при остановке сервера. */
   close(key: string): void {
     const managed = this.rooms.get(key);
@@ -442,7 +456,20 @@ export class RoomManager {
 
 /** Подмести опустевшие приватные комнаты: получасовой срок вышел. */
 export async function sweepStaleRooms(manager: RoomManager): Promise<void> {
-  for (const room of await staleRooms(new Date())) {
+  const now = new Date();
+  const orphans = await markOrphanRooms(manager.openKeys(), now);
+  if (orphans > 0) {
+    console.log(`[комнаты] без отсчёта и без людей: ${orphans}, отсчёт пошёл`);
+  }
+
+  for (const room of await staleRooms(now)) {
+    // Отметка могла разойтись с жизнью — сносить комнату с людьми нельзя ни
+    // при каком раскладе. Возвращаем отсчёт и идём дальше.
+    if (manager.occupied(room.id)) {
+      await markBusy(room.id);
+      continue;
+    }
+
     manager.close(room.id);
     await deletePrivateRoom(room.id, room.gameId);
     console.log(`[room ${room.id}] удалена: пустовала полчаса`);

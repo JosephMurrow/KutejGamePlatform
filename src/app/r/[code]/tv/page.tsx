@@ -6,10 +6,18 @@ import { GameTheme } from "@/components/games/GameTheme";
 import { gameById } from "@/lib/games/registry";
 import { gamePages } from "@/lib/games/pages";
 import { getSessionUserId } from "@/lib/auth/session";
-import { findPrivateRoom } from "@/lib/rooms/private";
+import { findRoomByCode } from "@/lib/rooms/code-guard";
+import { requestAddress } from "@/lib/request-address";
 import { hasScreen } from "@/shared/room-settings";
 
-const roomByCode = cache(findPrivateRoom);
+/**
+ * Поиск считает промахи адреса (docs/SECURITY.md, S-D1); исчерпал — комнаты
+ * для него «нет», как и для неверного кода.
+ */
+const roomByCode = cache(
+  async (code: string) =>
+    (await findRoomByCode(code, await requestAddress())).room,
+);
 
 /** Экран тоже подписан игрой: на телевизоре открыта не «платформа». */
 export async function generateMetadata({

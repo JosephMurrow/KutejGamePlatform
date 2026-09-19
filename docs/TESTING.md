@@ -77,6 +77,7 @@ npm run smoke:turbochess     # турбо-шахматы: партия, отка
 npm run smoke:guest          # экшены глазами гостя: что ему нельзя и что можно
 npm run smoke:limits         # лимиты входа, регистрации и писем (нужен mailpit)
 npm run smoke:account        # смена почты с паролем и `next` без выхода наружу
+npm run smoke:rooms          # перебор кодов комнат, квота и уборка комнат
 ```
 
 `smoke:sockets` проходит двенадцать разделов: скрытность вопроса в READY,

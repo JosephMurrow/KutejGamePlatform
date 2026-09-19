@@ -6,9 +6,12 @@ import { sessionMemberId, startSession } from "../auth/session";
 import type { FormState } from "../auth/form-state";
 import { allowsGuests, ROOM_CODE_LENGTH } from "@/shared/room-settings";
 import { defaultGameServer, gameServerById } from "@/lib/games/servers";
+import { requestAddress } from "../request-address";
+import { CODE_BLOCKED_REASON, findRoomByCode } from "./code-guard";
 import {
+  countRoomsOf,
   createPrivateRoom,
-  findPrivateRoom,
+  MAX_ROOMS_PER_HOST,
   normalizeSettings,
 } from "./private";
 
@@ -41,6 +44,17 @@ export async function createRoomAction(
       : defaultGameServer();
   if (!game) return { error: "Неизвестная игра" };
 
+  // Квота живых комнат (docs/SECURITY.md, S-D2): иначе экшеном в цикле
+  // заводится сколько угодно строк в базе. Пустые комнаты уходят сами через
+  // полчаса, так что упереться в квоту обычным путём трудно.
+  if ((await countRoomsOf(userId)) >= MAX_ROOMS_PER_HOST) {
+    return {
+      error:
+        `У тебя уже ${MAX_ROOMS_PER_HOST} комнат. Пустые закрываются сами ` +
+        "через полчаса — зайди в нужную или подожди.",
+    };
+  }
+
   let code: string;
   try {
     const room = await createPrivateRoom(userId, settings, game.id);
@@ -70,7 +84,10 @@ export async function joinAsGuestAction(
   const adult = formData.get("adult") === "on";
   const values = { nickname, adult: adult ? "on" : "" };
 
-  const room = await findPrivateRoom(code);
+  const lookup = await findRoomByCode(code, await requestAddress());
+  if (lookup.blocked) return { values, error: CODE_BLOCKED_REASON };
+
+  const room = lookup.room;
   if (!room || !allowsGuests(room.kind)) {
     return { values, error: "В эту комнату гостем не пускают" };
   }
@@ -112,7 +129,10 @@ export async function joinByCodeAction(
     };
   }
 
-  const room = await findPrivateRoom(code);
+  const lookup = await findRoomByCode(code, await requestAddress());
+  if (lookup.blocked) return { values: { code }, error: CODE_BLOCKED_REASON };
+
+  const room = lookup.room;
   if (!room) {
     return {
       values: { code },

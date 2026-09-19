@@ -7,7 +7,8 @@ import { GameTheme } from "@/components/games/GameTheme";
 import { gameById } from "@/lib/games/registry";
 import { gamePages } from "@/lib/games/pages";
 import { getCurrentUser } from "@/lib/auth/session";
-import { findPrivateRoom } from "@/lib/rooms/private";
+import { findRoomByCode } from "@/lib/rooms/code-guard";
+import { requestAddress } from "@/lib/request-address";
 import { PLATFORM_SURFACE } from "@/lib/theme";
 import { allowsGuests } from "@/shared/room-settings";
 
@@ -15,7 +16,14 @@ import { allowsGuests } from "@/shared/room-settings";
  * Комната нужна дважды за запрос — заголовку вкладки и самой странице. `cache`
  * склеивает два обращения в базу в одно.
  */
-const roomByCode = cache(findPrivateRoom);
+/**
+ * Поиск считает промахи адреса (docs/SECURITY.md, S-D1); исчерпал — комнаты
+ * для него «нет», как и для неверного кода.
+ */
+const roomByCode = cache(
+  async (code: string) =>
+    (await findRoomByCode(code, await requestAddress())).room,
+);
 
 /** Вкладка подписана игрой, а не платформой: комнаты у игр разные (E1). */
 export async function generateMetadata({
