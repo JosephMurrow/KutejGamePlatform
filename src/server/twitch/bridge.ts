@@ -127,9 +127,13 @@ export class TwitchBridge {
     const managed = this.manager.get(roomKey);
     if (!managed) return;
 
-    for (const seat of attachment.seats.values()) {
-      managed.profiles.delete(seat.userId);
-      managed.game.leave(seat.userId);
+    try {
+      for (const seat of attachment.seats.values()) {
+        managed.profiles.delete(seat.userId);
+        managed.game.leave(seat.userId);
+      }
+    } catch (error) {
+      managed.fail("отключение Твича", error);
     }
   }
 
@@ -173,7 +177,12 @@ export class TwitchBridge {
         const player = seat ?? (await this.seat(roomKey, message));
         if (!player) return;
 
-        await managed.game.act(intent.event, player.userId, intent.payload);
+        try {
+          await managed.game.act(intent.event, player.userId, intent.payload);
+        } catch (error) {
+          managed.fail(`действие из чата ${intent.event}`, error);
+          return;
+        }
         break;
       }
     }
@@ -242,7 +251,12 @@ export class TwitchBridge {
       avatarId: user.avatarId,
       isGuest: true,
     });
-    managed.game.join(user.id);
+    try {
+      managed.game.join(user.id);
+    } catch (error) {
+      managed.fail("вход из чата", error);
+      return null;
+    }
 
     return seat;
   }
@@ -257,6 +271,10 @@ export class TwitchBridge {
 
     attachment.seats.delete(twitchUserId);
     managed.profiles.delete(seat.userId);
-    managed.game.leave(seat.userId);
+    try {
+      managed.game.leave(seat.userId);
+    } catch (error) {
+      managed.fail("выход из чата", error);
+    }
   }
 }

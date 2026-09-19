@@ -15,6 +15,7 @@ import {
   staleRooms,
 } from "../lib/rooms/private";
 import type { SocketUser } from "./auth";
+import { logFailure as reportFailure } from "./failure-log";
 
 /**
  * Кадр рассылки. Раньше снимок уходил на каждое принятое действие, и двести
@@ -69,7 +70,17 @@ export interface ManagedRoom {
   locked: boolean;
   /** Потолок числа игроков. */
   maxPlayers: number | null;
+  /**
+   * Движок этой комнаты бросил исключение — карантин: комната закрывается,
+   * соседние не задеты (docs/SECURITY.md, S-E4, уровень 2). Звать из любого
+   * места, где платформа входит в движок.
+   */
+  fail: (where: string, error: unknown) => void;
 }
+
+/** Что сказать игрокам комнаты, ушедшей на карантин. */
+export const ROOM_BROKEN_REASON =
+  "Партия сломалась, и мы её закрыли. Зайди снова — комната поднимется заново.";
 
 export type Broadcast = (room: ManagedRoom) => void;
 
@@ -128,6 +139,8 @@ export class RoomManager {
    * молча затирал первого (docs/BACKLOG.md A3).
    */
   private readonly closeListeners = new Set<(roomKey: string) => void>();
+  /** Кого позвать при карантине комнаты. */
+  private readonly quarantineListeners = new Set<(roomKey: string) => void>();
 
   constructor(
     private readonly broadcast: Broadcast,
@@ -149,7 +162,9 @@ export class RoomManager {
     const tabs = (managed.connections.get(user.id) ?? 0) + 1;
     managed.connections.set(user.id, tabs);
 
-    if (tabs === 1) managed.game.join(user.id);
+    if (tabs === 1) {
+      this.safely(managed, "вход", () => managed.game.join(user.id));
+    }
 
     if (setup.isPrivate) void markBusy(key).catch(logFailure(key, "занятость"));
 
@@ -168,7 +183,13 @@ export class RoomManager {
     setup: RoomSetup,
   ): Promise<string | null> {
     const managed = await this.acquire(key, setup);
-    const seated = managed.game.seated();
+    let seated: readonly string[];
+    try {
+      seated = managed.game.seated();
+    } catch (error) {
+      managed.fail("состав", error);
+      return ROOM_BROKEN_REASON;
+    }
 
     if (managed.setup.ownerId === user.id) return null;
     if (seated.includes(user.id)) return null;
@@ -244,7 +265,8 @@ export class RoomManager {
 
     const timer = setTimeout(() => {
       this.leaving.delete(pendingKey);
-      this.rooms.get(key)?.game.leave(user.id);
+      const room = this.rooms.get(key);
+      if (room) this.safely(room, "выход", () => room.game.leave(user.id));
     }, DISCONNECT_GRACE_MS);
     timer.unref?.();
 
@@ -268,6 +290,49 @@ export class RoomManager {
   ): () => void {
     this.eventListeners.add(listener);
     return () => this.eventListeners.delete(listener);
+  }
+
+  /**
+   * Подписаться на карантин комнат: платформа выгоняет подключённых с
+   * объяснением. Возвращает функцию отписки.
+   */
+  onQuarantine(listener: (roomKey: string) => void): () => void {
+    this.quarantineListeners.add(listener);
+    return () => this.quarantineListeners.delete(listener);
+  }
+
+  /**
+   * Карантин комнаты (docs/SECURITY.md, S-E4, уровень 2): движок бросил
+   * исключение, и в каком он теперь состоянии — неизвестно. Комната
+   * закрывается целиком, игроков выгоняют с объяснением, следующий вход
+   * поднимет её заново. Соседние комнаты и процесс живут дальше.
+   */
+  quarantine(key: string, where: string, error: unknown): void {
+    const managed = this.rooms.get(key);
+    if (!managed) return;
+
+    reportFailure(2, `комната: ${where}`, error, {
+      room: key,
+      game: managed.setup.gameId,
+    });
+
+    for (const listener of this.quarantineListeners) {
+      try {
+        listener(key);
+      } catch (failure) {
+        console.error(`[room ${key}] подписчик карантина упал:`, failure);
+      }
+    }
+    this.close(key);
+  }
+
+  /** Позвать движок; бросил — карантин комнаты. */
+  private safely(managed: ManagedRoom, where: string, run: () => void): void {
+    try {
+      run();
+    } catch (error) {
+      managed.fail(where, error);
+    }
   }
 
   /** Подписаться на закрытие комнат. Возвращает функцию отписки. */
@@ -314,8 +379,17 @@ export class RoomManager {
     this.framed.delete(key);
     this.lastSent.delete(key);
 
-    managed.game.stop();
-    this.servers(managed.setup.gameId).closeRoom?.(key);
+    // Комнату могут гасить как раз потому, что движок сломан, — его остановка
+    // не должна сорвать уборку.
+    try {
+      managed.game.stop();
+      this.servers(managed.setup.gameId).closeRoom?.(key);
+    } catch (error) {
+      reportFailure(2, "комната: остановка", error, {
+        room: key,
+        game: managed.setup.gameId,
+      });
+    }
     this.rooms.delete(key);
     for (const listener of this.closeListeners) {
       try {
@@ -359,6 +433,7 @@ export class RoomManager {
       screens: new Set(),
       locked: setup.locked,
       maxPlayers: setup.maxPlayers,
+      fail: (where, error) => this.quarantine(key, where, error),
     };
 
     managed.game = await this.servers(setup.gameId).createRoom({
@@ -407,7 +482,13 @@ export class RoomManager {
     if (existing) clearTimeout(existing);
     this.clocks.delete(key);
 
-    const deadline = managed.game.deadline();
+    let deadline: number | null;
+    try {
+      deadline = managed.game.deadline();
+    } catch (error) {
+      managed.fail("дедлайн", error);
+      return;
+    }
     if (deadline === null) return;
 
     const timer = setTimeout(
@@ -417,7 +498,11 @@ export class RoomManager {
 
         // Движок сам решит, что значит «время вышло», и позовёт changed —
         // тогда будильник переведётся на следующую фазу.
-        managed.game.tick(Date.now());
+        //
+        // Бросил — карантин. Раньше здесь не было ничего: будильник уже
+        // удалён, новый не заведётся, и комната застывала навсегда
+        // (docs/SECURITY.md, S-E4).
+        this.safely(managed, "будильник", () => managed.game.tick(Date.now()));
       },
       Math.max(0, deadline - Date.now()),
     );

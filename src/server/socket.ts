@@ -38,6 +38,7 @@ import { dropExpiredLinks } from "../lib/auth/links";
 import { startCleanup } from "./cleanup";
 import {
   pushChat,
+  ROOM_BROKEN_REASON,
   RoomManager,
   sweepStaleRooms,
   type ManagedRoom,
@@ -162,6 +163,13 @@ export function createSocketServer(httpServer: HttpServer): SocketServer {
   });
 
   manager.onClose((roomKey) => twitch.detach(roomKey));
+
+  // Карантин комнаты: всех подключённых — игроков и экраны — выгоняем с
+  // объяснением. Следующий вход поднимет комнату заново (S-E4).
+  manager.onQuarantine((roomKey) => {
+    io.to(roomKey).emit(SERVER_EVENT.kicked, { reason: ROOM_BROKEN_REASON });
+    io.in(roomKey).disconnectSockets(true);
+  });
 
   io.use((socket, next) => {
     // Первым делом и без базы: поток подключений не должен в неё дойти.
@@ -391,10 +399,9 @@ async function onScreen(
   socket.data.viewer = viewer;
   socket.data.roomCode = target.code;
 
-  socket.emit(
-    SERVER_EVENT.state,
-    buildState(managed, viewer, target.code, twitch),
-  );
+  const initial = stateFor(managed, viewer, target.code, twitch);
+  if (!initial) return;
+  socket.emit(SERVER_EVENT.state, initial);
 
   socket.on("disconnect", () => {
     manager.unwatch(socket.id, target.key);
@@ -463,10 +470,9 @@ async function onConnection(
   socket.data.viewer = viewer;
   socket.data.roomCode = roomCode;
   socket.emit(SERVER_EVENT.chatHistory, managed.chat);
-  socket.emit(
-    SERVER_EVENT.state,
-    buildState(managed, viewer, roomCode, twitch),
-  );
+  const initial = stateFor(managed, viewer, roomCode, twitch);
+  if (!initial) return;
+  socket.emit(SERVER_EVENT.state, initial);
   void broadcastState(io, managed, twitch);
 
   // Действия игры платформа только передаёт: какие они бывают, объявляет
@@ -476,7 +482,14 @@ async function onConnection(
     socket.on(action, (...args: unknown[]) => {
       void respondAsync(args, async (payload) => {
         if (!actionLimiter.allow(user.id)) return tooFast();
-        return managed.game.act(action, user.id, payload);
+        try {
+          return await managed.game.act(action, user.id, payload);
+        } catch (error) {
+          // Исключение из движка — не отказ игроку, а сломанная партия:
+          // карантин комнаты (docs/SECURITY.md, S-E4, уровень 2).
+          managed.fail(`действие ${action}`, error);
+          return { accepted: false, reason: ROOM_BROKEN_REASON };
+        }
       });
     });
   }
@@ -514,7 +527,13 @@ async function onConnection(
       const targetId = readString(payload, "playerId");
       if (!targetId) return { accepted: false, reason: "Кого выгонять?" };
 
-      const result = managed.game.remove(user.id, targetId);
+      let result: HandlerResult;
+      try {
+        result = managed.game.remove(user.id, targetId);
+      } catch (error) {
+        managed.fail("выгон", error);
+        return { accepted: false, reason: ROOM_BROKEN_REASON };
+      }
 
       // Выгнать из круга мало: без разрыва сокета человек остался бы в
       // комнате призраком — видел бы игру, но не мог в ней участвовать.
@@ -657,10 +676,28 @@ async function broadcastState(
     if (!viewer) continue;
 
     const code = socket.data.roomCode as string | null | undefined;
-    socket.emit(
-      SERVER_EVENT.state,
-      buildState(managed, viewer, code ?? null, twitch),
-    );
+    const state = stateFor(managed, viewer, code ?? null, twitch);
+    // Снимок не собрался — комната ушла на карантин, рассылать нечего.
+    if (!state) return;
+    socket.emit(SERVER_EVENT.state, state);
+  }
+}
+
+/**
+ * Снимок для зрителя или `null`, если движок на нём сломался: тогда комната
+ * уходит на карантин (docs/SECURITY.md, S-E4, уровень 2).
+ */
+function stateFor(
+  managed: ManagedRoom,
+  viewer: Viewer,
+  roomCode: string | null,
+  twitch?: TwitchBridge,
+): RoomStatePayload | null {
+  try {
+    return buildState(managed, viewer, roomCode, twitch);
+  } catch (error) {
+    managed.fail("снимок", error);
+    return null;
   }
 }
 
