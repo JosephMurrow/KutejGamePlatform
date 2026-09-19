@@ -1,0 +1,17 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Write|Edit|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"$CLAUDE_PROJECT_DIR/scripts/check-hidden-chars.mjs\"",
+            "timeout": 10,
+            "statusMessage": "Проверяю файл на невидимые символы"
+          }
+        ]
+      }
+    ]
+  }
+}
