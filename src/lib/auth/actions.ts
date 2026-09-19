@@ -6,12 +6,18 @@ import { revalidatePath } from "next/cache";
 import { prisma } from "../prisma";
 import { AVATAR_COUNT, randomAvatarId } from "../avatars";
 import { RateLimiter } from "../../server/rate-limit";
-import { confirmLetter, resetLetter, welcomeLetter } from "../mail/letters";
-import { sendLetter } from "../mail/send";
+import {
+  confirmLetter,
+  emailChangedLetter,
+  resetLetter,
+  welcomeLetter,
+} from "../mail/letters";
+import { maskAddress, sendLetter } from "../mail/send";
 import type { FormState } from "./form-state";
 import { claimLink, issueLink } from "./links";
 import { LoginGuard } from "./login-guard";
 import { requestAddress } from "../request-address";
+import { safeInternalPath } from "../safe-path";
 import { endSession, sessionMemberId, startSession } from "./session";
 import {
   emailOnlySchema,
@@ -24,14 +30,14 @@ import {
 } from "./validation";
 
 /**
- * Куда вернуть после входа. Принимаем только относительный путь: внешний адрес
- * в этом параметре — это открытый редирект.
+ * Куда вернуть после входа. Только внутрь сайта: внешний адрес в этом
+ * параметре — открытый редирект (`safe-path.ts`, docs/SECURITY.md S-B4).
+ *
+ * Без `next` — на витрину: человек вошёл, чтобы играть, а не смотреть свой
+ * профиль (docs/BACKLOG.md C1).
  */
 function safeNext(value: FormDataEntryValue | null): string {
-  const path = typeof value === "string" ? value : "";
-  // Без `next` — на витрину: человек вошёл, чтобы играть, а не смотреть свой
-  // профиль (docs/BACKLOG.md C1).
-  return path.startsWith("/") && !path.startsWith("//") ? path : "/games";
+  return safeInternalPath(value) ?? "/games";
 }
 
 /** На каком поле сработала уникальность: Prisma кладёт его в meta.target. */
@@ -298,7 +304,12 @@ export async function attachEmailAction(
   const email = parsed.data.email;
   const me = await prisma.user.findUnique({
     where: { id: userId },
-    select: { login: true, email: true, emailConfirmedAt: true },
+    select: {
+      login: true,
+      email: true,
+      emailConfirmedAt: true,
+      passwordHash: true,
+    },
   });
 
   if (!me) redirect("/login");
@@ -316,7 +327,21 @@ export async function attachEmailAction(
     };
   }
 
-  if (me.email !== email) {
+  // Смена адреса — это смена способа вернуть аккаунт, поэтому только с
+  // паролем (docs/SECURITY.md, S-B3). Иначе укравший сессию привязал бы свою
+  // почту, сбросил пароль и увёл аккаунт насовсем. Повторное письмо на тот же
+  // адрес ничего не меняет — там пароль не спрашиваем.
+  const changing = me.email !== email;
+  if (changing) {
+    const problem = await checkCurrentPassword(
+      me.login,
+      me.passwordHash,
+      String(formData.get("password") ?? ""),
+    );
+    if (problem) return { values, fieldErrors: { password: problem } };
+  }
+
+  if (changing) {
     try {
       await prisma.user.update({
         where: { id: userId },
@@ -336,6 +361,12 @@ export async function attachEmailAction(
         error: "Что-то сломалось на сервере. Попробуй ещё раз.",
       };
     }
+  }
+
+  // Прежний подтверждённый адрес узнаёт о смене: если это был не хозяин,
+  // хозяин должен узнать сразу, а не когда полезет восстанавливать пароль.
+  if (changing && me.email && me.emailConfirmedAt) {
+    void sendLetter(me.email, emailChangedLetter(me.login, maskAddress(email)));
   }
 
   const token = await issueLink(userId, email, "EMAIL_CONFIRM");
@@ -364,6 +395,33 @@ export async function attachEmailAction(
           "сейчас не настроена. Попробуй позже.",
       };
   }
+}
+
+/**
+ * Текущий пароль для чувствительного действия. `null` — подошёл, строка —
+ * что сказать под полем.
+ *
+ * Неудачи считает тот же сторож, что и вход: иначе форма почты стала бы
+ * обходным путём для перебора пароля.
+ */
+async function checkCurrentPassword(
+  login: string,
+  passwordHash: string,
+  password: string,
+): Promise<string | null> {
+  if (password === "") return "Введи текущий пароль";
+
+  if (!loginGuard.admit(login, await requestAddress())) {
+    return "Слишком много попыток. Подожди четверть часа.";
+  }
+
+  if (!(await verify(passwordHash, password))) {
+    loginGuard.failed(login);
+    return "Пароль не подходит";
+  }
+
+  loginGuard.succeeded(login);
+  return null;
 }
 
 /**

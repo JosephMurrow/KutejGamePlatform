@@ -73,7 +73,10 @@ async function main() {
   const password = `pw-${run}-secret`;
   const anya = await member("anya", password);
   const borya = await member("borya", password);
-  const created: string[] = [anya.id, borya.id];
+  // Своя учётка для писем: после раздела 3 у borya десять неудач входа, а
+  // смена почты проверяет пароль тем же сторожем (S-B3).
+  const vera = await member("vera", password);
+  const created: string[] = [anya.id, borya.id, vera.id];
   const registered: string[] = [];
 
   try {
@@ -166,10 +169,12 @@ async function main() {
     );
 
     console.log("\n[6] Письма на один адрес");
-    const token = await signSessionToken(borya.id, 3600);
+    const token = await signSessionToken(vera.id, 3600);
     const target = `bomb-${run}@local.test`;
     const attach = (email: string) =>
-      callAction("attachEmailAction", [{}, form({ email })], { token });
+      callAction("attachEmailAction", [{}, form({ email, password })], {
+        token,
+      });
 
     for (let i = 0; i < 3; i++) {
       const reply = await attach(target);
@@ -190,7 +195,7 @@ async function main() {
     await attach(`spin-${run}-a@local.test`);
     const sixthAttach = await attach(`spin-${run}-b@local.test`);
     const after = await prisma.user.findUnique({
-      where: { id: borya.id },
+      where: { id: vera.id },
       select: { email: true },
     });
     check(
